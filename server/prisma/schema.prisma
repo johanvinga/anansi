@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  standard
+}
+
+enum AuditOutcome {
+  success
+  failure
+}
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique @db.VarChar(254)
+  passwordHash       String    @map("password_hash") @db.VarChar(255)
+  displayName        String?   @map("display_name") @db.VarChar(100)
+  role               UserRole
+  isActive           Boolean   @default(true) @map("is_active")
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  lastLoginAt        DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions         Session[]
+  auditLogs        AuditLog[]
+  suppliersCreated Supplier[]      @relation("SupplierCreatedBy")
+  assetsUploaded   SupplierAsset[] @relation("AssetUploadedBy")
+
+  @@map("users")
+}
+
+model Supplier {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(200)
+  /// Lowercased name; enforces case-insensitive uniqueness (FR-SUP-08).
+  nameKey     String   @unique @map("name_key") @db.VarChar(200)
+  street      String?  @db.VarChar(200)
+  city        String?  @db.VarChar(100)
+  stateRegion String?  @map("state_region") @db.VarChar(100)
+  postalCode  String?  @map("postal_code") @db.VarChar(20)
+  country     String?  @db.VarChar(100)
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdBy  User?              @relation("SupplierCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  categories SupplierCategory[]
+  assets     SupplierAsset[]
+
+  @@map("suppliers")
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  /// Lowercased name; enforces case-insensitive uniqueness.
+  nameKey   String   @unique @map("name_key") @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  suppliers SupplierCategory[]
+
+  @@map("categories")
+}
+
+model SupplierCategory {
+  supplierId String @map("supplier_id") @db.Uuid
+  categoryId String @map("category_id") @db.Uuid
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([supplierId, categoryId])
+  @@index([categoryId])
+  @@map("supplier_categories")
+}
+
+model SupplierAsset {
+  id               String   @id @default(uuid()) @db.Uuid
+  supplierId       String   @map("supplier_id") @db.Uuid
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  storageKey       String   @unique @map("storage_key") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(100)
+  sizeBytes        BigInt   @map("size_bytes")
+  title            String?  @db.VarChar(200)
+  description      String?  @db.Text
+  uploadedById     String?  @map("uploaded_by_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  uploadedBy User?    @relation("AssetUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([supplierId])
+  @@map("supplier_assets")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id          String       @id @default(uuid()) @db.Uuid
+  occurredAt  DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  actorUserId String?      @map("actor_user_id") @db.Uuid
+  actorEmail  String       @map("actor_email") @db.VarChar(254)
+  action      String       @db.VarChar(50)
+  outcome     AuditOutcome
+  entityType  String?      @map("entity_type") @db.VarChar(50)
+  entityId    String?      @map("entity_id") @db.VarChar(64)
+  changes     Json?
+  ipAddress   String?      @map("ip_address") @db.VarChar(45)
+  requestId   String       @map("request_id") @db.VarChar(64)
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([entityType, entityId])
+  @@index([action, occurredAt])
+  @@map("audit_logs")
+}
