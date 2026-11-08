@@ -1,0 +1,17 @@
+# Copy to /etc/systemd/system/supplier-app.service on the VPS, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now supplier-app
+[Unit]
+Description=Supplier app API
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+WorkingDirectory=/opt/supplier-app/server
+ExecStart=/usr/bin/node dist/server.js
+EnvironmentFile=/opt/supplier-app/server/.env
+Restart=always
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target
