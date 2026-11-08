@@ -1,9 +1,26 @@
-import { Dialog } from "@ark-ui/react/dialog";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Eye, Filter, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
 import type { AuditLogDetail, AuditLogSummary, Page } from "../../api/types";
+import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
+import { IconAction } from "../../components/icon-action";
+import { PageHeader } from "../../components/page-header";
 import { PaginationControls } from "../../components/pagination-controls";
+import { TableEmptyRow } from "../../components/table-empty-row";
 
 const PAGE_SIZE = 25;
 
@@ -15,6 +32,10 @@ interface Filters {
 }
 
 const emptyFilters: Filters = { action: "", entityType: "", from: "", to: "" };
+
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  return <Badge variant={outcome === "success" ? "success" : "destructive"}>{outcome}</Badge>;
+}
 
 export function AuditLogPage() {
   const [draft, setDraft] = useState<Filters>(emptyFilters);
@@ -66,92 +87,132 @@ export function AuditLogPage() {
   }
 
   return (
-    <section className="page">
-      <h1>Audit log</h1>
+    <>
+      <PageHeader title="Audit log" breadcrumbs={[{ label: "Audit log" }]} />
 
-      <form className="toolbar filters" onSubmit={applyFilters} role="search">
-        <FormField label="Action" name="action" value={draft.action} onChange={(action) => setDraft({ ...draft, action })} />
-        <FormField label="Entity type" name="entityType" value={draft.entityType} onChange={(entityType) => setDraft({ ...draft, entityType })} />
-        <FormField label="From" name="from" type="date" value={draft.from} onChange={(from) => setDraft({ ...draft, from })} />
-        <FormField label="To" name="to" type="date" value={draft.to} onChange={(to) => setDraft({ ...draft, to })} />
-        <button type="submit" className="secondary-button">
-          Apply
-        </button>
-        <button type="button" className="secondary-button" onClick={clearFilters}>
-          Clear
-        </button>
-      </form>
+      <Card className="gap-0 py-0">
+        <form className="flex flex-wrap items-end gap-3 p-4" onSubmit={applyFilters} role="search">
+          <div className="min-w-48 flex-1">
+            <FormField label="Action" name="action" value={draft.action} onChange={(action) => setDraft({ ...draft, action })} />
+          </div>
+          <div className="min-w-48 flex-1">
+            <FormField
+              label="Entity type"
+              name="entityType"
+              value={draft.entityType}
+              onChange={(entityType) => setDraft({ ...draft, entityType })}
+            />
+          </div>
+          <div className="min-w-40">
+            <FormField label="From" name="from" type="date" value={draft.from} onChange={(from) => setDraft({ ...draft, from })} />
+          </div>
+          <div className="min-w-40">
+            <FormField label="To" name="to" type="date" value={draft.to} onChange={(to) => setDraft({ ...draft, to })} />
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" variant="outline">
+              <Filter />
+              Apply
+            </Button>
+            <Button type="button" variant="ghost" onClick={clearFilters}>
+              <X />
+              Clear
+            </Button>
+          </div>
+        </form>
 
-      {error ? (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      ) : null}
+        {error ? (
+          <div className="px-4 pb-4">
+            <ErrorAlert message={error} />
+          </div>
+        ) : null}
 
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th scope="col">Time (UTC)</th>
-            <th scope="col">Actor</th>
-            <th scope="col">Action</th>
-            <th scope="col">Outcome</th>
-            <th scope="col">Entity</th>
-            <th scope="col">Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {result?.items.map((entry) => (
-            <tr key={entry.id}>
-              <td>{new Date(entry.occurredAt).toISOString().replace("T", " ").slice(0, 19)}</td>
-              <td>{entry.actorEmail}</td>
-              <td>{entry.action}</td>
-              <td>{entry.outcome}</td>
-              <td>{entry.entityType ? `${entry.entityType}${entry.entityId ? ` ${entry.entityId}` : ""}` : "—"}</td>
-              <td>
-                <button type="button" className="secondary-button" onClick={() => setSelectedId(entry.id)}>
-                  View
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        <Table aria-label="Audit log">
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <TableHead className="pl-4">Time (UTC)</TableHead>
+              <TableHead>Actor</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Outcome</TableHead>
+              <TableHead>Entity</TableHead>
+              <TableHead className="pr-4 text-right">Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {result && result.items.length === 0 ? <TableEmptyRow colSpan={6} message="No entries match the filters." /> : null}
+            {result?.items.map((entry) => (
+              <TableRow key={entry.id}>
+                <TableCell className="pl-4 font-mono text-xs">
+                  {new Date(entry.occurredAt).toISOString().replace("T", " ").slice(0, 19)}
+                </TableCell>
+                <TableCell>{entry.actorEmail}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="font-mono">
+                    {entry.action}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <OutcomeBadge outcome={entry.outcome} />
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {entry.entityType ? `${entry.entityType}${entry.entityId ? ` ${entry.entityId}` : ""}` : "—"}
+                </TableCell>
+                <TableCell className="pr-4 text-right">
+                  <IconAction label={`View entry ${entry.action}`} icon={Eye} onClick={() => setSelectedId(entry.id)} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
 
-      {result ? (
-        <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
-      ) : null}
+        {result ? (
+          <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
+        ) : null}
+      </Card>
 
-      <Dialog.Root open={selectedId !== null} onOpenChange={(details) => !details.open && setSelectedId(null)}>
-        <Dialog.Backdrop className="dialog-backdrop" />
-        <Dialog.Positioner className="dialog-positioner">
-          <Dialog.Content className="card dialog">
-            <Dialog.Title>Audit entry</Dialog.Title>
-            {detail ? (
-              <dl className="profile">
-                <dt>Action</dt>
-                <dd>{detail.action}</dd>
-                <dt>Actor</dt>
-                <dd>{detail.actorEmail}</dd>
-                <dt>Outcome</dt>
-                <dd>{detail.outcome}</dd>
-                <dt>IP address</dt>
-                <dd>{detail.ipAddress ?? "—"}</dd>
-                <dt>Request ID</dt>
-                <dd>{detail.requestId}</dd>
-                <dt>Changes</dt>
-                <dd>
-                  {detail.changes ? <pre>{JSON.stringify(detail.changes, null, 2)}</pre> : "None recorded"}
-                </dd>
-              </dl>
-            ) : (
-              <p>Loading…</p>
-            )}
-            <div className="dialog-actions">
-              <Dialog.CloseTrigger className="secondary-button">Close</Dialog.CloseTrigger>
-            </div>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Dialog.Root>
-    </section>
+      <Dialog open={selectedId !== null} onOpenChange={(isOpen) => !isOpen && setSelectedId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Audit entry</DialogTitle>
+          </DialogHeader>
+          {detail ? (
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 text-sm">
+              <dt className="text-muted-foreground">Action</dt>
+              <dd className="font-mono">{detail.action}</dd>
+              <dt className="text-muted-foreground">Actor</dt>
+              <dd>{detail.actorEmail}</dd>
+              <dt className="text-muted-foreground">Outcome</dt>
+              <dd>
+                <OutcomeBadge outcome={detail.outcome} />
+              </dd>
+              <dt className="text-muted-foreground">IP address</dt>
+              <dd>{detail.ipAddress ?? "—"}</dd>
+              <dt className="text-muted-foreground">Request ID</dt>
+              <dd className="font-mono text-xs break-all">{detail.requestId}</dd>
+              <dt className="text-muted-foreground">Changes</dt>
+              <dd className="min-w-0">
+                {detail.changes ? (
+                  <pre className="max-h-80 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                    {JSON.stringify(detail.changes, null, 2)}
+                  </pre>
+                ) : (
+                  "None recorded"
+                )}
+              </dd>
+            </dl>
+          ) : (
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner />
+              Loading…
+            </p>
+          )}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Close</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

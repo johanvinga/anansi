@@ -1,17 +1,38 @@
-import { Dialog } from "@ark-ui/react/dialog";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { FieldGroup } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import type { Category } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
+import { IconAction } from "../../components/icon-action";
+import { PageHeader } from "../../components/page-header";
+import { SearchForm } from "../../components/search-form";
+import { TableEmptyRow } from "../../components/table-empty-row";
 
 export function CategoriesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const newCategoryId = useId();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -23,6 +44,7 @@ export function CategoriesPage() {
     try {
       const result = await apiRequest<{ items: Category[] }>("GET", `/categories${params}`);
       setCategories(result.items);
+      setLoaded(true);
       setError(null);
     } catch (err) {
       setError(errorMessage(err));
@@ -59,71 +81,81 @@ export function CategoriesPage() {
     }
   }
 
+  const columns = isAdmin ? 3 : 2;
+
   return (
-    <section className="page">
-      <h1>Categories</h1>
+    <>
+      <PageHeader title="Categories" breadcrumbs={[{ label: "Categories" }]} />
 
-      {isAdmin ? (
-        <form className="toolbar" onSubmit={(event) => void createCategory(event)} noValidate>
-          <FormField label="New category" name="newCategory" value={newName} onChange={setNewName} required />
-          <button type="submit" className="primary-button" disabled={creating || !newName.trim()}>
-            Add category
-          </button>
-        </form>
-      ) : null}
-
-      <form
-        className="toolbar"
-        role="search"
-        onSubmit={(event: FormEvent<HTMLFormElement>) => {
-          event.preventDefault();
-          setSearch(query.trim());
-        }}
-      >
-        <FormField label="Search categories" name="q" value={query} onChange={setQuery} />
-        <button type="submit" className="secondary-button">
-          Search
-        </button>
-      </form>
-
-      {error ? (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      ) : null}
-
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Created</th>
-            {isAdmin ? <th scope="col">Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {categories.length === 0 ? (
-            <tr>
-              <td colSpan={isAdmin ? 3 : 2}>No categories found.</td>
-            </tr>
+      <Card className="gap-0 py-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <SearchForm
+            label="Search categories"
+            placeholder="Search categories…"
+            value={query}
+            onChange={setQuery}
+            onSearch={() => setSearch(query.trim())}
+          />
+          {isAdmin ? (
+            <form className="flex items-center gap-2" onSubmit={(event) => void createCategory(event)} noValidate>
+              <Label htmlFor={newCategoryId} className="sr-only">
+                New category
+              </Label>
+              <Input
+                id={newCategoryId}
+                name="newCategory"
+                placeholder="New category"
+                required
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                className="w-48"
+              />
+              <Button type="submit" size="lg" disabled={creating || !newName.trim()}>
+                <Plus />
+                Add category
+              </Button>
+            </form>
           ) : null}
-          {categories.map((category) => (
-            <tr key={category.id}>
-              <td>{category.name}</td>
-              <td>{new Date(category.createdAt).toLocaleDateString()}</td>
-              {isAdmin ? (
-                <td className="row-actions">
-                  <button type="button" className="secondary-button" onClick={() => setRenaming(category)}>
-                    Rename
-                  </button>
-                  <button type="button" className="danger-button" onClick={() => setDeleting(category)}>
-                    Delete
-                  </button>
-                </td>
-              ) : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        </div>
+
+        {error ? (
+          <div className="px-4 pb-4">
+            <ErrorAlert message={error} />
+          </div>
+        ) : null}
+
+        <Table aria-label="Categories">
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <TableHead className="pl-4">Name</TableHead>
+              <TableHead>Created</TableHead>
+              {isAdmin ? <TableHead className="pr-4 text-right">Actions</TableHead> : null}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loaded && categories.length === 0 ? <TableEmptyRow colSpan={columns} message="No categories found." /> : null}
+            {categories.map((category) => (
+              <TableRow key={category.id}>
+                <TableCell className="pl-4 font-medium">{category.name}</TableCell>
+                <TableCell>{new Date(category.createdAt).toLocaleDateString()}</TableCell>
+                {isAdmin ? (
+                  <TableCell className="pr-4">
+                    <div className="flex justify-end gap-1">
+                      <IconAction label={`Rename ${category.name}`} icon={Pencil} onClick={() => setRenaming(category)} />
+                      <IconAction
+                        label={`Delete ${category.name}`}
+                        icon={Trash2}
+                        destructive
+                        onClick={() => setDeleting(category)}
+                      />
+                    </div>
+                  </TableCell>
+                ) : null}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
 
       {renaming ? (
         <RenameCategoryDialog
@@ -144,7 +176,7 @@ export function CategoriesPage() {
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleting(null)}
       />
-    </section>
+    </>
   );
 }
 
@@ -174,27 +206,28 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
   }
 
   return (
-    <Dialog.Root open onOpenChange={(details) => !details.open && onClose()}>
-      <Dialog.Backdrop className="dialog-backdrop" />
-      <Dialog.Positioner className="dialog-positioner">
-        <Dialog.Content className="card dialog">
-          <form onSubmit={handleSubmit} noValidate>
-            <Dialog.Title>Rename category</Dialog.Title>
-            {error && error.details.length === 0 ? (
-              <p role="alert" className="form-error">
-                {error.message}
-              </p>
-            ) : null}
+    <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+          <DialogHeader>
+            <DialogTitle>Rename category</DialogTitle>
+          </DialogHeader>
+          <FieldGroup>
+            {error && error.details.length === 0 ? <ErrorAlert message={error.message} /> : null}
             <FormField label="Name" name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
-            <div className="dialog-actions">
-              <Dialog.CloseTrigger className="secondary-button">Cancel</Dialog.CloseTrigger>
-              <button type="submit" className="primary-button" disabled={submitting}>
-                {submitting ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </form>
-        </Dialog.Content>
-      </Dialog.Positioner>
-    </Dialog.Root>
+          </FieldGroup>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

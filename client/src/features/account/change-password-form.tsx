@@ -1,13 +1,19 @@
 import { useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { FieldGroup } from "@/components/ui/field";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
+import { ErrorAlert, SuccessAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 
 interface ChangePasswordFormProps {
   onChanged: () => void;
+  /** Renders without its own card, for use inside another card. */
+  embedded?: boolean;
 }
 
 /** Used both on the account page and when a password change is required (SPEC §8.4). */
-export function ChangePasswordForm({ onChanged }: ChangePasswordFormProps) {
+export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormProps) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -46,15 +52,10 @@ export function ChangePasswordForm({ onChanged }: ChangePasswordFormProps) {
     }
   }
 
-  return (
-    <form className="card" onSubmit={handleSubmit} noValidate>
-      <h2>Change password</h2>
-      {formError ? (
-        <p role="alert" className="form-error">
-          {formError}
-        </p>
-      ) : null}
-      {saved ? <p role="status">Your password has been changed.</p> : null}
+  const fields = (
+    <FieldGroup>
+      <ErrorAlert message={formError} />
+      {saved ? <SuccessAlert message="Your password has been changed." /> : null}
       <FormField
         label="Current password"
         name="currentPassword"
@@ -86,9 +87,36 @@ export function ChangePasswordForm({ onChanged }: ChangePasswordFormProps) {
         required
         error={errors.confirmPassword}
       />
-      <button type="submit" className="primary-button" disabled={submitting}>
-        {submitting ? "Saving…" : "Change password"}
-      </button>
-    </form>
+    </FieldGroup>
+  );
+
+  const submit = (
+    <Button type="submit" size="lg" disabled={submitting} className={embedded ? "w-full" : undefined}>
+      {submitting ? "Saving…" : "Change password"}
+    </Button>
+  );
+
+  if (embedded) {
+    return (
+      <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate aria-label="Change password">
+        {fields}
+        {submit}
+      </form>
+    );
+  }
+
+  return (
+    <Card className="gap-6 py-6">
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+        <CardHeader className="px-6">
+          <CardTitle>
+            <h2>Change password</h2>
+          </CardTitle>
+          <CardDescription>Enter your current password, then choose a new one.</CardDescription>
+        </CardHeader>
+        <CardContent className="px-6">{fields}</CardContent>
+        <CardFooter className="justify-end border-t px-6 py-4">{submit}</CardFooter>
+      </form>
+    </Card>
   );
 }

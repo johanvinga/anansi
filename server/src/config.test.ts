@@ -24,4 +24,42 @@ describe("loadConfig (SPEC §11)", () => {
   it("rejects a short SESSION_SECRET", () => {
     expect(() => loadConfig({ ...required, SESSION_SECRET: "short" })).toThrow(/SESSION_SECRET/);
   });
+
+  describe("STORAGE_BACKEND (FR-AST-09)", () => {
+    it("defaults to local storage", () => {
+      const config = loadConfig(required);
+      expect(config.storageBackend).toBe("local");
+    });
+
+    it("rejects an unknown backend", () => {
+      expect(() => loadConfig({ ...required, STORAGE_BACKEND: "s3" })).toThrow(/STORAGE_BACKEND/);
+    });
+
+    it("lists the missing R2 variables when r2 is selected", () => {
+      expect(() => loadConfig({ ...required, STORAGE_BACKEND: "r2" })).toThrow(
+        /R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET/,
+      );
+      expect(() =>
+        loadConfig({
+          ...required,
+          STORAGE_BACKEND: "r2",
+          R2_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+          R2_ACCESS_KEY_ID: "key",
+        }),
+      ).toThrow(/R2_SECRET_ACCESS_KEY, R2_BUCKET/);
+    });
+
+    it("accepts r2 when every variable is set", () => {
+      const config = loadConfig({
+        ...required,
+        STORAGE_BACKEND: "r2",
+        R2_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+        R2_ACCESS_KEY_ID: "key",
+        R2_SECRET_ACCESS_KEY: "secret",
+        R2_BUCKET: "assets",
+      });
+      expect(config.storageBackend).toBe("r2");
+      expect(config.r2Bucket).toBe("assets");
+    });
+  });
 });

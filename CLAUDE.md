@@ -5,15 +5,17 @@ Full-stack web application for managing suppliers, supplier assets (PDF catalogs
 ## Status
 
 - Milestone M1 (project setup, database, authentication, roles, user management, audit logging) is implemented.
-- Milestones M1 (setup, auth, roles, users, audit) and M2 (suppliers, categories, assets) are implemented.
-- Not yet implemented: M3 (attribute sets, products), M4 (UI polish, Docker app image, security review).
-- Supplier delete does not yet check for products (SPEC §8.3). Add that check when the Product model is added in M3.
+- Milestones M1 (setup, auth, roles, users, audit), M2 (suppliers, categories, assets), and M3 (attribute sets, products) are implemented on the server and client.
+- Not yet implemented: M4 (UI polish, Docker app image, security review, Playwright E2E tests).
+- Supplier deletion is blocked while the supplier has products (SPEC §8.3).
+- Attribute value validation lives in `server/src/services/attribute-values.ts`. Product saves go through `product.service.ts`.
+- Seed the example attribute sets (SPEC §4.5) with `npm run seed:attribute-sets` in `server/`.
 - Docker Compose currently runs PostgreSQL only. The app runs with `npm run dev` in each package.
 
 ## Stack
 
 - Frontend: React + TypeScript, built with Vite
-- UI components: Ark UI for React (https://ark-ui.com/, package `@ark-ui/react`)
+- UI components: shadcn/ui (https://ui.shadcn.com), built on Radix UI and Tailwind CSS v4, styled after the shadcn dashboard demo (Geist font, sidebar shell)
 - Backend: Node.js + TypeScript with Fastify
 - Database: PostgreSQL with Prisma 7 (versioned migrations only)
 - Validation: Zod for API inputs
@@ -25,9 +27,9 @@ Full-stack web application for managing suppliers, supplier assets (PDF catalogs
 - `client/` React app (Vite dev server on port 5173, proxies `/api` to the server)
   - `src/api/` fetch wrapper and shared API types
   - `src/auth/` auth state and provider
-  - `src/components/` shared wrappers around Ark UI (for example `FormField`)
+  - `src/components/` shared wrappers around shadcn components (for example `FormField`); `src/components/ui/` holds the shadcn primitives themselves
   - `src/features/` pages grouped by domain (`auth`, `account`, `users`, `audit`)
-  - `src/layout/` app shell with Ark UI tabs
+  - `src/layout/` app shell with the shadcn sidebar and a light/dark theme toggle
 - `server/` Fastify API (port 3000)
   - `prisma/` schema and migrations
   - `src/routes/` HTTP layer only (parse input, call services, shape responses)
@@ -81,7 +83,7 @@ Before committing, run the typecheck, lint, and test commands for the packages y
 - Prefer `interface` for object shapes and discriminated unions for complex state.
 - Named exports only. No default exports.
 - Functional React components only, with a `{Component}Props` interface for props.
-- All UI components in the React app must come from Ark UI (https://ark-ui.com/). Do not build custom equivalents of components Ark UI provides, and do not add other component libraries. Project-specific components may wrap Ark UI components but must not replace them. Plain HTML elements (`button`, `table`, `form`) are used for layout and actions.
+- All UI components in the React app must come from shadcn/ui (`src/components/ui/`, added with `npx shadcn add`). Do not build custom equivalents of components it provides. Project-specific components may wrap shadcn components but must not replace them. Plain HTML elements (`button`, `table`, `form`) are used for layout and actions.
 - Business rules live in service modules, not in route handlers or React components.
 - All API inputs are validated with Zod. Errors use the `{ error: { code, message, details } }` shape from SPEC.md §12.
 - Multi-step writes run in a transaction. Audit entries for data changes are written inside the same transaction.
@@ -110,7 +112,7 @@ ame_key column with a unique index (Prisma cannot model functional indexes).
 - Do not expose uploaded files through static hosting or direct URLs.
 - Do not log passwords, session tokens, or file contents.
 - Do not skip audit logging for any action listed in SPEC.md.
-- Do not use UI components from any library other than Ark UI.
+- Do not use UI components from any library other than shadcn/ui.
 - Do not add dependencies outside the stack above without discussing first.
 - Do not edit applied migrations.
 - Do not use inline styles in the frontend.

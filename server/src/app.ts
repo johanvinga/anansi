@@ -9,9 +9,14 @@ import type { AppConfig } from "./config.js";
 import { createDatabase, type Database } from "./db.js";
 import { AppError, errors } from "./errors.js";
 import { createLocalAssetStorage, type AssetStorage } from "./lib/asset-storage.js";
+import { createR2AssetStorage } from "./lib/r2-asset-storage.js";
 import { createGuards } from "./lib/auth-guards.js";
 import { LoginLimiter } from "./lib/login-limiter.js";
 import { registerAssetRoutes } from "./routes/asset.routes.js";
+import { registerAttributeSetRoutes } from "./routes/attribute-set.routes.js";
+import { registerCatalogRoutes } from "./routes/catalog.routes.js";
+import { registerProductRoutes } from "./routes/product.routes.js";
+import { registerSettingsRoutes } from "./routes/settings.routes.js";
 import { registerAuditRoutes } from "./routes/audit.routes.js";
 import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerCategoryRoutes } from "./routes/category.routes.js";
@@ -30,7 +35,17 @@ export interface BuildAppOptions {
 
 export async function buildApp(config: AppConfig, options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const db = options.db ?? createDatabase(config.databaseUrl);
-  const storage = options.storage ?? createLocalAssetStorage(config.uploadDir);
+  // FR-AST-09: the backend is chosen by configuration; tests can inject their own.
+  const storage =
+    options.storage ??
+    (config.storageBackend === "r2"
+      ? createR2AssetStorage({
+          endpoint: config.r2Endpoint,
+          accessKeyId: config.r2AccessKeyId,
+          secretAccessKey: config.r2SecretAccessKey,
+          bucket: config.r2Bucket,
+        })
+      : createLocalAssetStorage(config.uploadDir));
 
   const app = Fastify({
     logger:
@@ -129,7 +144,10 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       registerCategoryRoutes(v1, db, guards);
       registerSupplierRoutes(v1, { db, config, storage, log: app.log }, guards);
       registerAssetRoutes(v1, { db, storage, log: app.log }, guards);
-
+      registerCatalogRoutes(v1, { db, storage, log: app.log }, guards);
+      registerAttributeSetRoutes(v1, db, guards);
+      registerProductRoutes(v1, db, guards);
+      registerSettingsRoutes(v1, config, guards);
     },
     { prefix: "/api/v1" },
   );

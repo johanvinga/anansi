@@ -1,28 +1,53 @@
-import { Tabs } from "@ark-ui/react/tabs";
 import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest, errorMessage } from "../../api/client";
 import type { Supplier } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import { ErrorAlert } from "../../components/error-alert";
+import { PageHeader } from "../../components/page-header";
+import { ProductsPanel } from "../products/products-panel";
 import { AssetsPanel } from "./assets-panel";
+import { CatalogsPanel } from "./catalogs-panel";
 import { CategoryEditor } from "./category-editor";
 import { chipsFrom, toCategoryInputs, type CategoryChip } from "./category-chips";
 import { SupplierForm } from "./supplier-form";
 
+export type DetailTab = "details" | "categories" | "assets" | "catalogs" | "products";
+
 interface SupplierDetailProps {
   supplierId: string;
+  tab?: DetailTab;
+  onTabChange?: (tab: DetailTab) => void;
   onBack: () => void;
   onDeleted: () => void;
 }
 
-type DetailTab = "details" | "categories" | "assets" | "products";
+const DETAIL_TABS: { id: DetailTab; label: string }[] = [
+  { id: "details", label: "Details" },
+  { id: "categories", label: "Categories" },
+  { id: "assets", label: "Assets" },
+  { id: "catalogs", label: "Catalogs" },
+  { id: "products", label: "Products" },
+];
 
-export function SupplierDetail({ supplierId, onBack, onDeleted }: SupplierDetailProps) {
+export function SupplierDetail({
+  supplierId,
+  tab: controlledTab,
+  onTabChange,
+  onBack,
+  onDeleted,
+}: SupplierDetailProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<DetailTab>("details");
+  const [internalTab, setInternalTab] = useState<DetailTab>("details");
+  const tab = controlledTab ?? internalTab;
+  const setTab = onTabChange ?? setInternalTab;
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -54,83 +79,109 @@ export function SupplierDetail({ supplierId, onBack, onDeleted }: SupplierDetail
     }
   }
 
+  const currentTabLabel = DETAIL_TABS.find((item) => item.id === tab)?.label ?? "Details";
+  const supplierLabel = supplier?.name ?? "Supplier";
+  const breadcrumbItems =
+    tab === "details"
+      ? [{ label: "Suppliers", to: "/suppliers" }, { label: supplierLabel }]
+      : [
+          { label: "Suppliers", to: "/suppliers" },
+          { label: supplierLabel, to: `/suppliers/${supplierId}` },
+          { label: currentTabLabel },
+        ];
+
   return (
-    <section className="page">
-      <div className="page-header">
-        <button type="button" className="secondary-button" onClick={onBack}>
-          ← Back to suppliers
-        </button>
-        {isAdmin && supplier ? (
-          <button type="button" className="danger-button" onClick={() => setConfirmDelete(true)}>
-            Delete supplier
-          </button>
-        ) : null}
-      </div>
+    <>
+      <PageHeader
+        title={supplierLabel}
+        breadcrumbs={breadcrumbItems}
+        actions={
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft />
+            Back to suppliers
+          </Button>
+        }
+      />
 
-      {error ? (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      ) : null}
+      <ErrorAlert message={error} />
+
       {!supplier ? null : (
-        <>
-          <h1>{supplier.name}</h1>
-          <Tabs.Root className="tabs" value={tab} onValueChange={(details) => setTab(details.value as DetailTab)} lazyMount unmountOnExit>
-            <Tabs.List className="tab-list">
-              <Tabs.Trigger value="details">Details</Tabs.Trigger>
-              <Tabs.Trigger value="categories">Categories</Tabs.Trigger>
-              <Tabs.Trigger value="assets">Assets</Tabs.Trigger>
-              <Tabs.Trigger value="products">Products</Tabs.Trigger>
-            </Tabs.List>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)} className="gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <TabsList className="h-9">
+              {DETAIL_TABS.map((item) => (
+                <TabsTrigger key={item.id} value={item.id} className="px-3">
+                  {item.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {isAdmin ? (
+              <Button variant="destructive" size="lg" onClick={() => setConfirmDelete(true)}>
+                <Trash2 />
+                Delete supplier
+              </Button>
+            ) : null}
+          </div>
 
-            <Tabs.Content value="details">
-              {isAdmin && editing ? (
-                <SupplierForm
-                  supplier={supplier}
-                  onCancel={() => setEditing(false)}
-                  onSaved={(updated) => {
-                    setSupplier(updated);
-                    setEditing(false);
-                  }}
-                />
-              ) : (
-                <div className="card">
-                  <dl className="profile">
-                    <dt>Street</dt>
+          <TabsContent value="details">
+            {isAdmin && editing ? (
+              <SupplierForm
+                supplier={supplier}
+                onCancel={() => setEditing(false)}
+                onSaved={(updated) => {
+                  setSupplier(updated);
+                  setEditing(false);
+                }}
+              />
+            ) : (
+              <Card className="gap-6 py-6">
+                <CardHeader className="px-6">
+                  <CardTitle>
+                    <h2>Address</h2>
+                  </CardTitle>
+                  {isAdmin ? (
+                    <CardAction>
+                      <Button variant="outline" onClick={() => setEditing(true)}>
+                        <Pencil />
+                        Edit details
+                      </Button>
+                    </CardAction>
+                  ) : null}
+                </CardHeader>
+                <CardContent className="px-6">
+                  <dl className="grid grid-cols-[max-content_1fr] gap-x-8 gap-y-4 text-sm">
+                    <dt className="text-muted-foreground">Street</dt>
                     <dd>{supplier.street ?? "—"}</dd>
-                    <dt>City</dt>
+                    <dt className="text-muted-foreground">City</dt>
                     <dd>{supplier.city ?? "—"}</dd>
-                    <dt>State / region</dt>
+                    <dt className="text-muted-foreground">State / region</dt>
                     <dd>{supplier.stateRegion ?? "—"}</dd>
-                    <dt>Postal code</dt>
+                    <dt className="text-muted-foreground">Postal code</dt>
                     <dd>{supplier.postalCode ?? "—"}</dd>
-                    <dt>Country</dt>
+                    <dt className="text-muted-foreground">Country</dt>
                     <dd>{supplier.country ?? "—"}</dd>
                   </dl>
-                  {isAdmin ? (
-                    <button type="button" className="primary-button" onClick={() => setEditing(true)}>
-                      Edit details
-                    </button>
-                  ) : null}
-                </div>
-              )}
-            </Tabs.Content>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
 
-            <Tabs.Content value="categories">
-              <CategoriesTab supplier={supplier} isAdmin={isAdmin} onSaved={setSupplier} onError={setError} />
-            </Tabs.Content>
+          <TabsContent value="categories">
+            <CategoriesTab supplier={supplier} isAdmin={isAdmin} onSaved={setSupplier} onError={setError} />
+          </TabsContent>
 
-            <Tabs.Content value="assets">
-              <AssetsPanel supplierId={supplier.id} isAdmin={isAdmin} />
-            </Tabs.Content>
+          <TabsContent value="assets">
+            <AssetsPanel supplierId={supplier.id} isAdmin={isAdmin} />
+          </TabsContent>
 
-            <Tabs.Content value="products">
-              <div className="card">
-                <p>Products for this supplier will appear here once product management is available.</p>
-              </div>
-            </Tabs.Content>
-          </Tabs.Root>
-        </>
+          <TabsContent value="catalogs">
+            <CatalogsPanel supplierId={supplier.id} isAdmin={isAdmin} />
+          </TabsContent>
+
+          <TabsContent value="products">
+            <ProductsPanel supplierId={supplier.id} isAdmin={isAdmin} />
+          </TabsContent>
+        </Tabs>
       )}
 
       <ConfirmDialog
@@ -142,7 +193,7 @@ export function SupplierDetail({ supplierId, onBack, onDeleted }: SupplierDetail
         onConfirm={() => void handleDelete()}
         onCancel={() => setConfirmDelete(false)}
       />
-    </section>
+    </>
   );
 }
 
@@ -180,15 +231,22 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
   }
 
   return (
-    <div className="card">
-      <CategoryEditor value={chips} onChange={setChips} disabled={!isAdmin} />
+    <Card className="gap-6 py-6">
+      <CardHeader className="px-6">
+        <CardTitle>
+          <h2>Categories</h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-6">
+        <CategoryEditor value={chips} onChange={setChips} disabled={!isAdmin} />
+      </CardContent>
       {isAdmin ? (
-        <div className="dialog-actions">
-          <button type="button" className="primary-button" onClick={() => void save()} disabled={!dirty || saving}>
+        <CardFooter className="justify-end border-t px-6 py-4">
+          <Button size="lg" onClick={() => void save()} disabled={!dirty || saving}>
             {saving ? "Saving…" : "Save categories"}
-          </button>
-        </div>
+          </Button>
+        </CardFooter>
       ) : null}
-    </div>
+    </Card>
   );
 }

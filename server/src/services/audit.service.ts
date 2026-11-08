@@ -28,6 +28,26 @@ export const AuditAction = {
   ASSET_DELETE: "ASSET_DELETE",
   ASSET_LIST: "ASSET_LIST",
   ASSET_DOWNLOAD: "ASSET_DOWNLOAD",
+  CATALOG_UPLOAD: "CATALOG_UPLOAD",
+  CATALOG_UPDATE: "CATALOG_UPDATE",
+  CATALOG_DELETE: "CATALOG_DELETE",
+  CATALOG_LIST: "CATALOG_LIST",
+  CATALOG_DOWNLOAD: "CATALOG_DOWNLOAD",
+  ATTRIBUTE_SET_CREATE: "ATTRIBUTE_SET_CREATE",
+  ATTRIBUTE_SET_UPDATE: "ATTRIBUTE_SET_UPDATE",
+  ATTRIBUTE_SET_DELETE: "ATTRIBUTE_SET_DELETE",
+  ATTRIBUTE_SET_VIEW: "ATTRIBUTE_SET_VIEW",
+  ATTRIBUTE_SET_LIST: "ATTRIBUTE_SET_LIST",
+  ATTRIBUTE_FIELD_CREATE: "ATTRIBUTE_FIELD_CREATE",
+  ATTRIBUTE_FIELD_UPDATE: "ATTRIBUTE_FIELD_UPDATE",
+  ATTRIBUTE_FIELD_REORDER: "ATTRIBUTE_FIELD_REORDER",
+  ATTRIBUTE_FIELD_ARCHIVE: "ATTRIBUTE_FIELD_ARCHIVE",
+  ATTRIBUTE_FIELD_DELETE: "ATTRIBUTE_FIELD_DELETE",
+  PRODUCT_CREATE: "PRODUCT_CREATE",
+  PRODUCT_UPDATE: "PRODUCT_UPDATE",
+  PRODUCT_DELETE: "PRODUCT_DELETE",
+  PRODUCT_VIEW: "PRODUCT_VIEW",
+  PRODUCT_LIST: "PRODUCT_LIST",
 } as const;
 
 export type AuditActionName = (typeof AuditAction)[keyof typeof AuditAction];
@@ -75,7 +95,8 @@ export function diffFields(
   after: Record<string, unknown>,
 ): FieldChanges | undefined {
   const changes: FieldChanges = {};
-  for (const field of Object.keys(after)) {
+  // Union of keys so fields removed in `after` (for example, cleared attributes) are recorded too.
+  for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
     const previous = before[field] ?? null;
     const next = after[field] ?? null;
     if (JSON.stringify(previous) !== JSON.stringify(next)) {

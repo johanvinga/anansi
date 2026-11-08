@@ -1,18 +1,164 @@
-import { Tabs } from "@ark-ui/react/tabs";
 import { useState } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  BookOpen,
+  Boxes,
+  ChevronsUpDown,
+  ListTree,
+  LogOut,
+  Moon,
+  Package,
+  ScrollText,
+  Sun,
+  Tags,
+  Truck,
+  UserRound,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 import { errorMessage } from "../api/client";
+import type { CurrentUser } from "../api/types";
 import { useAuth } from "../auth/auth-state";
-import { AccountPage } from "../features/account/account-page";
-import { AuditLogPage } from "../features/audit/audit-log-page";
-import { CategoriesPage } from "../features/categories/categories-page";
-import { SuppliersPage } from "../features/suppliers/suppliers-page";
-import { UsersPage } from "../features/users/users-page";
+import { ErrorAlert } from "../components/error-alert";
+import { useTheme } from "./theme";
 
-type Section = "suppliers" | "categories" | "users" | "audit" | "account";
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const CATALOG_ITEMS: NavItem[] = [
+  { to: "/suppliers", label: "Suppliers", icon: Truck },
+  { to: "/products", label: "Products", icon: Package },
+  { to: "/catalogs", label: "Catalogs", icon: BookOpen },
+  { to: "/attribute-sets", label: "Attribute sets", icon: ListTree },
+  { to: "/categories", label: "Categories", icon: Tags },
+];
+
+const ADMIN_ITEMS: NavItem[] = [
+  { to: "/users", label: "Users", icon: Users },
+  { to: "/audit", label: "Audit log", icon: ScrollText },
+];
+
+const ACCOUNT_ITEMS: NavItem[] = [{ to: "/account", label: "My account", icon: UserRound }];
+
+function initials(user: CurrentUser): string {
+  const source = user.displayName?.trim() || user.email;
+  const parts = source.split(/[\s@.]+/).filter(Boolean);
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+interface NavGroupProps {
+  label: string;
+  items: NavItem[];
+  pathname: string;
+}
+
+function NavGroup({ label, items, pathname }: NavGroupProps) {
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel className="uppercase tracking-wide">{label}</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {items.map((item) => {
+            const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
+            return (
+              <SidebarMenuItem key={item.to}>
+                <SidebarMenuButton asChild isActive={isActive} tooltip={item.label}>
+                  <Link to={item.to} aria-current={isActive ? "page" : undefined}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+}
+
+interface UserMenuProps {
+  user: CurrentUser;
+  onLogout: () => void;
+}
+
+function UserMenu({ user, onLogout }: UserMenuProps) {
+  const navigate = useNavigate();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
+          <Avatar className="size-8 rounded-lg">
+            <AvatarFallback className="rounded-lg">{initials(user)}</AvatarFallback>
+          </Avatar>
+          <div className="grid flex-1 text-left text-sm leading-tight">
+            <span className="truncate font-medium">{user.displayName ?? user.email}</span>
+            <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+          </div>
+          <ChevronsUpDown className="ml-auto size-4" />
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="min-w-56">
+        <DropdownMenuLabel className="flex items-center justify-between gap-2 font-normal">
+          <span className="truncate">{user.email}</span>
+          <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={() => navigate("/account")}>
+            <UserRound />
+            My account
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onLogout}>
+          <LogOut />
+          Log out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function AppShell() {
   const { user, logout } = useAuth();
-  const [section, setSection] = useState<Section>("suppliers");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [theme, setTheme] = useTheme();
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const isAdmin = user?.role === "admin";
 
@@ -24,63 +170,67 @@ export function AppShell() {
     setLogoutError(null);
     try {
       await logout();
+      navigate("/login", { replace: true });
     } catch (err) {
       setLogoutError(errorMessage(err));
     }
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <span className="app-title">Supplier &amp; Product Management</span>
-        <span className="app-user">
-          {user.displayName ?? user.email} ({user.role})
-        </span>
-        <button type="button" className="secondary-button" onClick={() => void handleLogout()}>
-          Log out
-        </button>
-      </header>
-      {logoutError ? (
-        <p role="alert" className="form-error">
-          {logoutError}
-        </p>
-      ) : null}
+    <SidebarProvider>
+      <Sidebar collapsible="icon">
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" asChild>
+                <Link to="/suppliers">
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <Boxes className="size-4" />
+                  </div>
+                  <div className="grid flex-1 text-left leading-tight">
+                    <span className="truncate font-semibold">Supplier Hub</span>
+                    <span className="truncate text-xs text-muted-foreground">Products &amp; catalogs</span>
+                  </div>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+        <SidebarContent>
+          <NavGroup label="Catalog" items={CATALOG_ITEMS} pathname={location.pathname} />
+          {isAdmin ? <NavGroup label="Administration" items={ADMIN_ITEMS} pathname={location.pathname} /> : null}
+          <NavGroup label="Account" items={ACCOUNT_ITEMS} pathname={location.pathname} />
+        </SidebarContent>
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <UserMenu user={user} onLogout={() => void handleLogout()} />
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      </Sidebar>
 
-      <Tabs.Root
-        className="tabs"
-        value={section}
-        onValueChange={(details) => setSection(details.value as Section)}
-        lazyMount
-        unmountOnExit
-      >
-        <Tabs.List className="tab-list">
-          <Tabs.Trigger value="suppliers">Suppliers</Tabs.Trigger>
-          <Tabs.Trigger value="categories">Categories</Tabs.Trigger>
-          {isAdmin ? <Tabs.Trigger value="users">Users</Tabs.Trigger> : null}
-          {isAdmin ? <Tabs.Trigger value="audit">Audit log</Tabs.Trigger> : null}
-          <Tabs.Trigger value="account">My account</Tabs.Trigger>
-        </Tabs.List>
-
-        <Tabs.Content value="suppliers">
-          <SuppliersPage />
-        </Tabs.Content>
-        <Tabs.Content value="categories">
-          <CategoriesPage />
-        </Tabs.Content>
-        {isAdmin ? (
-          <Tabs.Content value="users">
-            <UsersPage />
-          </Tabs.Content>
-        ) : null}
-        {isAdmin ? (
-          <Tabs.Content value="audit">
-            <AuditLogPage />
-          </Tabs.Content>
-        ) : null}
-        <Tabs.Content value="account">
-          <AccountPage />
-        </Tabs.Content>
-      </Tabs.Root>
-    </div>
+      <SidebarInset>
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+          <span className="text-sm text-muted-foreground">Supplier &amp; Product Management</span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? <Sun /> : <Moon />}
+            </Button>
+          </div>
+        </header>
+        <main className="flex flex-1 flex-col gap-4 bg-muted/40 p-4 md:p-6">
+          <ErrorAlert message={logoutError} />
+          <Outlet />
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

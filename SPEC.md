@@ -36,6 +36,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | Supplier | An organization that provides products. Previously referred to as "vendor". |
 | Category | A label applied to suppliers, used for grouping and future search. |
 | Asset | A file attached to a supplier (currently PDF only). |
+| Catalog | A named, versioned PDF price or product catalog attached to a supplier. A catalog is a separate entity from an asset. |
 | Product | An item provided by a supplier. |
 | Supplier SKU | The supplier's own identifier for a product. Unique per supplier. |
 | Attribute Set | A named template containing attribute fields. |
@@ -53,7 +54,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | D3 | First admin | Created by a command-line seed script that takes an email and password. |
 | D4 | Currency | Each product has its own currency, any valid ISO 4217 code. |
 | D5 | Stack | TypeScript end-to-end: React with Vite (frontend), Node.js with Fastify (backend), PostgreSQL with Prisma. |
-| D6 | UI components | All React UI components must come from Ark UI (https://ark-ui.com/). |
+| D6 | UI components | All React UI components must come from shadcn/ui (https://ui.shadcn.com), built on Radix UI and Tailwind CSS. Untitled UI and Ark UI are no longer used. |
 | D7 | Hosting | Local or on-premises only for now. |
 | D8 | Units | Attribute fields may specify a unit (for example `mm`), stored as metadata only. |
 | D9 | Audit log | Every action is logged (see §4.10). Viewable by admins only, retained indefinitely. |
@@ -125,6 +126,18 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-AST-09 | Storage shall be accessed through an interface so the backing store (local disk or S3) can be swapped. |
 | FR-AST-10 | Optional: the user may give an asset a display title and a short description. |
 
+### 4.4A Supplier Catalogs (FR-CLG)
+
+| ID | Requirement |
+|---|---|
+| FR-CLG-01 | The user shall be able to upload a catalog to a supplier. A catalog is a PDF file with a required **name** (1–200 chars) and an optional **version** (1–50 chars). Each catalog belongs to exactly one supplier. |
+| FR-CLG-02 | Catalog uploads shall follow FR-AST-02, FR-AST-03, and FR-AST-04. |
+| FR-CLG-03 | The catalog's **weight** is its file size in bytes. It is computed at upload and is read-only. |
+| FR-CLG-04 | The user shall be able to list a supplier's catalogs with name, version, weight, and last updated date. |
+| FR-CLG-05 | The user shall be able to download a catalog. |
+| FR-CLG-06 | The user shall be able to edit a catalog's name and version. **Last updated** is set automatically to the time of the most recent change. |
+| FR-CLG-07 | The user shall be able to delete a catalog (file and metadata). |
+
 ### 4.5 Attribute Sets (FR-ATS)
 
 | ID | Requirement |
@@ -170,11 +183,11 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 
 | ID | Requirement |
 |---|---|
-| FR-UI-01 | The supplier detail page shall have tabs: **Details**, **Categories**, **Assets**, **Products**. |
+| FR-UI-01 | The supplier detail page shall have tabs: **Details**, **Categories**, **Assets**, **Catalogs**, **Products**. |
 | FR-UI-02 | The attribute set builder shall support drag-and-drop reordering of fields. |
 | FR-UI-03 | Forms shall display inline validation errors. |
 | FR-UI-04 | Destructive actions (delete supplier, delete product, delete asset, change attribute set) shall require confirmation. |
-| FR-UI-05 | All UI components in the React app shall come from Ark UI (https://ark-ui.com/). |
+| FR-UI-05 | All UI components in the React app shall come from shadcn/ui (https://ui.shadcn.com). |
 
 ---
 
@@ -195,10 +208,10 @@ Where other requirements say "the user", they apply to admins only. Standard use
 
 | Capability | Standard | Admin |
 |---|---|---|
-| View suppliers, categories, products, attribute sets, assets | Yes | Yes |
-| Download assets | Yes | Yes |
-| Create or edit suppliers, categories, assets, products, attribute sets | No | Yes |
-| Delete suppliers, categories, assets, products, attribute sets | No | Yes |
+| View suppliers, categories, products, attribute sets, assets, catalogs | Yes | Yes |
+| Download assets and catalogs | Yes | Yes |
+| Create or edit suppliers, categories, assets, catalogs, products, attribute sets | No | Yes |
+| Delete suppliers, categories, assets, catalogs, products, attribute sets | No | Yes |
 | Manage user accounts and reset passwords | No | Yes |
 | View audit log | No | Yes |
 
@@ -222,7 +235,7 @@ Where other requirements say "the user", they apply to admins only. Standard use
 
 | ID | Requirement |
 |---|---|
-| FR-AUD-01 | Every user action shall be recorded: login success and failure, logout, create, update, delete, record view, list view, asset download, and user management actions. |
+| FR-AUD-01 | Every user action shall be recorded: login success and failure, logout, create, update, delete, record view, list view, asset download, catalog download, and user management actions. |
 | FR-AUD-02 | Each entry shall record: actor (user ID and email at the time), action, entity type, entity ID, outcome, UTC timestamp, IP address, and request ID. |
 | FR-AUD-03 | Changes shall record before and after values for each changed field. Password hashes, tokens, and file contents shall never be recorded. |
 | FR-AUD-04 | Failed login entries shall record the attempted email. No password shall be recorded. |
@@ -242,6 +255,8 @@ erDiagram
   USER ||--o{ AUDIT_LOG : performs
   USER ||--o{ SUPPLIER : creates
   SUPPLIER ||--o{ SUPPLIER_ASSET : has
+  SUPPLIER ||--o{ CATALOG : has
+  USER ||--o{ CATALOG : uploads
   SUPPLIER }o--o{ CATEGORY : tagged_with
   SUPPLIER ||--o{ PRODUCT : supplies
   ATTRIBUTE_SET ||--o{ ATTRIBUTE_FIELD : defines
@@ -322,6 +337,22 @@ erDiagram
 | description | text | Nullable |
 | uploaded_by | UUID | FK → User |
 | created_at | timestamptz | Not null |
+
+**Catalog**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| supplier_id | UUID | FK → Supplier, on delete cascade, not null |
+| name | varchar(200) | Not null |
+| version | varchar(50) | Nullable (optional since FR-CLG-01 was relaxed) |
+| original_file_name | varchar(255) | Not null |
+| storage_key | varchar(255) | Not null, unique |
+| mime_type | varchar(100) | Not null |
+| size_bytes | bigint | Not null (the catalog's weight, FR-CLG-03) |
+| uploaded_by | UUID | FK → User |
+| created_at | timestamptz | Not null |
+| updated_at | timestamptz | Not null (last updated, FR-CLG-06) |
 
 **AttributeSet**
 
@@ -451,6 +482,17 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | PATCH | `/assets/{assetId}` | Update title or description. |
 | DELETE | `/assets/{assetId}` | Delete. |
 
+### 6.4A Supplier Catalogs
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/catalogs` | Global list across all suppliers (the Catalogs page). Query: `q` (searches name, version, supplier name), repeated `category` (supplier category ids), `page`, `pageSize`. Ordered newest first. Each item includes `supplierName` and `supplierCategoryNames`. |
+| GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes` and `updatedAt`. |
+| POST | `/suppliers/{id}/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; `version` is optional). Admin only. |
+| GET | `/catalogs/{catalogId}/download` | Download with `Content-Disposition: attachment`. |
+| PATCH | `/catalogs/{catalogId}` | Update `name` and/or `version` (at least one required). Admin only. |
+| DELETE | `/catalogs/{catalogId}` | Delete the catalog and its file. Admin only. |
+
 ### 6.5 Attribute Sets
 
 | Method | Path | Description |
@@ -514,6 +556,9 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | AttributeField.select | Value must be an existing option of that field. |
 | AttributeField.date | ISO 8601 date (`YYYY-MM-DD`). |
 | Asset upload | PDF MIME type, `%PDF-` signature, size ≤ configured max. |
+| Catalog name | Trimmed, 1–200 characters, required. |
+| Catalog version | Trimmed, 1–50 characters, optional. |
+| Catalog upload | Same rules as asset upload. |
 | Password (on creation or reset) | Minimum 12 characters. |
 
 ---
@@ -535,12 +580,13 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Action | Behavior |
 |---|---|
-| Delete supplier | Blocked if the supplier has products. The user must delete or reassign the products first. Assets are deleted with the supplier, and their files are removed from storage. |
+| Delete supplier | Blocked if the supplier has products. The user must delete or reassign the products first. Assets and catalogs are deleted with the supplier, and their files are removed from storage. |
 | Delete category | Removes links from all suppliers. |
 | Delete attribute set | Blocked if any product references it. |
 | Delete attribute field | Archived if any product has a value for it; otherwise deleted. |
 | Delete product | Deletes its attribute values. |
 | Delete asset | Deletes the stored file and metadata. |
+| Delete catalog | Deletes the stored file and metadata. |
 
 ---
 
@@ -588,6 +634,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Product | `(supplier_id, lower(supplier_sku))` unique | SKU uniqueness. |
 | Product | `lower(name)` | Name search. |
 | SupplierAsset | `supplier_id` | Asset list. |
+| Catalog | `supplier_id` | Catalog list. |
 | AttributeField | `(attribute_set_id, sort_order)` | Ordered fields. |
 | Session | `expires_at` | Cleanup of expired sessions. |
 | User | `lower(email)` unique | Login lookup. |
@@ -648,7 +695,7 @@ Acceptance tests must cover every requirement ID in §4.
 | Milestone | Scope | Exit criteria |
 |---|---|---|
 | M1 | Project setup, database, authentication, roles, user management, audit logging (FR-AUTH, FR-ROL, FR-USR, FR-AUD) | Users can log in and out; roles enforced; every action is audited. |
-| M2 | Suppliers, categories, supplier assets (FR-SUP, FR-CAT, FR-AST) | CRUD works; PDF upload and download verified. |
+| M2 | Suppliers, categories, supplier assets, supplier catalogs (FR-SUP, FR-CAT, FR-AST, FR-CLG) | CRUD works; PDF upload and download verified. |
 | M3 | Attribute sets, products, dynamic attribute forms (FR-ATS, FR-PRD) | Products created with attribute values per set. |
 | M4 | UI polish, tests, security review, Docker Compose (FR-UI, NFR) | All tests green; security checklist complete. |
 

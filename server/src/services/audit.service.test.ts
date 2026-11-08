@@ -12,6 +12,12 @@ describe("diffFields (FR-AUD-03)", () => {
     expect(diffFields({ name: undefined }, { name: null })).toBeUndefined();
   });
 
+  it("records fields that exist only in the before snapshot", () => {
+    expect(diffFields({ "attribute.width": 10 }, {})).toEqual({
+      "attribute.width": { before: 10, after: null },
+    });
+  });
+
   it("returns undefined when nothing changed", () => {
     expect(diffFields({ a: 1 }, { a: 1 })).toBeUndefined();
   });

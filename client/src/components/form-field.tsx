@@ -1,4 +1,6 @@
-import { Field } from "@ark-ui/react/field";
+import { useId } from "react";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 
 interface FormFieldProps {
   label: string;
@@ -11,9 +13,11 @@ interface FormFieldProps {
   disabled?: boolean;
   helperText?: string;
   error?: string | undefined;
+  maxLength?: number;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
-/** Labeled, validated text input built on Ark UI's Field. */
+/** Labeled, validated text input built on shadcn's Field and Input. */
 export function FormField({
   label,
   value,
@@ -25,22 +29,38 @@ export function FormField({
   disabled,
   helperText,
   error,
+  maxLength,
+  onKeyDown,
 }: FormFieldProps) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const hasHint = Boolean(error ?? helperText);
+
   return (
-    <Field.Root className="field" invalid={Boolean(error)} required={required} disabled={disabled}>
-      <Field.Label>
+    <Field data-invalid={error ? true : undefined} data-disabled={disabled ? true : undefined}>
+      <FieldLabel htmlFor={id}>
         {label}
-        {required ? <span aria-hidden="true"> *</span> : null}
-      </Field.Label>
-      <Field.Input
+        {required ? <span aria-hidden="true" className="text-destructive">*</span> : null}
+      </FieldLabel>
+      <Input
+        id={id}
         name={name}
         type={type}
         value={value}
         autoComplete={autoComplete}
+        required={required}
+        disabled={disabled}
+        maxLength={maxLength}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={hasHint ? hintId : undefined}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
       />
-      {helperText && !error ? <Field.HelperText>{helperText}</Field.HelperText> : null}
-      {error ? <Field.ErrorText>{error}</Field.ErrorText> : null}
-    </Field.Root>
+      {error ? (
+        <FieldError id={hintId}>{error}</FieldError>
+      ) : helperText ? (
+        <FieldDescription id={hintId}>{helperText}</FieldDescription>
+      ) : null}
+    </Field>
   );
 }

@@ -214,7 +214,10 @@ export async function updateSupplier(
   }
 }
 
-/** Deletes the supplier, its asset rows (cascade), and then the stored files (SPEC §8.3). */
+/**
+ * Deletes the supplier, its asset and catalog rows (cascade), and then the stored files.
+ * Blocked while the supplier has products (FR-SUP-05, SPEC §8.3).
+ */
 export async function deleteSupplier(
   db: Database,
   storage: AssetStorage,
@@ -225,9 +228,19 @@ export async function deleteSupplier(
   const storageKeys = await db.$transaction(async (tx) => {
     const existing = await tx.supplier.findUnique({
       where: { id },
-      include: { assets: { select: { storageKey: true } } },
+      include: {
+        assets: { select: { storageKey: true } },
+        catalogs: { select: { storageKey: true } },
+      },
     });
     if (!existing) throw errors.notFound("Supplier");
+
+    const productCount = await tx.product.count({ where: { supplierId: id } });
+    if (productCount > 0) {
+      throw errors.conflict(
+        `This supplier has ${productCount} product(s). Delete or reassign them before deleting the supplier.`,
+      );
+    }
 
     await tx.supplier.delete({ where: { id } });
     await recordAudit(tx, request, {
@@ -237,7 +250,7 @@ export async function deleteSupplier(
       entityId: id,
       changes: diffFields({ name: existing.name }, { name: null }),
     });
-    return existing.assets.map((asset) => asset.storageKey);
+    return [...existing.assets, ...existing.catalogs].map((file) => file.storageKey);
   });
 
   await removeStoredFiles(storage, storageKeys, log);
