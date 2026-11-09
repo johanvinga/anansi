@@ -1,3 +1,4 @@
+﻿import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ interface ProductsPanelProps {
 
 /** Product list with search and pagination, plus create, edit, and delete for admins (FR-PRD-01..09). */
 export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
@@ -87,21 +89,21 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const columnCount = (supplierId ? 6 : 7) + (isAdmin ? 1 : 0);
 
   return (
-    <Card className="gap-0 py-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
         <h2 className="text-base font-semibold">{supplierId ? "Products" : "All products"}</h2>
         {isAdmin ? (
           <Button size="lg" onClick={() => setEditing("new")}>
             <Plus />
-            New product
+            {t("products.createProduct")}
           </Button>
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 p-4">
+      <div className="flex flex-wrap items-center gap-3 py-1">
         <SearchForm
-          label="Search by name or SKU"
-          placeholder="Search by name or SKU…"
+          label={t("products.searchLabel")}
+          placeholder={t("products.searchPlaceholder")}
           value={query}
           onChange={setQuery}
           onSearch={() => {
@@ -114,8 +116,8 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
             <SelectField
               label="Supplier"
               hideLabel
-              placeholder="All suppliers"
-              options={[{ value: "", label: "All suppliers" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+              placeholder={t("products.allSuppliers")}
+              options={[{ value: "", label: t("products.allSuppliers") }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
               value={supplierFilter ?? ""}
               onChange={(value) => {
                 setPage(1);
@@ -125,6 +127,8 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
           </div>
         )}
       </div>
+
+      <Card className="gap-0 py-0">
 
       {error || status ? (
         <div className="flex flex-col gap-2 px-4 pb-4">
@@ -136,14 +140,14 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
       <Table aria-label={supplierId ? "Products" : "All products"}>
         <TableHeader className="bg-muted/50">
           <TableRow>
-            <TableHead className="pl-4">Name</TableHead>
-            <TableHead>SKU</TableHead>
-            {supplierId ? null : <TableHead>Supplier</TableHead>}
-            <TableHead className="text-right">Min. qty</TableHead>
-            <TableHead className="text-right">Cost</TableHead>
-            <TableHead>Attribute set</TableHead>
-            <TableHead>Updated</TableHead>
-            {isAdmin ? <TableHead className="pr-4 text-right">Actions</TableHead> : null}
+            <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+            <TableHead>{t("products.skuLabel")}</TableHead>
+            {supplierId ? null : <TableHead>{t("products.supplier")}</TableHead>}
+            <TableHead className="text-right">{t("products.minQty")}</TableHead>
+            <TableHead className="text-right">{t("products.cost")}</TableHead>
+            <TableHead>{t("products.attributeSet")}</TableHead>
+            <TableHead>{t("products.updated")}</TableHead>
+            {isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -162,9 +166,9 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
               {isAdmin ? (
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
-                    <IconAction label={`Edit ${product.name}`} icon={Pencil} onClick={() => void openEdit(product)} />
+                    <IconAction label={t("products.editAria", { name: product.name })} icon={Pencil} onClick={() => void openEdit(product)} />
                     <IconAction
-                      label={`Delete ${product.name}`}
+                      label={t("products.deleteAria", { name: product.name })}
                       icon={Trash2}
                       destructive
                       onClick={() => setDeleting(product)}
@@ -178,6 +182,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
       </Table>
 
       {result ? <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} /> : null}
+      </Card>
 
       {editing ? (
         <ProductForm
@@ -194,12 +199,12 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
 
       <ConfirmDialog
         open={deleting !== null}
-        title={`Delete ${deleting?.name ?? "product"}?`}
-        description="The product and its attribute values will be permanently deleted."
-        confirmLabel="Delete product"
+        title={t("products.confirmDeleteTitle", { name: deleting?.name ?? t("products.title") })}
+        description={t("products.confirmDeleteDescription")}
+        confirmLabel={t("products.deleteProduct")}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleting(null)}
       />
-    </Card>
+    </>
   );
 }

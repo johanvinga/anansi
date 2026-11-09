@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 import { App } from "./App";
 import { AuthProvider } from "./auth/auth-provider";
+import "./i18n/i18n";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

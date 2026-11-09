@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from "react";
 import { Archive, ArrowDown, ArrowLeft, ArrowUp, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ interface AttributeSetBuilderProps {
 
 /** Shows an attribute set and lets admins manage and reorder its fields (FR-ATS-02..09, FR-UI-02). */
 export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted }: AttributeSetBuilderProps) {
+  const { t } = useTranslation();
   const [detail, setDetail] = useState<AttributeSetDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<AttributeField | "new" | null>(null);
@@ -69,7 +71,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
   const backButton = (
     <Button type="button" variant="ghost" size="sm" onClick={onBack}>
       <ArrowLeft />
-      Back to attribute sets
+            {t("attributeSets.backToSets")}
     </Button>
   );
 
@@ -77,8 +79,8 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
     return (
       <>
         <PageHeader
-          title="Attribute set"
-          breadcrumbs={[{ label: "Attribute sets", to: "/attribute-sets" }, { label: "Builder" }]}
+          title={t("attributeSets.attributeSet")}
+          breadcrumbs={[{ label: t("attributeSets.title"), to: "/attribute-sets" }, { label: t("attributeSets.builder") }]}
           actions={backButton}
         />
         {error ? (
@@ -86,7 +88,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
         ) : (
           <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner />
-            Loading…
+            {t("common.loading")}
           </p>
         )}
       </>
@@ -106,7 +108,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
         fieldIds: [...ordered, ...archivedFields].map((f) => f.id),
       });
       setDetail(result.attributeSet);
-      setStatus("Field order saved.");
+      setStatus(t("attributeSets.orderSaved"));
     } catch (err) {
       setDetail(previous);
       setError(errorMessage(err));
@@ -143,7 +145,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
         `/attribute-sets/${attributeSetId}/fields/${target.id}`,
       );
       setDetail(result.attributeSet);
-      setStatus(result.result === "archived" ? `${target.name} was archived. Existing values are kept.` : `${target.name} was deleted.`);
+      setStatus(result.result === "archived" ? t("attributeSets.wasArchived", { name: target.name }) : t("attributeSets.wasDeleted", { name: target.name }));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -163,7 +165,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
     <>
       <PageHeader
         title={detail.name}
-        breadcrumbs={[{ label: "Attribute sets", to: "/attribute-sets" }, { label: detail.name }]}
+        breadcrumbs={[{ label: t("attributeSets.title"), to: "/attribute-sets" }, { label: detail.name }]}
         actions={backButton}
       />
 
@@ -177,24 +179,24 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
       <Card className="gap-4 py-6">
         <CardHeader className="px-6">
           <CardTitle>
-            <h2>Fields</h2>
+            <h2>{t("attributeSets.buildFields")}</h2>
           </CardTitle>
           {isAdmin && activeFields.length > 1 ? (
-            <CardDescription>Drag fields to reorder them, or use the Move up and Move down buttons.</CardDescription>
+            <CardDescription>{t("attributeSets.dragHint")}</CardDescription>
           ) : null}
           {isAdmin ? (
             <CardAction className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" onClick={() => setRenaming(true)}>
                 <Pencil />
-                Rename set
+                {t("attributeSets.renameSet")}
               </Button>
               <Button type="button" variant="destructive" onClick={() => setConfirmDelete(true)}>
                 <Trash2 />
-                Delete set
+                {t("attributeSets.deleteSet")}
               </Button>
               <Button type="button" onClick={() => setEditingField("new")}>
                 <Plus />
-                Add field
+                {t("attributeSets.addField")}
               </Button>
             </CardAction>
           ) : null}
@@ -203,8 +205,8 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
           {activeFields.length === 0 ? (
             <Empty className="border border-dashed">
               <EmptyHeader>
-                <EmptyTitle>No fields yet</EmptyTitle>
-                {isAdmin ? <EmptyDescription>Add a field to start building this set.</EmptyDescription> : null}
+                <EmptyTitle>{t("attributeSets.noFields")}</EmptyTitle>
+                {isAdmin ? <EmptyDescription>{t("attributeSets.noFieldsHint")}</EmptyDescription> : null}
               </EmptyHeader>
             </Empty>
           ) : null}
@@ -240,31 +242,31 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
                   <div className="flex flex-wrap items-center gap-2">
                     <strong className="text-sm font-medium">{field.name}</strong>
                     <Badge variant="secondary">{TYPE_LABELS[field.dataType]}</Badge>
-                    {field.isRequired ? <Badge variant="warning">Required</Badge> : null}
+                    {field.isRequired ? <Badge variant="warning">{t("attributeSets.required")}</Badge> : null}
                     {field.unit ? <Badge variant="outline">{field.unit}</Badge> : null}
                   </div>
                   <span className="text-xs text-muted-foreground">
                     code: <span className="font-mono">{field.code}</span>
-                    {field.dataType === "select" ? ` · ${field.options.map((o) => o.label).join(", ")}` : ""}
+                    {field.dataType === "select" ? ` Â· ${field.options.map((o) => o.label).join(", ")}` : ""}
                   </span>
                 </div>
                 {isAdmin ? (
                   <div className="flex items-center gap-1">
                     <IconAction
-                      label={`Move ${field.name} up`}
+                      label={t("attributeSets.moveUp", { name: field.name })}
                       icon={ArrowUp}
                       disabled={index === 0}
                       onClick={() => moveField(field.id, index - 1)}
                     />
                     <IconAction
-                      label={`Move ${field.name} down`}
+                      label={t("attributeSets.moveDown", { name: field.name })}
                       icon={ArrowDown}
                       disabled={index === activeFields.length - 1}
                       onClick={() => moveField(field.id, index + 1)}
                     />
-                    <IconAction label={`Edit ${field.name}`} icon={Pencil} onClick={() => setEditingField(field)} />
+                    <IconAction label={t("attributeSets.editFieldAria", { name: field.name })} icon={Pencil} onClick={() => setEditingField(field)} />
                     <IconAction
-                      label={field.hasValues ? `Archive ${field.name}` : `Delete ${field.name}`}
+                      label={field.hasValues ? t("attributeSets.archiveAria", { name: field.name }) : t("attributeSets.deleteAria2", { name: field.name })}
                       icon={field.hasValues ? Archive : Trash2}
                       destructive
                       onClick={() => setRemovingField(field)}
@@ -281,9 +283,9 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
         <Card className="gap-4 py-6">
           <CardHeader className="px-6">
             <CardTitle>
-              <h2>Archived fields</h2>
+              <h2>{t("attributeSets.archivedFields")}</h2>
             </CardTitle>
-            <CardDescription>Hidden from product forms. Values already saved on products are kept.</CardDescription>
+            <CardDescription>{t("attributeSets.archivedHint")}</CardDescription>
           </CardHeader>
           <CardContent className="px-6">
             <ul className="flex flex-col gap-2 text-sm">
@@ -307,7 +309,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
           onSaved={(updated) => {
             setDetail(updated);
             setEditingField(null);
-            setStatus("Field saved.");
+            setStatus(t("attributeSets.fieldSaved"));
           }}
         />
       ) : null}
@@ -325,22 +327,22 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
 
       <ConfirmDialog
         open={removingField !== null}
-        title={removingField?.hasValues ? `Archive ${removingField.name}?` : `Delete ${removingField?.name ?? "field"}?`}
+        title={removingField?.hasValues ? t("attributeSets.archiveTitle", { name: removingField.name }) : t("attributeSets.confirmDeleteFieldTitle", { name: removingField?.name ?? t("attributeSets.fieldWord") })}
         description={
           removingField?.hasValues
-            ? "Products already have values for this field. It will be archived: hidden from forms, with existing values kept."
-            : "The field will be permanently deleted."
+            ? t("attributeSets.archiveDescription")
+            : t("attributeSets.deleteDescription")
         }
-        confirmLabel={removingField?.hasValues ? "Archive field" : "Delete field"}
+        confirmLabel={removingField?.hasValues ? t("attributeSets.archiveOrDeleteField") : t("attributeSets.deleteField")}
         onConfirm={() => void confirmRemoveField()}
         onCancel={() => setRemovingField(null)}
       />
 
       <ConfirmDialog
         open={confirmDelete}
-        title={`Delete ${detail.name}?`}
-        description="The attribute set and all of its fields will be deleted. Sets used by products cannot be deleted."
-        confirmLabel="Delete set"
+        title={t("attributeSets.confirmDeleteFieldTitle", { name: detail.name })}
+        description={t("attributeSets.confirmDeleteSetDescription")}
+        confirmLabel={t("attributeSets.deleteSet")}
         onConfirm={() => void handleDeleteSet()}
         onCancel={() => setConfirmDelete(false)}
       />
@@ -355,6 +357,7 @@ interface RenameSetDialogProps {
 }
 
 function RenameSetDialog({ detail, onClose, onSaved }: RenameSetDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(detail.name);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -378,19 +381,19 @@ function RenameSetDialog({ detail, onClose, onSaved }: RenameSetDialogProps) {
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>Rename attribute set</DialogTitle>
+            <DialogTitle>{t("attributeSets.renameTitle")}</DialogTitle>
           </DialogHeader>
           <FieldGroup>
-            <FormField label="Name" name="name" value={name} onChange={setName} required error={error ?? undefined} />
+            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required error={error ?? undefined} />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>

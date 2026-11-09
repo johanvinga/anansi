@@ -1,3 +1,4 @@
+﻿import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ const PAGE_SIZE = 25;
 /** Global catalogs list: every supplier's catalogs in one table, searchable by name/version/
  * supplier, filterable by supplier categories, newest first (FR-CLG-04 global view). */
 export function CatalogsPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [query, setQuery] = useState("");
@@ -63,29 +65,29 @@ export function CatalogsPage() {
 
   return (
     <>
-      <PageHeader title="Catalogs" breadcrumbs={[{ label: "Catalogs" }]} />
+      <PageHeader title={t("catalogs.title")} breadcrumbs={[{ label: t("catalogs.title") }]} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
+        <SearchForm
+          label={t("catalogs.searchLabel")}
+          placeholder={t("catalogs.searchPlaceholder")}
+          value={query}
+          onChange={setQuery}
+          onSearch={() => {
+            setPage(1);
+            setSearch(query.trim());
+          }}
+        />
+        {isAdmin ? (
+          <Button size="lg" onClick={() => setUploadOpen(true)}>
+            {t("catalogs.uploadCatalog")}
+          </Button>
+        ) : null}
+      </div>
 
       <Card className="gap-0 py-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <SearchForm
-            label="Search catalogs"
-            placeholder="Search by catalog, version, or supplier…"
-            value={query}
-            onChange={setQuery}
-            onSearch={() => {
-              setPage(1);
-              setSearch(query.trim());
-            }}
-          />
-          {isAdmin ? (
-            <Button size="lg" onClick={() => setUploadOpen(true)}>
-              Upload catalog
-            </Button>
-          ) : null}
-        </div>
-
         <div className="flex flex-wrap items-center gap-1 border-t px-4 py-3">
-          <span className="mr-1 text-sm text-muted-foreground">Categories:</span>
+          <span className="mr-1 text-sm text-muted-foreground">{t("suppliers.categoriesLabel")}:</span>
           {categories.map((category) => {
             const active = categoryIds.includes(category.id);
             return (
@@ -107,15 +109,15 @@ export function CatalogsPage() {
           </div>
         ) : null}
 
-        <Table aria-label="Catalogs">
+        <Table aria-label={t("catalogs.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Catalog name</TableHead>
-              <TableHead>PDF file</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Categories</TableHead>
-              <TableHead>Uploaded at</TableHead>
-              <TableHead className="pr-4 text-right">Actions</TableHead>
+              <TableHead className="pl-4">{t("catalogs.catalogName")}</TableHead>
+              <TableHead>{t("catalogs.pdfFile")}</TableHead>
+              <TableHead>{t("catalogs.supplier")}</TableHead>
+              <TableHead>{t("suppliers.categoriesLabel")}</TableHead>
+              <TableHead>{t("catalogs.uploadedAt")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -139,7 +141,7 @@ export function CatalogsPage() {
                 <TableCell>{formatDateTime(catalog.createdAt)}</TableCell>
                 <TableCell className="pr-4 text-right">
                   <IconAction
-                    label={`Download ${catalog.name}`}
+                    label={t("catalogs.downloadAria", { name: catalog.name })}
                     icon={Download}
                     href={`/api/v1/catalogs/${catalog.id}/download`}
                   />

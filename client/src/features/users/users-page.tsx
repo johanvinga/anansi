@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+﻿import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { KeyRound, Pencil, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -25,18 +26,23 @@ import { IconAction } from "../../components/icon-action";
 import { PageHeader } from "../../components/page-header";
 import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
-import { SelectField } from "../../components/select-field";
+import { SelectField, type SelectOption } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 
 const PAGE_SIZE = 25;
 
-const roleOptions: { value: UserRole; label: string }[] = [
-  { value: "standard", label: "Standard (read-only)" },
-  { value: "admin", label: "Admin" },
-];
+function useRoleOptions(): SelectOption[] {
+  const { t } = useTranslation();
+  return [
+    { value: "standard", label: t("users.roleStandardOption") },
+    { value: "admin", label: t("users.roleAdminOption") },
+  ];
+}
 
 export function UsersPage() {
   const { user: me } = useAuth();
+  const { t } = useTranslation();
+  const roleOptions = useRoleOptions();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -95,26 +101,26 @@ export function UsersPage() {
 
   return (
     <>
-      <PageHeader title="Users" breadcrumbs={[{ label: "Users" }]} />
+      <PageHeader title={t("users.title")} breadcrumbs={[{ label: t("users.title") }]} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
+        <SearchForm
+          label={t("users.searchLabel")}
+          placeholder={t("users.searchPlaceholder")}
+          value={query}
+          onChange={setQuery}
+          onSearch={() => {
+            setPage(1);
+            setSearch(query.trim());
+          }}
+        />
+        <Button size="lg" onClick={() => setCreateOpen(true)}>
+          <Plus />
+          {t("users.createUser")}
+        </Button>
+      </div>
 
       <Card className="gap-0 py-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <SearchForm
-            label="Search by email or name"
-            placeholder="Search by email or name…"
-            value={query}
-            onChange={setQuery}
-            onSearch={() => {
-              setPage(1);
-              setSearch(query.trim());
-            }}
-          />
-          <Button size="lg" onClick={() => setCreateOpen(true)}>
-            <Plus />
-            New user
-          </Button>
-        </div>
-
         {loadError || rowError ? (
           <div className="flex flex-col gap-2 px-4 pb-4">
             <ErrorAlert message={loadError} />
@@ -122,19 +128,19 @@ export function UsersPage() {
           </div>
         ) : null}
 
-        <Table aria-label="Users">
+        <Table aria-label={t("users.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Email</TableHead>
-              <TableHead>Display name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Active</TableHead>
-              <TableHead>Last login</TableHead>
-              <TableHead className="pr-4 text-right">Actions</TableHead>
+              <TableHead className="pl-4">{t("users.email")}</TableHead>
+              <TableHead>{t("users.displayName")}</TableHead>
+              <TableHead>{t("users.role")}</TableHead>
+              <TableHead>{t("users.status")}</TableHead>
+              <TableHead>{t("users.lastLogin")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("users.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {result && result.items.length === 0 ? <TableEmptyRow colSpan={6} message="No users found." /> : null}
+            {result && result.items.length === 0 ? <TableEmptyRow colSpan={6} message={t("users.noUsers")} /> : null}
             {result?.items.map((row) => (
               <TableRow key={row.id}>
                 <TableCell className="pl-4 font-medium">{row.email}</TableCell>
@@ -142,7 +148,7 @@ export function UsersPage() {
                 <TableCell>
                   <div className="w-48">
                     <SelectField
-                      label={`Role for ${row.email}`}
+                      label={t("users.roleFor", { email: row.email })}
                       hideLabel
                       options={roleOptions}
                       value={row.role}
@@ -159,11 +165,26 @@ export function UsersPage() {
                     onChange={(isActive) => (isActive ? void setActive(row, true) : setDeactivating(row))}
                   />
                 </TableCell>
-                <TableCell>{row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString() : "Never"}</TableCell>
+                <TableCell>
+                  {row.lastLoginAt
+                    ? new Date(row.lastLoginAt).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : t("users.never")}
+                </TableCell>
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
-                    <IconAction label={`Edit ${row.email}`} icon={Pencil} onClick={() => setEditing(row)} />
-                    <IconAction label={`Reset password for ${row.email}`} icon={KeyRound} onClick={() => setResetting(row)} />
+                    <IconAction
+                      label={t("users.editUserAria", { email: row.email })}
+                      icon={Pencil}
+                      onClick={() => setEditing(row)}
+                    />
+                    <IconAction
+                      label={t("users.resetPasswordAria", { email: row.email })}
+                      icon={KeyRound}
+                      onClick={() => setResetting(row)}
+                    />
                   </div>
                 </TableCell>
               </TableRow>
@@ -186,9 +207,9 @@ export function UsersPage() {
       />
       <ConfirmDialog
         open={deactivating !== null}
-        title={`Deactivate ${deactivating?.email ?? ""}?`}
-        description="The user will be signed out immediately and cannot log in until reactivated."
-        confirmLabel="Deactivate"
+        title={t("users.confirmDeactivateTitle", { email: deactivating?.email ?? "" })}
+        description={t("users.confirmDeactivateDescription")}
+        confirmLabel={t("users.deactivate")}
         onConfirm={() => void confirmDeactivate()}
         onCancel={() => setDeactivating(null)}
       />
@@ -228,30 +249,27 @@ interface ActiveSwitchProps {
 }
 
 function ActiveSwitch({ user, disabled, onChange }: ActiveSwitchProps) {
+  const { t } = useTranslation();
   const id = useId();
   return (
     <div className="flex items-center gap-2">
       <Switch
         id={id}
-        aria-label={`Active for ${user.email}`}
+        aria-label={t("users.activeFor", { email: user.email })}
         checked={user.isActive}
         disabled={disabled}
         onCheckedChange={onChange}
       />
       <Label htmlFor={id} className="font-normal text-muted-foreground">
-        {user.isActive ? "Active" : "Inactive"}
+        {user.isActive ? t("users.active") : t("users.inactive")}
       </Label>
     </div>
   );
 }
 
-interface CreateUserDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated: () => void;
-}
-
 function CreateUserDialog({ open, onOpenChange, onCreated }: CreateUserDialogProps) {
+  const { t } = useTranslation();
+  const roleOptions = useRoleOptions();
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -287,12 +305,12 @@ function CreateUserDialog({ open, onOpenChange, onCreated }: CreateUserDialogPro
       <DialogContent className="sm:max-w-md">
         <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate>
           <DialogHeader>
-            <DialogTitle>Create user</DialogTitle>
+            <DialogTitle>{t("users.createUserTitle")}</DialogTitle>
           </DialogHeader>
           <FieldGroup>
             {error && !error.details.length ? <ErrorAlert message={error.message} /> : null}
             <FormField
-              label="Email"
+              label={t("users.email")}
               name="email"
               type="email"
               value={email}
@@ -301,39 +319,50 @@ function CreateUserDialog({ open, onOpenChange, onCreated }: CreateUserDialogPro
               error={error?.fieldError("email")}
             />
             <FormField
-              label="Display name"
+              label={t("users.displayName")}
               name="displayName"
               value={displayName}
               onChange={setDisplayName}
               error={error?.fieldError("displayName")}
             />
             <FormField
-              label="Initial password"
+              label={t("users.initialPassword")}
               name="password"
               type="password"
               autoComplete="new-password"
               value={password}
               onChange={setPassword}
               required
-              helperText="At least 12 characters."
+              helperText={t("account.passwordHint")}
               error={error?.fieldError("password")}
             />
-            <SelectField label="Role" options={roleOptions} value={role} onChange={(next) => next && setRole(next as UserRole)} />
+            <SelectField
+              label={t("users.role")}
+              options={roleOptions}
+              value={role}
+              onChange={(next) => next && setRole(next as UserRole)}
+            />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Creating…" : "Create user"}
+              {submitting ? t("users.creating") : t("users.createUserTitle")}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   );
+}
+
+interface CreateUserDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: () => void;
 }
 
 interface EditUserDialogProps {
@@ -344,6 +373,8 @@ interface EditUserDialogProps {
 }
 
 function EditUserDialog({ user, isSelf, onClose, onSaved }: EditUserDialogProps) {
+  const { t } = useTranslation();
+  const roleOptions = useRoleOptions();
   const [displayName, setDisplayName] = useState(user.displayName ?? "");
   const [role, setRole] = useState<UserRole>(user.role);
   const [error, setError] = useState<ApiError | null>(null);
@@ -368,30 +399,33 @@ function EditUserDialog({ user, isSelf, onClose, onSaved }: EditUserDialogProps)
       <DialogContent className="sm:max-w-md">
         <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate>
           <DialogHeader>
-            <DialogTitle>Edit {user.email}</DialogTitle>
-            {isSelf ? (
-              <DialogDescription>Changing your own role may lock you out of admin features.</DialogDescription>
-            ) : null}
+            <DialogTitle>{t("users.editUserTitle", { email: user.email })}</DialogTitle>
+            {isSelf ? <DialogDescription>{t("users.selfRoleWarning")}</DialogDescription> : null}
           </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error?.message} />
             <FormField
-              label="Display name"
+              label={t("users.displayName")}
               name="displayName"
               value={displayName}
               onChange={setDisplayName}
               error={error?.fieldError("displayName")}
             />
-            <SelectField label="Role" options={roleOptions} value={role} onChange={(next) => next && setRole(next as UserRole)} />
+            <SelectField
+              label={t("users.role")}
+              options={roleOptions}
+              value={role}
+              onChange={(next) => next && setRole(next as UserRole)}
+            />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>
@@ -407,6 +441,7 @@ interface ResetPasswordDialogProps {
 }
 
 function ResetPasswordDialog({ user, onClose, onReset }: ResetPasswordDialogProps) {
+  const { t } = useTranslation();
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -430,33 +465,31 @@ function ResetPasswordDialog({ user, onClose, onReset }: ResetPasswordDialogProp
       <DialogContent className="sm:max-w-md">
         <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate>
           <DialogHeader>
-            <DialogTitle>Reset password for {user.email}</DialogTitle>
-            <DialogDescription>
-              The user's sessions are signed out and they must choose a new password at next login.
-            </DialogDescription>
+            <DialogTitle>{t("users.resetPasswordTitle", { email: user.email })}</DialogTitle>
+            <DialogDescription>{t("users.resetPasswordDescription")}</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error?.message} />
             <FormField
-              label="Temporary password"
+              label={t("users.temporaryPassword")}
               name="temporaryPassword"
               type="password"
               autoComplete="new-password"
               value={temporaryPassword}
               onChange={setTemporaryPassword}
               required
-              helperText="At least 12 characters."
+              helperText={t("account.passwordHint")}
               error={error?.fieldError("temporaryPassword")}
             />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Resetting…" : "Reset password"}
+              {submitting ? t("users.resetting") : t("users.resetPassword")}
             </Button>
           </DialogFooter>
         </form>

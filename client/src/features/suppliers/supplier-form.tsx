@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+﻿import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { FieldError, FieldGroup, FieldLegend, FieldSeparator, FieldSet } from "@/components/ui/field";
@@ -17,16 +18,21 @@ interface SupplierFormProps {
 
 type AddressKey = "street" | "city" | "stateRegion" | "postalCode" | "country";
 
-const ADDRESS_FIELDS: { key: AddressKey; label: string }[] = [
-  { key: "street", label: "Street" },
-  { key: "city", label: "City" },
-  { key: "stateRegion", label: "State / region" },
-  { key: "postalCode", label: "Postal code" },
-  { key: "country", label: "Country" },
-];
+function useAddressFields(): { key: AddressKey; label: string }[] {
+  const { t } = useTranslation();
+  return [
+    { key: "street", label: t("suppliers.street") },
+    { key: "city", label: t("suppliers.city") },
+    { key: "stateRegion", label: t("suppliers.stateRegion") },
+    { key: "postalCode", label: t("suppliers.postalCode") },
+    { key: "country", label: t("suppliers.country") },
+  ];
+}
+
 
 /** Create or edit a supplier's name, address, and categories (FR-SUP-01, FR-SUP-04). */
 export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(supplier?.name ?? "");
   const [address, setAddress] = useState<Record<AddressKey, string>>({
     street: supplier?.street ?? "",
@@ -62,11 +68,11 @@ export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps)
         <CardContent className="px-6">
           <FieldGroup>
             {error && error.details.length === 0 ? <ErrorAlert message={error.message} /> : null}
-            <FormField label="Name" name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
+            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
             <FieldSet>
-              <FieldLegend>Address</FieldLegend>
+              <FieldLegend>{t("suppliers.address")}</FieldLegend>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {ADDRESS_FIELDS.map((field) => (
+                {useAddressFields().map((field) => (
                   <FormField
                     key={field.key}
                     label={field.label}
@@ -80,7 +86,7 @@ export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps)
             </FieldSet>
             <FieldSeparator />
             <FieldSet>
-              <FieldLegend>Categories</FieldLegend>
+              <FieldLegend>{t("suppliers.categoriesLabel")}</FieldLegend>
               <CategoryEditor value={categories} onChange={setCategories} />
               {error?.fieldError("categories") ? <FieldError>{error.fieldError("categories")}</FieldError> : null}
             </FieldSet>
@@ -88,10 +94,10 @@ export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps)
         </CardContent>
         <CardFooter className="justify-end gap-2 border-t px-6 py-4">
           <Button type="button" variant="outline" size="lg" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" size="lg" disabled={submitting}>
-            {submitting ? "Saving…" : supplier ? "Save changes" : "Create supplier"}
+            {submitting ? t("common.saving") : supplier ? t("common.saveChanges") : t("suppliers.createSupplier")}
           </Button>
         </CardFooter>
       </form>

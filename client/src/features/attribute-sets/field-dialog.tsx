@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,14 +19,17 @@ import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { SelectField, type SelectOption } from "../../components/select-field";
 
-const DATA_TYPES: SelectOption[] = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Number (whole)" },
-  { value: "decimal", label: "Decimal" },
-  { value: "boolean", label: "Yes / no" },
-  { value: "date", label: "Date" },
-  { value: "select", label: "Select (one option)" },
-];
+function useDataTypes(): SelectOption[] {
+  const { t } = useTranslation();
+  return [
+    { value: "text", label: t("attributeSets.typeText") },
+    { value: "number", label: t("attributeSets.typeNumberWhole") },
+    { value: "decimal", label: t("attributeSets.typeDecimal") },
+    { value: "boolean", label: t("attributeSets.typeBoolean") },
+    { value: "date", label: t("attributeSets.typeDate") },
+    { value: "select", label: t("attributeSets.typeSelect") },
+  ];
+}
 
 interface OptionRow {
   key: string;
@@ -46,6 +50,8 @@ const nextKey = () => `row-${(rowKey += 1)}`;
 
 /** Create or edit an attribute field (FR-ATS-03/04/06). The data type is locked once products have values (FR-ATS-07). */
 export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDialogProps) {
+  const { t } = useTranslation();
+  const DATA_TYPES = useDataTypes();
   const [name, setName] = useState(field?.name ?? "");
   const [dataType, setDataType] = useState<AttributeDataType>(field?.dataType ?? "text");
   const [unit, setUnit] = useState(field?.unit ?? "");
@@ -93,41 +99,41 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>{field ? `Edit ${field.name}` : "Add field"}</DialogTitle>
-            {field ? <DialogDescription>Code: {field.code}</DialogDescription> : null}
+            <DialogTitle>{field ? t("attributeSets.editFieldAria", { name: field.name }) : t("attributeSets.addField")}</DialogTitle>
+            {field ? <DialogDescription>{t("attributeSets.codeLabel")}: {field.code}</DialogDescription> : null}
           </DialogHeader>
           <FieldGroup>
             {error && error.details.length === 0 ? <ErrorAlert message={error.message} /> : null}
-            <FormField label="Name" name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
+            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
             <SelectField
-              label="Data type"
+              label={t("attributeSets.dataType")}
               options={DATA_TYPES}
               value={dataType}
               onChange={(value) => value && setDataType(value as AttributeDataType)}
               disabled={typeLocked}
               required
-              helperText={typeLocked ? "Locked because products already have values for this field." : undefined}
+              helperText={typeLocked ? t("attributeSets.typeLocked") : undefined}
               error={error?.fieldError("dataType")}
             />
             <FormField
-              label="Unit (optional)"
+              label={t("attributeSets.unitOptional")}
               name="unit"
               value={unit}
               onChange={setUnit}
-              helperText="For example mm. Shown next to the value; not used for conversion."
+              helperText={t("attributeSets.unitHint")}
               error={error?.fieldError("unit")}
             />
-            <CheckboxField label="Required" checked={isRequired} onChange={setIsRequired} />
+            <CheckboxField label={t("attributeSets.required")} checked={isRequired} onChange={setIsRequired} />
 
             {dataType === "select" ? (
               <FieldSet>
-                <FieldLegend variant="label">Options</FieldLegend>
+                <FieldLegend variant="label">{t("attributeSets.options")}</FieldLegend>
                 <div className="flex flex-col gap-3">
                   {options.map((option, index) => (
                     <div key={option.key} className="flex items-end gap-2">
                       <div className="flex-1">
                         <FormField
-                          label={`Option ${index + 1}`}
+                          label={t("attributeSets.optionLabel", { index: index + 1 })}
                           value={option.label}
                           onChange={(label) => setOptions(options.map((o) => (o.key === option.key ? { ...o, label } : o)))}
                         />
@@ -136,7 +142,7 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
                         type="button"
                         variant="outline"
                         size="icon"
-                        aria-label={`Remove option ${index + 1}`}
+                        aria-label={t("attributeSets.removeOption", { index: index + 1 })}
                         onClick={() => setOptions(options.filter((o) => o.key !== option.key))}
                         disabled={options.length === 1}
                       >
@@ -153,7 +159,7 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
                     onClick={() => setOptions([...options, { key: nextKey(), label: "" }])}
                   >
                     <Plus />
-                    Add option
+                    {t("attributeSets.addOption")}
                   </Button>
                 </div>
                 {optionsError ? <FieldError>{optionsError}</FieldError> : null}
@@ -164,11 +170,11 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : field ? "Save field" : "Add field"}
+              {submitting ? t("common.saving") : field ? t("attributeSets.saveField") : t("attributeSets.addField")}
             </Button>
           </DialogFooter>
         </form>

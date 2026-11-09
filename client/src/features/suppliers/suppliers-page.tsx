@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Eye, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +26,7 @@ function isDetailTab(value: string): value is DetailTab {
 }
 
 export function SuppliersPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
@@ -51,46 +53,44 @@ export function SuppliersPage() {
 
   return (
     <>
-      <PageHeader title="Suppliers" breadcrumbs={[{ label: "Suppliers" }]} />
-
+      <PageHeader title={t("suppliers.title")} breadcrumbs={[{ label: t("suppliers.title") }]} />
+      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
+        <SearchForm
+          label={t("suppliers.searchLabel")}
+          placeholder={t("suppliers.searchPlaceholder")}
+          value={query}
+          onChange={setQuery}
+          onSearch={() => {
+            setPage(1);
+            setSearch(query.trim());
+          }}
+        />
+        {isAdmin ? (
+          <Button size="lg" onClick={() => navigate("/suppliers/new")}>
+            <Plus />
+            {t("suppliers.createSupplier")}
+          </Button>
+        ) : null}
+      </div>
       <Card className="gap-0 py-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <SearchForm
-            label="Search by name"
-            placeholder="Search suppliers…"
-            value={query}
-            onChange={setQuery}
-            onSearch={() => {
-              setPage(1);
-              setSearch(query.trim());
-            }}
-          />
-          {isAdmin ? (
-            <Button size="lg" onClick={() => navigate("/suppliers/new")}>
-              <Plus />
-              New supplier
-            </Button>
-          ) : null}
-        </div>
-
         {error ? (
           <div className="px-4 pb-4">
             <ErrorAlert message={error} />
           </div>
         ) : null}
 
-        <Table aria-label="Suppliers">
+        <Table aria-label={t("suppliers.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Name</TableHead>
-              <TableHead>City</TableHead>
-              <TableHead>Country</TableHead>
-              <TableHead>Categories</TableHead>
-              <TableHead className="pr-4 text-right">Actions</TableHead>
+              <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+              <TableHead>{t("suppliers.city")}</TableHead>
+              <TableHead>{t("suppliers.country")}</TableHead>
+              <TableHead>{t("suppliers.categoriesLabel")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {result && result.items.length === 0 ? <TableEmptyRow colSpan={5} message="No suppliers found." /> : null}
+            {result && result.items.length === 0 ? <TableEmptyRow colSpan={5} message={t("suppliers.noSuppliers")} /> : null}
             {result?.items.map((supplier) => (
               <TableRow key={supplier.id}>
                 <TableCell className="pl-4 font-medium">
@@ -115,7 +115,7 @@ export function SuppliersPage() {
                 </TableCell>
                 <TableCell className="pr-4 text-right">
                   <IconAction
-                    label={`View ${supplier.name}`}
+                    label={t("suppliers.viewSupplier", { name: supplier.name })}
                     icon={Eye}
                     onClick={() => navigate(`/suppliers/${supplier.id}`)}
                   />
@@ -134,12 +134,13 @@ export function SuppliersPage() {
 }
 
 export function SupplierNewPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   return (
     <>
       <PageHeader
-        title="New supplier"
-        breadcrumbs={[{ label: "Suppliers", to: "/suppliers" }, { label: "New supplier" }]}
+        title={t("suppliers.createSupplier")}
+        breadcrumbs={[{ label: t("suppliers.title"), to: "/suppliers" }, { label: t("suppliers.createSupplier") }]}
       />
       <SupplierForm
         onCancel={() => navigate("/suppliers")}

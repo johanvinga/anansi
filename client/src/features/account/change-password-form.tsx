@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+﻿import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { FieldGroup } from "@/components/ui/field";
@@ -14,6 +15,7 @@ interface ChangePasswordFormProps {
 
 /** Used both on the account page and when a password change is required (SPEC §8.4). */
 export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormProps) {
+  const { t } = useTranslation();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -27,7 +29,7 @@ export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormPr
     setSaved(false);
     setFormError(null);
     if (newPassword !== confirmPassword) {
-      setErrors({ confirmPassword: "The passwords do not match." });
+      setErrors({ confirmPassword: t("account.passwordsDoNotMatch") });
       return;
     }
     setErrors({});
@@ -55,9 +57,9 @@ export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormPr
   const fields = (
     <FieldGroup>
       <ErrorAlert message={formError} />
-      {saved ? <SuccessAlert message="Your password has been changed." /> : null}
+      {saved ? <SuccessAlert message={t("account.passwordUpdated")} /> : null}
       <FormField
-        label="Current password"
+        label={t("account.currentPassword")}
         name="currentPassword"
         type="password"
         autoComplete="current-password"
@@ -67,18 +69,18 @@ export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormPr
         error={errors.currentPassword}
       />
       <FormField
-        label="New password"
+        label={t("account.newPassword")}
         name="newPassword"
         type="password"
         autoComplete="new-password"
         value={newPassword}
         onChange={setNewPassword}
         required
-        helperText="At least 12 characters."
+        helperText={t("account.passwordHint")}
         error={errors.newPassword}
       />
       <FormField
-        label="Confirm new password"
+        label={t("account.confirmPassword")}
         name="confirmPassword"
         type="password"
         autoComplete="new-password"
@@ -92,13 +94,13 @@ export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormPr
 
   const submit = (
     <Button type="submit" size="lg" disabled={submitting} className={embedded ? "w-full" : undefined}>
-      {submitting ? "Saving…" : "Change password"}
+      {submitting ? t("common.saving") : t("account.changePassword")}
     </Button>
   );
 
   if (embedded) {
     return (
-      <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate aria-label="Change password">
+      <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate aria-label={t("account.changePassword")}>
         {fields}
         {submit}
       </form>
@@ -110,9 +112,9 @@ export function ChangePasswordForm({ onChanged, embedded }: ChangePasswordFormPr
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
         <CardHeader className="px-6">
           <CardTitle>
-            <h2>Change password</h2>
+            <h2>{t("account.changePassword")}</h2>
           </CardTitle>
-          <CardDescription>Enter your current password, then choose a new one.</CardDescription>
+          <CardDescription>{t("account.changePasswordDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="px-6">{fields}</CardContent>
         <CardFooter className="justify-end border-t px-6 py-4">{submit}</CardFooter>

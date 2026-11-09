@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+﻿import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +29,7 @@ const SUPPLIER_PICKER_LIMIT = 100;
 
 /** Uploads a catalog PDF to an existing supplier or a brand-new one created here. */
 export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialogProps) {
+  const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
@@ -52,20 +54,20 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
     event.preventDefault();
     setError(null);
     if (!file) {
-      setError("Choose a PDF file to upload.");
+      setError(t("suppliers.choosePdf"));
       return;
     }
     if (!name.trim()) {
-      setError("Catalog name is required.");
+      setError(t("catalogs.catalogNameRequired"));
       return;
     }
     if (addNewSupplier) {
       if (!newSupplierName.trim()) {
-        setError("Supplier name is required.");
+        setError(t("suppliers.nameRequired"));
         return;
       }
     } else if (!supplierId) {
-      setError("Select a supplier or add a new one.");
+      setError(t("catalogs.selectSupplier"));
       return;
     }
     setSubmitting(true);
@@ -98,22 +100,22 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>Upload catalog</DialogTitle>
+            <DialogTitle>{t("catalogs.uploadCatalog")}</DialogTitle>
             <DialogDescription>
-              The PDF is stored under a generated name; the catalog keeps its own display name.
+              {t("catalogs.uploadDescription")}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error} />
             <PdfFileField file={file} onChange={setFile} />
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label="Catalog name" name="name" value={name} onChange={setName} required />
-              <FormField label="Version (optional)" name="version" value={version} onChange={setVersion} />
+              <FormField label={t("catalogs.catalogName")} name="name" value={name} onChange={setName} required />
+              <FormField label={t("catalogs.versionOptional")} name="version" value={version} onChange={setVersion} />
             </div>
             {addNewSupplier ? (
               <div className="flex flex-col gap-4 rounded-lg border p-4">
                 <FormField
-                  label="Supplier name"
+                  label={t("catalogs.supplierName")}
                   name="newSupplierName"
                   value={newSupplierName}
                   onChange={setNewSupplierName}
@@ -130,12 +132,12 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
                     setCategories([]);
                   }}
                 >
-                  Use an existing supplier instead
+                  {t("catalogs.existingSupplier")}
                 </Button>
               </div>
             ) : (
               <SelectField
-                label="Supplier"
+                label={t("catalogs.supplier")}
                 options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
                 value={supplierId}
                 onChange={setSupplierId}
@@ -149,16 +151,16 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
                 className="justify-start px-0"
                 onClick={() => setAddNewSupplier(true)}
               >
-                Add a new supplier
+                {t("catalogs.addNewSupplier")}
               </Button>
             ) : null}
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="outline">Cancel</Button>
+              <Button type="button" variant="outline">{t("common.cancel")}</Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Uploading…" : "Upload"}
+              {submitting ? t("catalogs.uploading") : t("suppliers.upload")}
             </Button>
           </DialogFooter>
         </form>

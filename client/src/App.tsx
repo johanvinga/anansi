@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+﻿import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ import { UsersPage } from "./features/users/users-page";
 import { AppShell } from "./layout/app-shell";
 
 export function App() {
+  const { t } = useTranslation();
   const { user, isLoading, logout, setUser } = useAuth();
   const location = useLocation();
   const isAdmin = user?.role === "admin";
@@ -28,7 +30,7 @@ export function App() {
       <main className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
         <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner />
-          Loading…
+          {t("common.loading")}
         </p>
       </main>
     );
@@ -51,8 +53,8 @@ export function App() {
             <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Boxes className="size-5" />
             </div>
-            <CardTitle className="text-lg">Choose a new password</CardTitle>
-            <CardDescription role="status">You must choose a new password before continuing.</CardDescription>
+            <CardTitle className="text-lg">{t("account.chooseNewPassword")}</CardTitle>
+            <CardDescription role="status">{t("account.mustChoosePassword")}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4 px-6">
             <ChangePasswordForm
@@ -62,7 +64,7 @@ export function App() {
               }
             />
             <Button variant="outline" size="lg" onClick={() => void logout()}>
-              Log out
+              {t("common.signOut")}
             </Button>
           </CardContent>
         </Card>

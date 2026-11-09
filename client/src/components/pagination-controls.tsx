@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   Pagination,
   PaginationContent,
@@ -30,6 +31,7 @@ function visiblePages(page: number, totalPages: number): (number | "gap")[] {
 
 /** Page navigation for lists (FR-SUP-02). `total` is the item count; pages are derived from `pageSize`. */
 export function PaginationControls({ total, pageSize, page, onPageChange }: PaginationControlsProps) {
+  const { t } = useTranslation();
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const go = (target: number) => (event: React.MouseEvent) => {
     event.preventDefault();
@@ -40,7 +42,7 @@ export function PaginationControls({ total, pageSize, page, onPageChange }: Pagi
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
       <p className="text-sm text-muted-foreground">
-        Page {page} of {totalPages} · {total} {total === 1 ? "item" : "items"}
+        {t("pagination.summary", { page, totalPages, total })}
       </p>
       <Pagination className="mx-0 w-auto">
         <PaginationContent>

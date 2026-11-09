@@ -1,3 +1,4 @@
+﻿import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Eye, Plus, Settings2 } from "lucide-react";
@@ -17,6 +18,7 @@ import { TableEmptyRow } from "../../components/table-empty-row";
 import { AttributeSetBuilder } from "./attribute-set-builder";
 
 export function AttributeSetsPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
@@ -56,19 +58,19 @@ export function AttributeSetsPage() {
 
   return (
     <>
-      <PageHeader title="Attribute sets" breadcrumbs={[{ label: "Attribute sets" }]} />
+      <PageHeader title={t("attributeSets.title")} breadcrumbs={[{ label: t("attributeSets.title") }]} />
 
       <Card className="gap-0 py-0">
         {isAdmin ? (
           <form className="flex flex-wrap items-start justify-end gap-2 p-4" onSubmit={(event) => void handleCreate(event)} noValidate>
             <Field data-invalid={createError ? true : undefined} className="w-64">
               <FieldLabel htmlFor={newSetId} className="sr-only">
-                New attribute set
+                {t("attributeSets.createSet")}
               </FieldLabel>
               <Input
                 id={newSetId}
                 name="newSet"
-                placeholder="New attribute set"
+                placeholder={t("attributeSets.createSet")}
                 required
                 value={newName}
                 aria-invalid={createError ? true : undefined}
@@ -78,7 +80,7 @@ export function AttributeSetsPage() {
             </Field>
             <Button type="submit" size="lg" disabled={!newName.trim()}>
               <Plus />
-              Create set
+              {t("attributeSets.createSetButton")}
             </Button>
           </form>
         ) : null}
@@ -92,10 +94,10 @@ export function AttributeSetsPage() {
         <Table aria-label="Attribute sets">
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Name</TableHead>
-              <TableHead className="text-right">Fields</TableHead>
-              <TableHead className="text-right">Products</TableHead>
-              <TableHead className="pr-4 text-right">Actions</TableHead>
+              <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+              <TableHead className="text-right">{t("attributeSets.fields")}</TableHead>
+              <TableHead className="text-right">{t("attributeSets.products")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

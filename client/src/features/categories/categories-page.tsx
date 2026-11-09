@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+﻿import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,6 +28,7 @@ import { TableEmptyRow } from "../../components/table-empty-row";
 
 export function CategoriesPage() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const isAdmin = user?.role === "admin";
   const newCategoryId = useId();
   const [query, setQuery] = useState("");
@@ -85,55 +87,55 @@ export function CategoriesPage() {
 
   return (
     <>
-      <PageHeader title="Categories" breadcrumbs={[{ label: "Categories" }]} />
+      <PageHeader title={t("categories.title")} breadcrumbs={[{ label: t("categories.title") }]} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
+        <SearchForm
+          label={t("categories.searchLabel")}
+          placeholder={t("categories.searchPlaceholder")}
+          value={query}
+          onChange={setQuery}
+          onSearch={() => setSearch(query.trim())}
+        />
+        {isAdmin ? (
+          <form className="flex items-center gap-2" onSubmit={(event) => void createCategory(event)} noValidate>
+            <Label htmlFor={newCategoryId} className="sr-only">
+              {t("categories.newCategory")}
+            </Label>
+            <Input
+              id={newCategoryId}
+              name="newCategory"
+              placeholder={t("categories.newCategory")}
+              required
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              className="w-48"
+            />
+            <Button type="submit" size="lg" disabled={creating || !newName.trim()}>
+              <Plus />
+              {t("categories.addCategory")}
+            </Button>
+          </form>
+        ) : null}
+      </div>
 
       <Card className="gap-0 py-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <SearchForm
-            label="Search categories"
-            placeholder="Search categories…"
-            value={query}
-            onChange={setQuery}
-            onSearch={() => setSearch(query.trim())}
-          />
-          {isAdmin ? (
-            <form className="flex items-center gap-2" onSubmit={(event) => void createCategory(event)} noValidate>
-              <Label htmlFor={newCategoryId} className="sr-only">
-                New category
-              </Label>
-              <Input
-                id={newCategoryId}
-                name="newCategory"
-                placeholder="New category"
-                required
-                value={newName}
-                onChange={(event) => setNewName(event.target.value)}
-                className="w-48"
-              />
-              <Button type="submit" size="lg" disabled={creating || !newName.trim()}>
-                <Plus />
-                Add category
-              </Button>
-            </form>
-          ) : null}
-        </div>
-
         {error ? (
           <div className="px-4 pb-4">
             <ErrorAlert message={error} />
           </div>
         ) : null}
 
-        <Table aria-label="Categories">
+        <Table aria-label={t("categories.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Name</TableHead>
-              <TableHead>Created</TableHead>
-              {isAdmin ? <TableHead className="pr-4 text-right">Actions</TableHead> : null}
+              <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+              <TableHead>{t("categories.created")}</TableHead>
+              {isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loaded && categories.length === 0 ? <TableEmptyRow colSpan={columns} message="No categories found." /> : null}
+            {loaded && categories.length === 0 ? <TableEmptyRow colSpan={columns} message={t("categories.noCategories")} /> : null}
             {categories.map((category) => (
               <TableRow key={category.id}>
                 <TableCell className="pl-4 font-medium">{category.name}</TableCell>
@@ -141,9 +143,9 @@ export function CategoriesPage() {
                 {isAdmin ? (
                   <TableCell className="pr-4">
                     <div className="flex justify-end gap-1">
-                      <IconAction label={`Rename ${category.name}`} icon={Pencil} onClick={() => setRenaming(category)} />
+                      <IconAction label={t("categories.renameAria", { name: category.name })} icon={Pencil} onClick={() => setRenaming(category)} />
                       <IconAction
-                        label={`Delete ${category.name}`}
+                        label={t("suppliers.deleteAria", { name: category.name })}
                         icon={Trash2}
                         destructive
                         onClick={() => setDeleting(category)}
@@ -170,9 +172,9 @@ export function CategoriesPage() {
 
       <ConfirmDialog
         open={deleting !== null}
-        title={`Delete ${deleting?.name ?? "category"}?`}
-        description="The category is removed from every supplier that uses it. The suppliers themselves are kept."
-        confirmLabel="Delete category"
+        title={t("categories.confirmDeleteTitle", { name: deleting?.name ?? t("categories.title") })}
+        description={t("categories.confirmDeleteDescription")}
+        confirmLabel={t("categories.deleteCategory")}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleting(null)}
       />
@@ -187,6 +189,7 @@ interface RenameCategoryDialogProps {
 }
 
 function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(category.name);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -210,20 +213,20 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>Rename category</DialogTitle>
+            <DialogTitle>{t("categories.renameCategory")}</DialogTitle>
           </DialogHeader>
           <FieldGroup>
             {error && error.details.length === 0 ? <ErrorAlert message={error.message} /> : null}
-            <FormField label="Name" name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
+            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>

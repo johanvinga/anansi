@@ -1,4 +1,5 @@
-import type { FormEvent } from "react";
+﻿import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -13,6 +14,8 @@ interface SearchFormProps {
 
 /** Search box with a leading icon, used in list toolbars. */
 export function SearchForm({ label, value, onChange, onSearch, placeholder }: SearchFormProps) {
+  const { t } = useTranslation();
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSearch();
@@ -33,7 +36,7 @@ export function SearchForm({ label, value, onChange, onSearch, placeholder }: Se
         />
       </InputGroup>
       <Button type="submit" variant="outline">
-        Search
+        {t("common.search")}
       </Button>
     </form>
   );

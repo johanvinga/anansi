@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Download, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +30,8 @@ interface AssetsPanelProps {
 
 /** Lists, uploads, edits, downloads, and deletes a supplier's PDF assets (FR-AST-01..10). */
 export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
+  const { t } = useTranslation();
+
   const [assets, setAssets] = useState<SupplierAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<SupplierAsset | null>(null);
@@ -67,18 +70,18 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
       <ErrorAlert message={error} />
 
       <Card className="gap-0 py-0">
-        <Table aria-label="Supplier assets">
+        <Table aria-label={t("suppliers.assets")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Title</TableHead>
-              <TableHead>File</TableHead>
-              <TableHead>Size</TableHead>
-              <TableHead>Uploaded</TableHead>
-              <TableHead className="pr-4 text-right">Actions</TableHead>
+              <TableHead className="pl-4">{t("suppliers.title")}</TableHead>
+              <TableHead>{t("catalogs.file")}</TableHead>
+              <TableHead>{t("suppliers.size")}</TableHead>
+              <TableHead>{t("catalogs.uploaded")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {assets.length === 0 ? <TableEmptyRow colSpan={5} message="No assets uploaded yet." /> : null}
+            {assets.length === 0 ? <TableEmptyRow colSpan={5} message={t("suppliers.noAssets")} /> : null}
             {assets.map((asset) => (
               <TableRow key={asset.id}>
                 <TableCell className="pl-4 whitespace-normal">
@@ -91,15 +94,15 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
                     <IconAction
-                      label={`Download ${asset.originalFileName}`}
+                      label={t("suppliers.downloadAria", { name: asset.originalFileName })}
                       icon={Download}
                       href={`/api/v1/assets/${asset.id}/download`}
                     />
                     {isAdmin ? (
                       <>
-                        <IconAction label={`Edit ${asset.originalFileName}`} icon={Pencil} onClick={() => setEditing(asset)} />
+                        <IconAction label={t("suppliers.editAria", { name: asset.originalFileName })} icon={Pencil} onClick={() => setEditing(asset)} />
                         <IconAction
-                          label={`Delete ${asset.originalFileName}`}
+                          label={t("suppliers.deleteAria", { name: asset.originalFileName })}
                           icon={Trash2}
                           destructive
                           onClick={() => setDeleting(asset)}
@@ -127,9 +130,9 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
 
       <ConfirmDialog
         open={deleting !== null}
-        title={`Delete ${deleting?.originalFileName ?? "file"}?`}
-        description="The file and its details will be permanently removed."
-        confirmLabel="Delete file"
+        title={t("suppliers.confirmDeleteFileTitle", { name: deleting?.originalFileName ?? t("catalogs.file") })}
+        description={t("suppliers.confirmDeleteFileDescription")}
+        confirmLabel={t("suppliers.deleteFile")}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleting(null)}
       />
@@ -143,6 +146,8 @@ interface UploadFormProps {
 }
 
 function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
+  const { t } = useTranslation();
+
   const [file, setFile] = useState<File | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const [title, setTitle] = useState("");
@@ -153,7 +158,7 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
-      setError("Choose a PDF file to upload.");
+      setError(t("suppliers.choosePdf"));
       return;
     }
     setError(null);
@@ -181,7 +186,7 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
       <form onSubmit={handleUpload} noValidate className="flex flex-col gap-6">
         <CardHeader className="px-6">
           <CardTitle>
-            <h2>Upload PDF</h2>
+            <h2>{t("suppliers.uploadAsset")}</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="px-6">
@@ -189,14 +194,14 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
             <ErrorAlert message={error} />
             <PdfFileField file={file} onChange={setFile} resetKey={resetKey} />
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label="Title (optional)" name="title" value={title} onChange={setTitle} />
-              <FormField label="Description (optional)" name="description" value={description} onChange={setDescription} />
+              <FormField label={t("suppliers.titleOptional")} name="title" value={title} onChange={setTitle} />
+              <FormField label={t("suppliers.descriptionOptional")} name="description" value={description} onChange={setDescription} />
             </div>
           </FieldGroup>
         </CardContent>
         <CardFooter className="justify-end border-t px-6 py-4">
           <Button type="submit" size="lg" disabled={uploading}>
-            {uploading ? "Uploading…" : "Upload"}
+            {uploading ? t("suppliers.uploading") : t("suppliers.upload")}
           </Button>
         </CardFooter>
       </form>
@@ -211,6 +216,8 @@ interface AssetEditDialogProps {
 }
 
 function AssetEditDialog({ asset, onClose, onSaved }: AssetEditDialogProps) {
+  const { t } = useTranslation();
+
   const [title, setTitle] = useState(asset.title ?? "");
   const [description, setDescription] = useState(asset.description ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -238,21 +245,21 @@ function AssetEditDialog({ asset, onClose, onSaved }: AssetEditDialogProps) {
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>Edit file details</DialogTitle>
+            <DialogTitle>{t("suppliers.editFileTitle")}</DialogTitle>
           </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error} />
-            <FormField label="Title" name="title" value={title} onChange={setTitle} />
-            <FormField label="Description" name="description" value={description} onChange={setDescription} />
+            <FormField label={t("suppliers.title")} name="title" value={title} onChange={setTitle} />
+            <FormField label={t("suppliers.description")} name="description" value={description} onChange={setDescription} />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>

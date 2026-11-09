@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Download, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ interface CatalogsPanelProps {
 
 /** Lists, uploads, edits, downloads, and deletes a supplier's catalogs (FR-CLG-01..07). */
 export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
+  const { t } = useTranslation();
   const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Catalog | null>(null);
@@ -68,19 +70,19 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
       <ErrorAlert message={error} />
 
       <Card className="gap-0 py-0">
-        <Table aria-label="Supplier catalogs">
+        <Table aria-label={t("suppliers.catalogs")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Name</TableHead>
-              <TableHead>Version</TableHead>
-              <TableHead>File</TableHead>
-              <TableHead>Size</TableHead>
-              <TableHead>Last updated</TableHead>
-              <TableHead className="pr-4 text-right">Actions</TableHead>
+              <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+              <TableHead>{t("catalogs.version")}</TableHead>
+              <TableHead>{t("catalogs.file")}</TableHead>
+              <TableHead>{t("suppliers.size")}</TableHead>
+              <TableHead>{t("suppliers.lastUpdated")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {catalogs.length === 0 ? <TableEmptyRow colSpan={6} message="No catalogs yet." /> : null}
+            {catalogs.length === 0 ? <TableEmptyRow colSpan={6} message={t("suppliers.noCatalogs")} /> : null}
             {catalogs.map((catalog) => (
               <TableRow key={catalog.id}>
                 <TableCell className="pl-4 font-medium">{catalog.name}</TableCell>
@@ -93,15 +95,15 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
                     <IconAction
-                      label={`Download ${catalog.name}`}
+                      label={t("suppliers.downloadAria", { name: catalog.name })}
                       icon={Download}
                       href={`/api/v1/catalogs/${catalog.id}/download`}
                     />
                     {isAdmin ? (
                       <>
-                        <IconAction label={`Edit ${catalog.name}`} icon={Pencil} onClick={() => setEditing(catalog)} />
+                        <IconAction label={t("suppliers.editAria", { name: catalog.name })} icon={Pencil} onClick={() => setEditing(catalog)} />
                         <IconAction
-                          label={`Delete ${catalog.name}`}
+                          label={t("suppliers.deleteAria", { name: catalog.name })}
                           icon={Trash2}
                           destructive
                           onClick={() => setDeleting(catalog)}
@@ -129,9 +131,9 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
 
       <ConfirmDialog
         open={deleting !== null}
-        title={`Delete ${deleting?.name ?? "catalog"}?`}
-        description="The catalog and its file will be permanently removed. This cannot be undone."
-        confirmLabel="Delete catalog"
+        title={t("catalogs.confirmDeleteTitle", { name: deleting?.name ?? t("nav.catalogs") })}
+        description={t("catalogs.confirmDeleteFileDescription")}
+        confirmLabel={t("catalogs.deleteCatalog")}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleting(null)}
       />
@@ -145,6 +147,7 @@ interface CatalogUploadFormProps {
 }
 
 function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
+  const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const [name, setName] = useState("");
@@ -155,11 +158,11 @@ function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
-      setError("Choose a PDF file to upload.");
+      setError(t("suppliers.choosePdf"));
       return;
     }
     if (!name.trim()) {
-      setError("Name is required.");
+      setError(t("catalogs.nameRequired"));
       return;
     }
     setError(null);
@@ -187,22 +190,22 @@ function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
       <form onSubmit={handleUpload} noValidate className="flex flex-col gap-6">
         <CardHeader className="px-6">
           <CardTitle>
-            <h2>Add catalog</h2>
+            <h2>{t("catalogs.addCatalog")}</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="px-6">
           <FieldGroup>
             <ErrorAlert message={error} />
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label="Name" name="name" value={name} onChange={setName} required />
-              <FormField label="Version" name="version" value={version} onChange={setVersion} />
+              <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required />
+              <FormField label={t("catalogs.version")} name="version" value={version} onChange={setVersion} />
             </div>
             <PdfFileField file={file} onChange={setFile} resetKey={resetKey} />
           </FieldGroup>
         </CardContent>
         <CardFooter className="justify-end border-t px-6 py-4">
           <Button type="submit" size="lg" disabled={uploading}>
-            {uploading ? "Uploading…" : "Upload"}
+            {uploading ? t("suppliers.uploading") : t("suppliers.upload")}
           </Button>
         </CardFooter>
       </form>
@@ -217,6 +220,7 @@ interface CatalogEditDialogProps {
 }
 
 function CatalogEditDialog({ catalog, onClose, onSaved }: CatalogEditDialogProps) {
+  const { t } = useTranslation();
   // Version is optional (FR-CLG-01 relaxed); empty input clears it.
   const [name, setName] = useState(catalog.name);
   const [version, setVersion] = useState(catalog.version ?? "");
@@ -246,21 +250,21 @@ function CatalogEditDialog({ catalog, onClose, onSaved }: CatalogEditDialogProps
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>Edit catalog</DialogTitle>
+            <DialogTitle>{t("catalogs.editCatalog")}</DialogTitle>
           </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error} />
-            <FormField label="Name" name="name" value={name} onChange={setName} required />
-            <FormField label="Version" name="version" value={version} onChange={setVersion} required />
+            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required />
+            <FormField label={t("catalogs.version")} name="version" value={version} onChange={setVersion} required />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,12 +27,17 @@ interface SupplierDetailProps {
   onDeleted: () => void;
 }
 
-const DETAIL_TABS: { id: DetailTab; label: string }[] = [
-  { id: "details", label: "Details" },
-  { id: "categories", label: "Categories" },
-  { id: "assets", label: "Assets" },
-  { id: "catalogs", label: "Catalogs" },
-  { id: "products", label: "Products" },
+interface DetailTabItem {
+  id: DetailTab;
+  labelKey: string;
+}
+
+const DETAIL_TABS: DetailTabItem[] = [
+  { id: "details", labelKey: "suppliers.tabDetails" },
+  { id: "categories", labelKey: "suppliers.categoriesLabel" },
+  { id: "assets", labelKey: "suppliers.assets" },
+  { id: "catalogs", labelKey: "suppliers.catalogs" },
+  { id: "products", labelKey: "suppliers.products" },
 ];
 
 export function SupplierDetail({
@@ -42,6 +48,7 @@ export function SupplierDetail({
   onDeleted,
 }: SupplierDetailProps) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const isAdmin = user?.role === "admin";
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,8 +86,8 @@ export function SupplierDetail({
     }
   }
 
-  const currentTabLabel = DETAIL_TABS.find((item) => item.id === tab)?.label ?? "Details";
-  const supplierLabel = supplier?.name ?? "Supplier";
+  const currentTabLabel = t(DETAIL_TABS.find((item) => item.id === tab)?.labelKey ?? "suppliers.tabDetails");
+  const supplierLabel = supplier?.name ?? t("suppliers.title");
   const breadcrumbItems =
     tab === "details"
       ? [{ label: "Suppliers", to: "/suppliers" }, { label: supplierLabel }]
@@ -98,7 +105,7 @@ export function SupplierDetail({
         actions={
           <Button variant="ghost" size="sm" onClick={onBack}>
             <ArrowLeft />
-            Back to suppliers
+            {t("suppliers.backToSuppliers")}
           </Button>
         }
       />
@@ -111,14 +118,14 @@ export function SupplierDetail({
             <TabsList className="h-9">
               {DETAIL_TABS.map((item) => (
                 <TabsTrigger key={item.id} value={item.id} className="px-3">
-                  {item.label}
+                  {t(item.labelKey)}
                 </TabsTrigger>
               ))}
             </TabsList>
             {isAdmin ? (
               <Button variant="destructive" size="lg" onClick={() => setConfirmDelete(true)}>
                 <Trash2 />
-                Delete supplier
+                {t("suppliers.deleteSupplier")}
               </Button>
             ) : null}
           </div>
@@ -137,28 +144,28 @@ export function SupplierDetail({
               <Card className="gap-6 py-6">
                 <CardHeader className="px-6">
                   <CardTitle>
-                    <h2>Address</h2>
+                    <h2>{t("suppliers.address")}</h2>
                   </CardTitle>
                   {isAdmin ? (
                     <CardAction>
                       <Button variant="outline" onClick={() => setEditing(true)}>
                         <Pencil />
-                        Edit details
+                        {t("suppliers.editDetails")}
                       </Button>
                     </CardAction>
                   ) : null}
                 </CardHeader>
                 <CardContent className="px-6">
                   <dl className="grid grid-cols-[max-content_1fr] gap-x-8 gap-y-4 text-sm">
-                    <dt className="text-muted-foreground">Street</dt>
+                    <dt className="text-muted-foreground">{t("suppliers.street")}</dt>
                     <dd>{supplier.street ?? "—"}</dd>
-                    <dt className="text-muted-foreground">City</dt>
+                    <dt className="text-muted-foreground">{t("suppliers.city")}</dt>
                     <dd>{supplier.city ?? "—"}</dd>
-                    <dt className="text-muted-foreground">State / region</dt>
+                    <dt className="text-muted-foreground">{t("suppliers.stateRegion")}</dt>
                     <dd>{supplier.stateRegion ?? "—"}</dd>
-                    <dt className="text-muted-foreground">Postal code</dt>
+                    <dt className="text-muted-foreground">{t("suppliers.postalCode")}</dt>
                     <dd>{supplier.postalCode ?? "—"}</dd>
-                    <dt className="text-muted-foreground">Country</dt>
+                    <dt className="text-muted-foreground">{t("suppliers.country")}</dt>
                     <dd>{supplier.country ?? "—"}</dd>
                   </dl>
                 </CardContent>
@@ -187,8 +194,8 @@ export function SupplierDetail({
       <ConfirmDialog
         open={confirmDelete}
         title={`Delete ${supplier?.name ?? "supplier"}?`}
-        description="The supplier and all of its uploaded files will be permanently deleted. This cannot be undone."
-        confirmLabel="Delete supplier"
+        description={t("suppliers.confirmDeleteDescription")}
+        confirmLabel={t("suppliers.deleteSupplier")}
         busy={deleting}
         onConfirm={() => void handleDelete()}
         onCancel={() => setConfirmDelete(false)}
@@ -206,6 +213,7 @@ interface CategoriesTabProps {
 
 function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabProps) {
   const [chips, setChips] = useState<CategoryChip[]>(chipsFrom(supplier.categories));
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const dirty = JSON.stringify(chips) !== JSON.stringify(chipsFrom(supplier.categories));
 
@@ -234,7 +242,7 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
     <Card className="gap-6 py-6">
       <CardHeader className="px-6">
         <CardTitle>
-          <h2>Categories</h2>
+          <h2>{t("suppliers.categoriesLabel")}</h2>
         </CardTitle>
       </CardHeader>
       <CardContent className="px-6">
@@ -243,7 +251,7 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
       {isAdmin ? (
         <CardFooter className="justify-end border-t px-6 py-4">
           <Button size="lg" onClick={() => void save()} disabled={!dirty || saving}>
-            {saving ? "Saving…" : "Save categories"}
+            {saving ? t("common.saving") : t("suppliers.saveCategories")}
           </Button>
         </CardFooter>
       ) : null}

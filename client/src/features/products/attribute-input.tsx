@@ -1,3 +1,4 @@
+﻿import { useTranslation } from "react-i18next";
 import type { AttributeField, AttributeValue } from "../../api/types";
 import { CheckboxField } from "../../components/checkbox-field";
 import { FormField } from "../../components/form-field";
@@ -12,6 +13,7 @@ interface AttributeInputProps {
 
 /** Renders the input that matches a field's data type (FR-PRD-05). */
 export function AttributeInput({ field, value, onChange, error }: AttributeInputProps) {
+  const { t } = useTranslation();
   const label = field.unit ? `${field.name} (${field.unit})` : field.name;
   const text = typeof value === "string" || typeof value === "number" ? String(value) : "";
 
@@ -42,7 +44,7 @@ export function AttributeInput({ field, value, onChange, error }: AttributeInput
           value={text}
           onChange={onChange}
           required={field.isRequired}
-          helperText="Whole number."
+          helperText={t("products.wholeNumber")}
           error={error}
         />
       );
@@ -53,7 +55,7 @@ export function AttributeInput({ field, value, onChange, error }: AttributeInput
           value={text}
           onChange={onChange}
           required={field.isRequired}
-          helperText="Up to 4 decimal places."
+          helperText={t("products.decimals4")}
           error={error}
         />
       );

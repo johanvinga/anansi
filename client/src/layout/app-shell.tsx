@@ -16,6 +16,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,28 +49,29 @@ import { errorMessage } from "../api/client";
 import type { CurrentUser } from "../api/types";
 import { useAuth } from "../auth/auth-state";
 import { ErrorAlert } from "../components/error-alert";
+import { LanguageSwitcher } from "../i18n/language-switcher";
 import { useTheme } from "./theme";
 
 interface NavItem {
   to: string;
-  label: string;
+  labelKey: string;
   icon: LucideIcon;
 }
 
 const CATALOG_ITEMS: NavItem[] = [
-  { to: "/suppliers", label: "Suppliers", icon: Truck },
-  { to: "/products", label: "Products", icon: Package },
-  { to: "/catalogs", label: "Catalogs", icon: BookOpen },
-  { to: "/attribute-sets", label: "Attribute sets", icon: ListTree },
-  { to: "/categories", label: "Categories", icon: Tags },
+  { to: "/suppliers", labelKey: "nav.suppliers", icon: Truck },
+  { to: "/products", labelKey: "nav.products", icon: Package },
+  { to: "/catalogs", labelKey: "nav.catalogs", icon: BookOpen },
+  { to: "/attribute-sets", labelKey: "nav.attributeSets", icon: ListTree },
+  { to: "/categories", labelKey: "nav.categories", icon: Tags },
 ];
 
 const ADMIN_ITEMS: NavItem[] = [
-  { to: "/users", label: "Users", icon: Users },
-  { to: "/audit", label: "Audit log", icon: ScrollText },
+  { to: "/users", labelKey: "nav.users", icon: Users },
+  { to: "/audit", labelKey: "nav.auditLog", icon: ScrollText },
 ];
 
-const ACCOUNT_ITEMS: NavItem[] = [{ to: "/account", label: "My account", icon: UserRound }];
+const ACCOUNT_ITEMS: NavItem[] = [{ to: "/account", labelKey: "nav.myAccount", icon: UserRound }];
 
 function initials(user: CurrentUser): string {
   const source = user.displayName?.trim() || user.email;
@@ -87,6 +89,7 @@ interface NavGroupProps {
 }
 
 function NavGroup({ label, items, pathname }: NavGroupProps) {
+  const { t } = useTranslation();
   return (
     <SidebarGroup>
       <SidebarGroupLabel className="uppercase tracking-wide">{label}</SidebarGroupLabel>
@@ -94,12 +97,13 @@ function NavGroup({ label, items, pathname }: NavGroupProps) {
         <SidebarMenu>
           {items.map((item) => {
             const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
+            const label = t(item.labelKey);
             return (
               <SidebarMenuItem key={item.to}>
-                <SidebarMenuButton asChild isActive={isActive} tooltip={item.label}>
+                <SidebarMenuButton asChild isActive={isActive} tooltip={label}>
                   <Link to={item.to} aria-current={isActive ? "page" : undefined}>
                     <item.icon />
-                    <span>{item.label}</span>
+                    <span>{label}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -118,6 +122,7 @@ interface UserMenuProps {
 
 function UserMenu({ user, onLogout }: UserMenuProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -141,13 +146,13 @@ function UserMenu({ user, onLogout }: UserMenuProps) {
         <DropdownMenuGroup>
           <DropdownMenuItem onSelect={() => navigate("/account")}>
             <UserRound />
-            My account
+            {t("nav.myAccount")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onLogout}>
           <LogOut />
-          Log out
+          {t("common.signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -158,6 +163,7 @@ export function AppShell() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [theme, setTheme] = useTheme();
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const isAdmin = user?.role === "admin";
@@ -188,8 +194,8 @@ export function AppShell() {
                     <Boxes className="size-4" />
                   </div>
                   <div className="grid flex-1 text-left leading-tight">
-                    <span className="truncate font-semibold">Supplier Hub</span>
-                    <span className="truncate text-xs text-muted-foreground">Products &amp; catalogs</span>
+                    <span className="truncate font-semibold">{t("nav.appName")}</span>
+                    <span className="truncate text-xs text-muted-foreground">{t("nav.appTagline")}</span>
                   </div>
                 </Link>
               </SidebarMenuButton>
@@ -197,9 +203,9 @@ export function AppShell() {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
-          <NavGroup label="Catalog" items={CATALOG_ITEMS} pathname={location.pathname} />
-          {isAdmin ? <NavGroup label="Administration" items={ADMIN_ITEMS} pathname={location.pathname} /> : null}
-          <NavGroup label="Account" items={ACCOUNT_ITEMS} pathname={location.pathname} />
+          <NavGroup label={t("nav.catalog")} items={CATALOG_ITEMS} pathname={location.pathname} />
+          {isAdmin ? <NavGroup label={t("nav.administration")} items={ADMIN_ITEMS} pathname={location.pathname} /> : null}
+          <NavGroup label={t("nav.account")} items={ACCOUNT_ITEMS} pathname={location.pathname} />
         </SidebarContent>
         <SidebarFooter>
           <SidebarMenu>
@@ -214,12 +220,13 @@ export function AppShell() {
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-          <span className="text-sm text-muted-foreground">Supplier &amp; Product Management</span>
+          <span className="text-sm text-muted-foreground">{t("nav.headerTitle")}</span>
           <div className="ml-auto flex items-center gap-2">
+            <LanguageSwitcher />
             <Button
               variant="ghost"
               size="icon"
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              aria-label={theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             >
               {theme === "dark" ? <Sun /> : <Moon />}

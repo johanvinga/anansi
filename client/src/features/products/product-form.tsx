@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +52,7 @@ function toSubmitValue(field: AttributeField, value: AttributeValue): AttributeV
 
 /** Create or edit a product, including its attribute set values (FR-PRD-01..07). */
 export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: ProductFormProps) {
+  const { t } = useTranslation();
   const [supplierId, setSupplierId] = useState<string | null>(product?.supplierId ?? defaultSupplierId ?? null);
   const [name, setName] = useState(product?.name ?? "");
   const [supplierSku, setSupplierSku] = useState(product?.supplierSku ?? "");
@@ -102,7 +104,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
     return options;
   }, [suppliers, product]);
   const currencyOptions = useMemo(() => currencies.map((c) => ({ value: c, label: c })), [currencies]);
-  const setOptions = useMemo(() => [{ value: "", label: "— None —" }, ...sets.map((s) => ({ value: s.id, label: s.name }))], [sets]);
+  const setOptions = useMemo(() => [{ value: "", label: t("attributeSets.noneOption") }, ...sets.map((s) => ({ value: s.id, label: s.name }))], [sets, t]);
 
   function requestSetChange(next: string | null) {
     const normalized = next || null;
@@ -126,7 +128,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
     event.preventDefault();
     setError(null);
     if (!supplierId) {
-      setError(new ApiError(400, "VALIDATION_ERROR", "Input validation failed.", [{ field: "supplierId", message: "Choose a supplier." }]));
+      setError(new ApiError(400, "VALIDATION_ERROR", t("errors.validation"), [{ field: "supplierId", message: t("products.chooseSupplier") }]));
       return;
     }
     const body = {
@@ -160,7 +162,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
             <DialogHeader>
-              <DialogTitle>{product ? `Edit ${product.name}` : "New product"}</DialogTitle>
+              <DialogTitle>{product ? t("products.editAria", { name: product.name }) : t("products.createProduct")}</DialogTitle>
             </DialogHeader>
             <FieldGroup>
               {error && (error.details.length === 0 || unmatchedErrors.length > 0) ? (
@@ -169,7 +171,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
               <ErrorAlert message={error?.fieldError("attributeValues")} />
 
               <SelectField
-                label="Supplier"
+                label={t("products.supplier")}
                 options={supplierOptions}
                 value={supplierId}
                 onChange={setSupplierId}
@@ -178,10 +180,10 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                 error={error?.fieldError("supplierId")}
               />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <FormField label="Name" value={name} onChange={setName} required error={error?.fieldError("name")} />
-                <FormField label="Supplier SKU" value={supplierSku} onChange={setSupplierSku} required error={error?.fieldError("supplierSku")} />
+                <FormField label={t("suppliers.name")} value={name} onChange={setName} required error={error?.fieldError("name")} />
+                <FormField label={t("products.supplierSku")} value={supplierSku} onChange={setSupplierSku} required error={error?.fieldError("supplierSku")} />
                 <FormField
-                  label="Minimum quantity"
+                  label={t("products.minimumQuantity")}
                   type="number"
                   value={minQuantity}
                   onChange={setMinQuantity}
@@ -189,15 +191,15 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                   error={error?.fieldError("minQuantity")}
                 />
                 <FormField
-                  label="Cost"
+                  label={t("products.costLabel")}
                   value={cost}
                   onChange={setCost}
                   required
-                  helperText="Up to 2 decimal places."
+                  helperText={t("products.decimals2")}
                   error={error?.fieldError("cost")}
                 />
                 <SelectField
-                  label="Currency"
+                  label={t("products.currency")}
                   options={currencyOptions}
                   value={currency}
                   onChange={setCurrency}
@@ -208,9 +210,9 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
 
               <FieldSeparator />
               <FieldSet>
-                <FieldLegend>Attributes</FieldLegend>
+                <FieldLegend>{t("products.attributes")}</FieldLegend>
                 <SelectField
-                  label="Attribute set"
+                  label={t("products.attributeSet")}
                   options={setOptions}
                   value={attributeSetId ?? ""}
                   onChange={requestSetChange}
@@ -231,7 +233,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                 ) : null}
                 {archivedValues.length > 0 && attributeSetId === product?.attributeSet?.id ? (
                   <FieldDescription>
-                    Archived fields kept on this product:{" "}
+                    {t("products.archivedKept")}:{" "}
                     {archivedValues.map((v) => `${v.name}: ${v.optionLabel ?? String(v.value)}`).join(", ")}
                   </FieldDescription>
                 ) : null}
@@ -241,11 +243,11 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="outline">
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </DialogClose>
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Saving…" : product ? "Save product" : "Create product"}
+                {submitting ? t("common.saving") : product ? t("products.saveProduct") : t("products.createProduct")}
               </Button>
             </DialogFooter>
           </form>
@@ -254,9 +256,9 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
 
       <ConfirmDialog
         open={pendingSetId !== undefined}
-        title="Change attribute set?"
-        description="Attribute values for fields that are not in the new set will be removed when you save."
-        confirmLabel="Change set"
+        title={t("products.changeSetTitle")}
+        description={t("products.changeSetWarning")}
+        confirmLabel={t("products.changeSet")}
         onConfirm={() => applySetChange(pendingSetId ?? null)}
         onCancel={() => setPendingSetId(undefined)}
       />

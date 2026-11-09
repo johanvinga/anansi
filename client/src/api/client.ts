@@ -1,3 +1,5 @@
+﻿import i18next from "i18next";
+
 export interface ApiErrorDetail {
   field?: string;
   message: string;
@@ -46,7 +48,7 @@ export async function apiRequest<T>(method: HttpMethod, path: string, body?: unk
     throw new ApiError(
       response.status,
       error?.code ?? "INTERNAL_ERROR",
-      error?.message ?? "Something went wrong. Please try again.",
+      error?.message ?? i18next.t("errors.generic"),
       error?.details ?? [],
     );
   }
@@ -66,7 +68,7 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
     throw new ApiError(
       response.status,
       error?.code ?? "INTERNAL_ERROR",
-      error?.message ?? "Upload failed. Please try again.",
+      error?.message ?? i18next.t("errors.uploadFailed"),
       error?.details ?? [],
     );
   }
@@ -74,5 +76,5 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
 }
 
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Something went wrong. Please try again.";
+  return error instanceof Error ? error.message : i18next.t("errors.generic");
 }

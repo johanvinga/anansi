@@ -1,4 +1,5 @@
-import { Fragment } from "react";
+﻿import { Fragment } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
   Breadcrumb,
@@ -20,12 +21,13 @@ export interface PageBreadcrumbsProps {
 
 /** Route-aware breadcrumb trail built on shadcn's Breadcrumb. */
 export function PageBreadcrumbs({ items }: PageBreadcrumbsProps) {
+  const { t } = useTranslation();
   return (
     <Breadcrumb>
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <Link to="/suppliers">Home</Link>
+            <Link to="/suppliers">{t("nav.home")}</Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         {items.map((item, index) => {

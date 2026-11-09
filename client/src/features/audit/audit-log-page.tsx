@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Eye, Filter, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,10 +35,16 @@ interface Filters {
 const emptyFilters: Filters = { action: "", entityType: "", from: "", to: "" };
 
 function OutcomeBadge({ outcome }: { outcome: string }) {
-  return <Badge variant={outcome === "success" ? "success" : "destructive"}>{outcome}</Badge>;
+  const { t } = useTranslation();
+  return (
+    <Badge variant={outcome === "success" ? "success" : "destructive"}>
+      {outcome === "success" ? t("audit.success") : t("audit.failure")}
+    </Badge>
+  );
 }
 
 export function AuditLogPage() {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Filters>(emptyFilters);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [page, setPage] = useState(1);
@@ -88,35 +95,35 @@ export function AuditLogPage() {
 
   return (
     <>
-      <PageHeader title="Audit log" breadcrumbs={[{ label: "Audit log" }]} />
+      <PageHeader title={t("audit.title")} breadcrumbs={[{ label: t("audit.title") }]} />
 
       <Card className="gap-0 py-0">
         <form className="flex flex-wrap items-end gap-3 p-4" onSubmit={applyFilters} role="search">
           <div className="min-w-48 flex-1">
-            <FormField label="Action" name="action" value={draft.action} onChange={(action) => setDraft({ ...draft, action })} />
+            <FormField label={t("audit.action")} name="action" value={draft.action} onChange={(action) => setDraft({ ...draft, action })} />
           </div>
           <div className="min-w-48 flex-1">
             <FormField
-              label="Entity type"
+              label={t("audit.entityType")}
               name="entityType"
               value={draft.entityType}
               onChange={(entityType) => setDraft({ ...draft, entityType })}
             />
           </div>
           <div className="min-w-40">
-            <FormField label="From" name="from" type="date" value={draft.from} onChange={(from) => setDraft({ ...draft, from })} />
+            <FormField label={t("audit.from")} name="from" type="date" value={draft.from} onChange={(from) => setDraft({ ...draft, from })} />
           </div>
           <div className="min-w-40">
-            <FormField label="To" name="to" type="date" value={draft.to} onChange={(to) => setDraft({ ...draft, to })} />
+            <FormField label={t("audit.to")} name="to" type="date" value={draft.to} onChange={(to) => setDraft({ ...draft, to })} />
           </div>
           <div className="flex gap-2">
             <Button type="submit" variant="outline">
               <Filter />
-              Apply
+              {t("audit.apply")}
             </Button>
             <Button type="button" variant="ghost" onClick={clearFilters}>
               <X />
-              Clear
+              {t("audit.clearFilters")}
             </Button>
           </div>
         </form>
@@ -127,19 +134,19 @@ export function AuditLogPage() {
           </div>
         ) : null}
 
-        <Table aria-label="Audit log">
+        <Table aria-label={t("audit.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead className="pl-4">Time (UTC)</TableHead>
-              <TableHead>Actor</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Outcome</TableHead>
-              <TableHead>Entity</TableHead>
-              <TableHead className="pr-4 text-right">Details</TableHead>
+              <TableHead className="pl-4">{t("audit.time")}</TableHead>
+              <TableHead>{t("audit.who")}</TableHead>
+              <TableHead>{t("audit.action")}</TableHead>
+              <TableHead>{t("audit.outcome")}</TableHead>
+              <TableHead>{t("audit.entity")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("audit.details")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {result && result.items.length === 0 ? <TableEmptyRow colSpan={6} message="No entries match the filters." /> : null}
+            {result && result.items.length === 0 ? <TableEmptyRow colSpan={6} message={t("audit.noMatch")} /> : null}
             {result?.items.map((entry) => (
               <TableRow key={entry.id}>
                 <TableCell className="pl-4 font-mono text-xs">
@@ -158,7 +165,7 @@ export function AuditLogPage() {
                   {entry.entityType ? `${entry.entityType}${entry.entityId ? ` ${entry.entityId}` : ""}` : "—"}
                 </TableCell>
                 <TableCell className="pr-4 text-right">
-                  <IconAction label={`View entry ${entry.action}`} icon={Eye} onClick={() => setSelectedId(entry.id)} />
+                  <IconAction label={t("audit.viewEntry", { action: entry.action })} icon={Eye} onClick={() => setSelectedId(entry.id)} />
                 </TableCell>
               </TableRow>
             ))}
@@ -173,42 +180,42 @@ export function AuditLogPage() {
       <Dialog open={selectedId !== null} onOpenChange={(isOpen) => !isOpen && setSelectedId(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Audit entry</DialogTitle>
+            <DialogTitle>{t("audit.entryTitle")}</DialogTitle>
           </DialogHeader>
           {detail ? (
             <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 text-sm">
-              <dt className="text-muted-foreground">Action</dt>
+              <dt className="text-muted-foreground">{t("audit.action")}</dt>
               <dd className="font-mono">{detail.action}</dd>
-              <dt className="text-muted-foreground">Actor</dt>
+              <dt className="text-muted-foreground">{t("audit.who")}</dt>
               <dd>{detail.actorEmail}</dd>
-              <dt className="text-muted-foreground">Outcome</dt>
+              <dt className="text-muted-foreground">{t("audit.outcome")}</dt>
               <dd>
                 <OutcomeBadge outcome={detail.outcome} />
               </dd>
-              <dt className="text-muted-foreground">IP address</dt>
+              <dt className="text-muted-foreground">{t("audit.ipAddress")}</dt>
               <dd>{detail.ipAddress ?? "—"}</dd>
-              <dt className="text-muted-foreground">Request ID</dt>
+              <dt className="text-muted-foreground">{t("audit.requestId")}</dt>
               <dd className="font-mono text-xs break-all">{detail.requestId}</dd>
-              <dt className="text-muted-foreground">Changes</dt>
+              <dt className="text-muted-foreground">{t("audit.changes")}</dt>
               <dd className="min-w-0">
                 {detail.changes ? (
                   <pre className="max-h-80 overflow-auto rounded-lg bg-muted p-3 text-xs">
                     {JSON.stringify(detail.changes, null, 2)}
                   </pre>
                 ) : (
-                  "None recorded"
+                  t("audit.noneRecorded")
                 )}
               </dd>
             </dl>
           ) : (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner />
-              Loading…
+              {t("common.loading")}
             </p>
           )}
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Close</Button>
+              <Button variant="outline">{t("common.close")}</Button>
             </DialogClose>
           </DialogFooter>
         </DialogContent>

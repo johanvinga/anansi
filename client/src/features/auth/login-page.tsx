@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
+﻿import { useState, type FormEvent } from "react";
 import { Boxes } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FieldGroup } from "@/components/ui/field";
@@ -8,9 +9,11 @@ import { ApiError, errorMessage } from "../../api/client";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
+import { LanguageSwitcher } from "../../i18n/language-switcher";
 
 export function LoginPage() {
   const { login } = useAuth();
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,21 +40,21 @@ export function LoginPage() {
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Boxes className="size-4" />
           </div>
-          Supplier Hub
+          {t("nav.appName")}
         </div>
         <Card className="gap-6 py-6">
           <CardHeader className="px-6 text-center">
             <CardTitle className="text-xl">
-              <h1>Sign in</h1>
+              <h1>{t("auth.signInTitle")}</h1>
             </CardTitle>
-            <CardDescription>Use the account your administrator created for you.</CardDescription>
+            <CardDescription>{t("auth.signInDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="px-6">
             <form onSubmit={handleSubmit} noValidate>
               <FieldGroup>
                 <ErrorAlert message={error} />
                 <FormField
-                  label="Email"
+                  label={t("auth.email")}
                   name="email"
                   type="email"
                   autoComplete="username"
@@ -60,7 +63,7 @@ export function LoginPage() {
                   required
                 />
                 <FormField
-                  label="Password"
+                  label={t("auth.password")}
                   name="password"
                   type="password"
                   autoComplete="current-password"
@@ -70,12 +73,15 @@ export function LoginPage() {
                 />
                 <Button type="submit" size="lg" className="w-full" disabled={submitting}>
                   {submitting ? <Spinner /> : null}
-                  {submitting ? "Signing in…" : "Sign in"}
+                  {submitting ? t("auth.signingIn") : t("auth.signIn")}
                 </Button>
               </FieldGroup>
             </form>
           </CardContent>
         </Card>
+        <div className="flex justify-center">
+          <LanguageSwitcher />
+        </div>
       </div>
     </main>
   );
