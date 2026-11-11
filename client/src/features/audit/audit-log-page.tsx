@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Eye, Filter, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -48,38 +49,28 @@ export function AuditLogPage() {
   const [draft, setDraft] = useState<Filters>(emptyFilters);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [page, setPage] = useState(1);
-  const [result, setResult] = useState<Page<AuditLogSummary> | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<AuditLogDetail | null>(null);
 
-  const load = useCallback(async () => {
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-    if (filters.action) params.set("action", filters.action.trim());
-    if (filters.entityType) params.set("entityType", filters.entityType.trim());
-    if (filters.from) params.set("from", new Date(`${filters.from}T00:00:00Z`).toISOString());
-    if (filters.to) params.set("to", new Date(`${filters.to}T23:59:59.999Z`).toISOString());
-    try {
-      setResult(await apiRequest<Page<AuditLogSummary>>("GET", `/audit-log?${params.toString()}`));
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [page, filters]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      return;
-    }
-    apiRequest<{ entry: AuditLogDetail }>("GET", `/audit-log/${selectedId}`)
-      .then((response) => setDetail(response.entry))
-      .catch((err: unknown) => setError(errorMessage(err)));
-  }, [selectedId]);
+  const logsQuery = useQuery({
+    queryKey: ["audit-log", { page, pageSize: PAGE_SIZE, filters }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (filters.action) params.set("action", filters.action.trim());
+      if (filters.entityType) params.set("entityType", filters.entityType.trim());
+      if (filters.from) params.set("from", new Date(`${filters.from}T00:00:00Z`).toISOString());
+      if (filters.to) params.set("to", new Date(`${filters.to}T23:59:59.999Z`).toISOString());
+      return apiRequest<Page<AuditLogSummary>>("GET", `/audit-log?${params.toString()}`);
+    },
+  });
+  const detailQuery = useQuery({
+    queryKey: ["audit-entry", selectedId],
+    enabled: selectedId !== null,
+    queryFn: async () =>
+      (await apiRequest<{ entry: AuditLogDetail }>("GET", `/audit-log/${selectedId}`)).entry,
+  });
+  const result = logsQuery.data;
+  const detail = detailQuery.data;
+  const error = logsQuery.error ?? detailQuery.error;
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,7 +121,7 @@ export function AuditLogPage() {
 
         {error ? (
           <div className="px-4 pb-4">
-            <ErrorAlert message={error} />
+            <ErrorAlert message={errorMessage(error)} />
           </div>
         ) : null}
 
@@ -202,6 +193,8 @@ export function AuditLogPage() {
                   <pre className="max-h-80 overflow-auto rounded-lg bg-muted p-3 text-xs">
                     {JSON.stringify(detail.changes, null, 2)}
                   </pre>
+                ) : detailQuery.error ? (
+                  <ErrorAlert message={errorMessage(detailQuery.error)} />
                 ) : (
                   t("audit.noneRecorded")
                 )}

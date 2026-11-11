@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,24 +33,20 @@ interface AssetsPanelProps {
 export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
   const { t } = useTranslation();
 
-  const [assets, setAssets] = useState<SupplierAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<SupplierAsset | null>(null);
   const [deleting, setDeleting] = useState<SupplierAsset | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const result = await apiRequest<{ items: SupplierAsset[] }>("GET", `/suppliers/${supplierId}/assets`);
-      setAssets(result.items);
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [supplierId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const queryClient = useQueryClient();
+  const assetsQuery = useQuery({
+    queryKey: ["assets", supplierId],
+    queryFn: async () =>
+      (await apiRequest<{ items: SupplierAsset[] }>("GET", `/suppliers/${supplierId}/assets`)).items,
+  });
+  const assets = assetsQuery.data ?? [];
+  const refresh = () => {
+    setError(null);
+    void assetsQuery.refetch();
+  };
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -57,7 +54,7 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
     setDeleting(null);
     try {
       await apiRequest<void>("DELETE", `/assets/${target.id}`);
-      await load();
+      await queryClient.invalidateQueries({ queryKey: ["assets", supplierId] });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -65,9 +62,9 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {isAdmin ? <UploadForm supplierId={supplierId} onUploaded={load} /> : null}
+      {isAdmin ? <UploadForm supplierId={supplierId} onUploaded={refresh} /> : null}
 
-      <ErrorAlert message={error} />
+      <ErrorAlert message={error ?? (assetsQuery.error ? errorMessage(assetsQuery.error) : null)} />
 
       <Card className="gap-0 py-0">
         <Table aria-label={t("suppliers.assets")}>
@@ -123,7 +120,7 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            void load();
+            refresh();
           }}
         />
       ) : null}

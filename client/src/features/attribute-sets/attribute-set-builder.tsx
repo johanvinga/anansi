@@ -1,5 +1,6 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type DragEvent, type FormEvent } from "react";
 import { Archive, ArrowDown, ArrowLeft, ArrowUp, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,6 @@ interface AttributeSetBuilderProps {
 /** Shows an attribute set and lets admins manage and reorder its fields (FR-ATS-02..09, FR-UI-02). */
 export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted }: AttributeSetBuilderProps) {
   const { t } = useTranslation();
-  const [detail, setDetail] = useState<AttributeSetDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<AttributeField | "new" | null>(null);
   const [removingField, setRemovingField] = useState<AttributeField | null>(null);
@@ -55,19 +55,17 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("GET", `/attribute-sets/${attributeSetId}`);
-      setDetail(result.attributeSet);
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [attributeSetId]);
+  const queryClient = useQueryClient();
+  const detailQuery = useQuery({
+    queryKey: ["attribute-set", attributeSetId],
+    queryFn: () =>
+      apiRequest<{ attributeSet: AttributeSetDetail }>("GET", `/attribute-sets/${attributeSetId}`),
+  });
+  const detail = detailQuery.data?.attributeSet ?? null;
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  function cacheDetail(updated: AttributeSetDetail) {
+    queryClient.setQueryData(["attribute-set", attributeSetId], { attributeSet: updated });
+  }
 
   const backButton = (
     <Button type="button" variant="ghost" size="sm" onClick={onBack}>
@@ -84,8 +82,8 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
           breadcrumbs={[{ label: t("attributeSets.title"), to: "/attribute-sets" }, { label: t("attributeSets.builder") }]}
           actions={backButton}
         />
-        {error ? (
-          <ErrorAlert message={error} />
+        {error || detailQuery.error ? (
+            <ErrorAlert message={error ?? (detailQuery.error ? errorMessage(detailQuery.error) : null)} />
         ) : (
           <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner />
@@ -103,15 +101,16 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
     if (!detail) return;
     const previous = detail;
     // Optimistic update; archived fields keep their place after the active ones.
-    setDetail({ ...detail, fields: [...ordered, ...archivedFields] });
+    cacheDetail({ ...detail, fields: [...ordered, ...archivedFields] });
     try {
       const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", `/attribute-sets/${attributeSetId}/fields/reorder`, {
         fieldIds: [...ordered, ...archivedFields].map((f) => f.id),
       });
-      setDetail(result.attributeSet);
+      cacheDetail(result.attributeSet);
+      void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
       setStatus(t("attributeSets.orderSaved"));
     } catch (err) {
-      setDetail(previous);
+      cacheDetail(previous);
       setError(errorMessage(err));
     }
   }
@@ -145,7 +144,8 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
         "DELETE",
         `/attribute-sets/${attributeSetId}/fields/${target.id}`,
       );
-      setDetail(result.attributeSet);
+      cacheDetail(result.attributeSet);
+      void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
       setStatus(result.result === "archived" ? t("attributeSets.wasArchived", { name: localize(target.name) }) : t("attributeSets.wasDeleted", { name: localize(target.name) }));
     } catch (err) {
       setError(errorMessage(err));
@@ -156,6 +156,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
     setConfirmDelete(false);
     try {
       await apiRequest<void>("DELETE", `/attribute-sets/${attributeSetId}`);
+      await queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
       onDeleted();
     } catch (err) {
       setError(errorMessage(err));
@@ -308,8 +309,9 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
           field={editingField === "new" ? undefined : editingField}
           onClose={() => setEditingField(null)}
           onSaved={(updated) => {
-            setDetail(updated);
+            cacheDetail(updated);
             setEditingField(null);
+            void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
             setStatus(t("attributeSets.fieldSaved"));
           }}
         />
@@ -320,8 +322,9 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
           detail={detail}
           onClose={() => setRenaming(false)}
           onSaved={(updated) => {
-            setDetail(updated);
+            cacheDetail(updated);
             setRenaming(false);
+            void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
           }}
         />
       ) : null}

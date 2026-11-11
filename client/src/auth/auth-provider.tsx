@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { queryClient } from "../api/query-client";
 import { apiRequest } from "../api/client";
 import type { CurrentUser } from "../api/types";
 import { AuthContext } from "./auth-state";
@@ -20,6 +21,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await apiRequest<{ user: CurrentUser }>("POST", "/auth/login", { email, password });
+    queryClient.clear();
     setUser(result.user);
   }, []);
 
@@ -27,6 +29,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       await apiRequest<void>("POST", "/auth/logout");
     } finally {
+      queryClient.clear();
       setUser(null);
     }
   }, []);

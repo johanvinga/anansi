@@ -1,9 +1,16 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
@@ -12,6 +19,7 @@ import type { Page, ProductDetail, ProductSummary, Supplier } from "../../api/ty
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert, SuccessAlert } from "../../components/error-alert";
 import { IconAction } from "../../components/icon-action";
+import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
 import { SelectField } from "../../components/select-field";
@@ -32,38 +40,39 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [page, setPage] = useState(1);
-  const [result, setResult] = useState<Page<ProductSummary> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProductDetail | "new" | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<ProductSummary | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const effectiveSupplier = supplierId ?? supplierFilter ?? undefined;
-
-  const load = useCallback(async () => {
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-    if (search) params.set("q", search);
-    if (effectiveSupplier) params.set("supplierId", effectiveSupplier);
-    try {
-      setResult(await apiRequest<Page<ProductSummary>>("GET", `/products?${params.toString()}`));
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [page, search, effectiveSupplier]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    if (supplierId) return;
-    apiRequest<Page<Supplier>>("GET", "/suppliers?pageSize=100")
-      .then((response) => setSuppliers(response.items))
-      .catch(() => undefined);
-  }, [supplierId]);
+  const productsQuery = useQuery({
+    queryKey: ["products", { page, pageSize: PAGE_SIZE, search, supplierId: effectiveSupplier }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (search) params.set("q", search);
+      if (effectiveSupplier) params.set("supplierId", effectiveSupplier);
+      return apiRequest<Page<ProductSummary>>("GET", `/products?${params.toString()}`);
+    },
+  });
+  const suppliersQuery = useQuery({
+    queryKey: ["suppliers", "picker", 100],
+    enabled: !supplierId,
+    queryFn: async () =>
+      (await apiRequest<Page<Supplier>>("GET", "/suppliers?pageSize=100")).items,
+  });
+  const detailQuery = useQuery({
+    queryKey: ["product", viewingId],
+    enabled: viewingId !== null,
+    queryFn: async () =>
+      (await apiRequest<{ product: ProductDetail }>("GET", `/products/${viewingId}`)).product,
+  });
+  const result = productsQuery.data;
+  const suppliers = suppliersQuery.data ?? [];
+  const viewing = detailQuery.data;
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -72,7 +81,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
     try {
       await apiRequest<void>("DELETE", `/products/${target.id}`);
       setStatus(`${localize(target.name)} was deleted.`);
-      await load();
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -80,110 +89,130 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
 
   async function openEdit(summary: ProductSummary) {
     try {
-      const response = await apiRequest<{ product: ProductDetail }>("GET", `/products/${summary.id}`);
-      setEditing(response.product);
+      const detail = await queryClient.fetchQuery({
+        queryKey: ["product", summary.id],
+        queryFn: async () =>
+          (await apiRequest<{ product: ProductDetail }>("GET", `/products/${summary.id}`)).product,
+      });
+      setEditing(detail);
     } catch (err) {
       setError(errorMessage(err));
     }
   }
 
+  const localizedDescription = viewing
+    ? localize({ en: viewing.description.en ?? "", fr: viewing.description.fr ?? "" })
+    : "";
   const columnCount = (supplierId ? 6 : 7) + (isAdmin ? 1 : 0);
+  const pageTitle = supplierId ? undefined : t("products.title");
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
-        <h2 className="text-base font-semibold">{supplierId ? "Products" : "All products"}</h2>
-        {isAdmin ? (
-          <Button size="lg" onClick={() => setEditing("new")}>
-            <Plus />
-            {t("products.createProduct")}
-          </Button>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 py-1">
-        <SearchForm
-          label={t("products.searchLabel")}
-          placeholder={t("products.searchPlaceholder")}
-          value={query}
-          onChange={setQuery}
-          onSearch={() => {
-            setPage(1);
-            setSearch(query.trim());
-          }}
-        />
-        {supplierId ? null : (
-          <div className="w-56">
-            <SelectField
-              label="Supplier"
-              hideLabel
-              placeholder={t("products.allSuppliers")}
-              options={[{ value: "", label: t("products.allSuppliers") }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
-              value={supplierFilter ?? ""}
-              onChange={(value) => {
-                setPage(1);
-                setSupplierFilter(value || null);
-              }}
-            />
+      <PageLayout
+        title={pageTitle}
+        breadcrumbs={pageTitle ? [{ label: pageTitle }] : undefined}
+        toolbar={
+          <>
+            <div className="flex flex-row items-center gap-3">
+              {supplierId ? <h2 className="text-base font-semibold">{t("products.title")}</h2> : null}
+              <SearchForm
+                label={t("products.searchLabel")}
+                placeholder={t("products.searchPlaceholder")}
+                value={query}
+                onChange={setQuery}
+                onSearch={() => {
+                  setPage(1);
+                  setSearch(query.trim());
+                }}
+              />
+              {supplierId ? null : (
+                <div className="w-56">
+                  <SelectField
+                    label="Supplier"
+                    hideLabel
+                    placeholder={t("products.allSuppliers")}
+                    options={[{ value: "", label: t("products.allSuppliers") }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+                    value={supplierFilter ?? ""}
+                    onChange={(value) => {
+                      setPage(1);
+                      setSupplierFilter(value || null);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+            {isAdmin ? (
+              <Button size="lg" onClick={() => setEditing("new")}>
+                <Plus />
+                {t("products.createProduct")}
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        {error || status || productsQuery.error || suppliersQuery.error ? (
+          <div className="flex flex-col gap-2 px-4 pb-4">
+            <ErrorAlert message={error ?? (productsQuery.error ? errorMessage(productsQuery.error) : suppliersQuery.error ? errorMessage(suppliersQuery.error) : null)} />
+            {status ? <SuccessAlert message={status} /> : null}
           </div>
-        )}
-      </div>
+        ) : null}
 
-      <Card className="gap-0 py-0">
-
-      {error || status ? (
-        <div className="flex flex-col gap-2 px-4 pb-4">
-          <ErrorAlert message={error} />
-          {status ? <SuccessAlert message={status} /> : null}
-        </div>
-      ) : null}
-
-      <Table aria-label={supplierId ? "Products" : "All products"}>
-        <TableHeader className="bg-muted/50">
-          <TableRow>
-            <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
-            <TableHead>{t("products.skuLabel")}</TableHead>
-            {supplierId ? null : <TableHead>{t("products.supplier")}</TableHead>}
-            <TableHead className="text-right">{t("products.minQty")}</TableHead>
-            <TableHead className="text-right">{t("products.cost")}</TableHead>
-            <TableHead>{t("products.attributeSet")}</TableHead>
-            <TableHead>{t("products.updated")}</TableHead>
-            {isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {result && result.items.length === 0 ? <TableEmptyRow colSpan={columnCount} message="No products found." /> : null}
-          {result?.items.map((product) => (
-            <TableRow key={product.id}>
-              <TableCell className="pl-4 font-medium">{localize(product.name)}</TableCell>
-              <TableCell className="font-mono text-xs">{product.supplierSku}</TableCell>
-              {supplierId ? null : <TableCell>{product.supplierName}</TableCell>}
-              <TableCell className="text-right tabular-nums">{product.minQuantity}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatMoney(product.cost, product.currency)}</TableCell>
-              <TableCell>
-                {product.attributeSet ? <Badge variant="info">{localize(product.attributeSet.name)}</Badge> : "—"}
-              </TableCell>
-              <TableCell>{formatDate(product.updatedAt)}</TableCell>
-              {isAdmin ? (
-                <TableCell className="pr-4">
-                  <div className="flex justify-end gap-1">
-                    <IconAction label={t("products.editAria", { name: localize(product.name) })} icon={Pencil} onClick={() => void openEdit(product)} />
-                    <IconAction
-                      label={t("products.deleteAria", { name: localize(product.name) })}
-                      icon={Trash2}
-                      destructive
-                      onClick={() => setDeleting(product)}
-                    />
-                  </div>
-                </TableCell>
-              ) : null}
+        <Table aria-label={supplierId ? "Products" : "All products"}>
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+              <TableHead>{t("products.skuLabel")}</TableHead>
+              {supplierId ? null : <TableHead>{t("products.supplier")}</TableHead>}
+              <TableHead className="text-right">{t("products.minQty")}</TableHead>
+              <TableHead className="text-right">{t("products.cost")}</TableHead>
+              <TableHead>{t("products.attributeSet")}</TableHead>
+              <TableHead>{t("products.updated")}</TableHead>
+              {isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {result && result.items.length === 0 ? <TableEmptyRow colSpan={columnCount} message="No products found." /> : null}
+            {result?.items.map((product) => (
+              <TableRow key={product.id}>
+                <TableCell className="pl-4">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 font-medium text-foreground"
+                    aria-label={t("products.viewAria", { name: localize(product.name) })}
+                    onClick={() => setViewingId(product.id)}
+                  >
+                    {localize(product.name)}
+                  </Button>
+                </TableCell>
+                <TableCell className="font-mono text-xs">{product.supplierSku}</TableCell>
+                {supplierId ? null : <TableCell>{product.supplierName}</TableCell>}
+                <TableCell className="text-right tabular-nums">{product.minQuantity}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatMoney(product.cost, product.currency)}</TableCell>
+                <TableCell>
+                  {product.attributeSet ? <Badge variant="info">{localize(product.attributeSet.name)}</Badge> : "—"}
+                </TableCell>
+                <TableCell>{formatDate(product.updatedAt)}</TableCell>
+                {isAdmin ? (
+                  <TableCell className="pr-4">
+                    <div className="flex justify-end gap-1">
+                      <IconAction label={t("products.editAria", { name: localize(product.name) })} icon={Pencil} onClick={() => void openEdit(product)} />
+                      <IconAction
+                        label={t("products.deleteAria", { name: localize(product.name) })}
+                        icon={Trash2}
+                        destructive
+                        onClick={() => setDeleting(product)}
+                      />
+                    </div>
+                  </TableCell>
+                ) : null}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
 
-      {result ? <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} /> : null}
-      </Card>
+        {result ? <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} /> : null}
+      </PageLayout>
 
       {editing ? (
         <ProductForm
@@ -193,10 +222,55 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
           onSaved={(saved) => {
             setEditing(null);
             setStatus(`${localize(saved.name)} was saved.`);
-            void load();
+            void queryClient.invalidateQueries({ queryKey: ["products"] });
+            queryClient.setQueryData(["product", saved.id], saved);
           }}
         />
       ) : null}
+
+      <Dialog open={viewingId !== null} onOpenChange={(open) => !open && setViewingId(null)}>
+        {viewingId ? (
+          <DialogContent className="max-h-[95dvh] overflow-y-auto sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>{viewing ? localize(viewing.name) : t("common.loading")}</DialogTitle>
+              <DialogDescription>{t("products.detailsSubtitle")}</DialogDescription>
+            </DialogHeader>
+            {!viewing && detailQuery.error ? <ErrorAlert message={errorMessage(detailQuery.error)} /> : null}
+            {viewing ? (
+              <>
+                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-muted-foreground">{t("products.supplier")}</dt>
+                    <dd className="font-medium">{viewing.supplierName}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("products.supplierSku")}</dt>
+                    <dd className="font-mono text-sm">{viewing.supplierSku}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("products.minimumQuantity")}</dt>
+                    <dd>{viewing.minQuantity}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("products.costLabel")}</dt>
+                    <dd>{formatMoney(viewing.cost, viewing.currency)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("products.attributeSet")}</dt>
+                    <dd>{viewing.attributeSet ? localize(viewing.attributeSet.name) : "—"}</dd>
+                  </div>
+                </dl>
+                <section className="space-y-2 border-t pt-4">
+                  <h3 className="font-medium">{t("products.productDescription")}</h3>
+                  <p className="whitespace-pre-wrap text-muted-foreground">
+                    {localizedDescription || t("products.noDescription")}
+                  </p>
+                </section>
+              </>
+            ) : null}
+          </DialogContent>
+        ) : null}
+      </Dialog>
 
       <ConfirmDialog
         open={deleting !== null}

@@ -1,9 +1,9 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
@@ -12,7 +12,7 @@ import type { CatalogWithSupplier, Category, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
 import { IconAction } from "../../components/icon-action";
-import { PageHeader } from "../../components/page-header";
+import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
 import { TableEmptyRow } from "../../components/table-empty-row";
@@ -30,32 +30,23 @@ export function CatalogsPage() {
   const [search, setSearch] = useState("");
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const [result, setResult] = useState<Page<CatalogWithSupplier> | null>(null);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiRequest<{ items: Category[] }>("GET", "/categories")
-      .then((res) => setCategories(res.items))
-      .catch(() => setCategories([]));
-  }, []);
-
-  const load = useCallback(async () => {
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-    if (search) params.set("q", search);
-    for (const id of categoryIds) params.append("category", id);
-    try {
-      setResult(await apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`));
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [page, search, categoryIds]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const queryClient = useQueryClient();
+  const categoriesQuery = useQuery({
+    queryKey: ["categories"],
+    queryFn: async () => (await apiRequest<{ items: Category[] }>("GET", "/categories")).items,
+  });
+  const catalogsQuery = useQuery({
+    queryKey: ["catalogs", "all", { page, pageSize: PAGE_SIZE, search, categoryIds }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (search) params.set("q", search);
+      for (const id of categoryIds) params.append("category", id);
+      return apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`);
+    },
+  });
+  const categories = categoriesQuery.data ?? [];
+  const result = catalogsQuery.data;
 
   function toggleCategory(id: string) {
     setPage(1);
@@ -66,47 +57,54 @@ export function CatalogsPage() {
 
   return (
     <>
-      <PageHeader title={t("catalogs.title")} breadcrumbs={[{ label: t("catalogs.title") }]} />
+      <PageLayout
+        title={t("catalogs.title")}
+        breadcrumbs={[{ label: t("catalogs.title") }]}
+        toolbar={
+          <>
+            <SearchForm
+              label={t("catalogs.searchLabel")}
+              placeholder={t("catalogs.searchPlaceholder")}
+              value={query}
+              onChange={setQuery}
+              onSearch={() => {
+                setPage(1);
+                setSearch(query.trim());
+              }}
+            />
+            {isAdmin ? (
+              <Button size="lg" onClick={() => setUploadOpen(true)}>
+                {t("catalogs.uploadCatalog")}
+              </Button>
+            ) : null}
+          </>
+        }
+        filters={
+          <>
+            <span className="mr-1 text-sm text-muted-foreground">{t("suppliers.categoriesLabel")}:</span>
+            {categories.map((category) => {
+              const active = categoryIds.includes(category.id);
+              return (
+                <Button
+                  key={category.id}
+                  type="button"
+                  variant={active ? "default" : "secondary"}
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  aria-pressed={active}
+                  onClick={() => toggleCategory(category.id)}
+                >
+                  {localize(category.name)}
+                </Button>
+              );
+            })}
+          </>
+        }
+      >
 
-      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
-        <SearchForm
-          label={t("catalogs.searchLabel")}
-          placeholder={t("catalogs.searchPlaceholder")}
-          value={query}
-          onChange={setQuery}
-          onSearch={() => {
-            setPage(1);
-            setSearch(query.trim());
-          }}
-        />
-        {isAdmin ? (
-          <Button size="lg" onClick={() => setUploadOpen(true)}>
-            {t("catalogs.uploadCatalog")}
-          </Button>
-        ) : null}
-      </div>
-
-      <Card className="gap-0 py-0">
-        <div className="flex flex-wrap items-center gap-1 border-t px-4 py-3">
-          <span className="mr-1 text-sm text-muted-foreground">{t("suppliers.categoriesLabel")}:</span>
-          {categories.map((category) => {
-            const active = categoryIds.includes(category.id);
-            return (
-              <Badge
-                key={category.id}
-                variant={active ? "default" : "secondary"}
-                className="cursor-pointer"
-                onClick={() => toggleCategory(category.id)}
-              >
-                {localize(category.name)}
-              </Badge>
-            );
-          })}
-        </div>
-
-        {error ? (
+        {categoriesQuery.error || catalogsQuery.error ? (
           <div className="px-4 pb-4">
-            <ErrorAlert message={error} />
+            <ErrorAlert message={categoriesQuery.error ? errorMessage(categoriesQuery.error) : catalogsQuery.error ? errorMessage(catalogsQuery.error) : null} />
           </div>
         ) : null}
 
@@ -155,7 +153,7 @@ export function CatalogsPage() {
         {result ? (
           <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
         ) : null}
-      </Card>
+      </PageLayout>
 
       {uploadOpen ? (
         <UploadCatalogDialog
@@ -163,7 +161,7 @@ export function CatalogsPage() {
           onUploaded={() => {
             setUploadOpen(false);
             setPage(1);
-            void load();
+            void queryClient.invalidateQueries({ queryKey: ["catalogs", "all"] });
           }}
         />
       ) : null}

@@ -1,20 +1,29 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Eye, Plus, Settings2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { FieldGroup } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
 import type { AttributeSetDetail, AttributeSetSummary } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
+import { FormField } from "../../components/form-field";
 import { ErrorAlert } from "../../components/error-alert";
 import { IconAction } from "../../components/icon-action";
-import { PageHeader } from "../../components/page-header";
+import { PageLayout } from "../../components/page-layout";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { AttributeSetBuilder } from "./attribute-set-builder";
 
@@ -23,72 +32,34 @@ export function AttributeSetsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
-  const newSetId = useId();
-  const [sets, setSets] = useState<AttributeSetSummary[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [createError, setCreateError] = useState<string | undefined>(undefined);
+  const [createOpen, setCreateOpen] = useState(false);
+  const queryClient = useQueryClient();
 
-  const load = useCallback(async () => {
-    try {
-      const result = await apiRequest<{ items: AttributeSetSummary[] }>("GET", "/attribute-sets");
-      setSets(result.items);
-      setLoaded(true);
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreateError(undefined);
-    try {
-      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", "/attribute-sets", { name: { en: newName } });
-      setNewName("");
-      navigate(`/attribute-sets/${result.attributeSet.id}`);
-    } catch (err) {
-      setCreateError(err instanceof ApiError ? (err.fieldError("name") ?? err.message) : errorMessage(err));
-    }
-  }
+  const setsQuery = useQuery({
+    queryKey: ["attribute-sets"],
+    queryFn: async () => (await apiRequest<{ items: AttributeSetSummary[] }>("GET", "/attribute-sets")).items,
+  });
+  const sets = setsQuery.data ?? [];
+  const loaded = setsQuery.isSuccess;
 
   return (
     <>
-      <PageHeader title={t("attributeSets.title")} breadcrumbs={[{ label: t("attributeSets.title") }]} />
-
-      <Card className="gap-0 py-0">
-        {isAdmin ? (
-          <form className="flex flex-wrap items-start justify-end gap-2 p-4" onSubmit={(event) => void handleCreate(event)} noValidate>
-            <Field data-invalid={createError ? true : undefined} className="w-64">
-              <FieldLabel htmlFor={newSetId} className="sr-only">
-                {t("attributeSets.createSet")}
-              </FieldLabel>
-              <Input
-                id={newSetId}
-                name="newSet"
-                placeholder={t("attributeSets.createSet")}
-                required
-                value={newName}
-                aria-invalid={createError ? true : undefined}
-                onChange={(event) => setNewName(event.target.value)}
-              />
-              {createError ? <FieldError>{createError}</FieldError> : null}
-            </Field>
-            <Button type="submit" size="lg" disabled={!newName.trim()}>
+      <PageLayout
+        title={t("attributeSets.title")}
+        breadcrumbs={[{ label: t("attributeSets.title") }]}
+        toolbar={
+          isAdmin ? (
+            <Button className="ml-auto" size="lg" onClick={() => setCreateOpen(true)}>
               <Plus />
               {t("attributeSets.createSetButton")}
             </Button>
-          </form>
-        ) : null}
+          ) : null
+        }
+      >
 
-        {error ? (
+        {setsQuery.error ? (
           <div className="px-4 pb-4">
-            <ErrorAlert message={error} />
+            <ErrorAlert message={errorMessage(setsQuery.error)} />
           </div>
         ) : null}
 
@@ -127,8 +98,101 @@ export function AttributeSetsPage() {
             ))}
           </TableBody>
         </Table>
-      </Card>
+      </PageLayout>
+
+      {createOpen ? (
+        <CreateAttributeSetDialog
+          onClose={() => setCreateOpen(false)}
+          onCreated={(id) => {
+            setCreateOpen(false);
+            void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
+            navigate(`/attribute-sets/${id}`);
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+interface CreateAttributeSetDialogProps {
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}
+
+function CreateAttributeSetDialog({ onClose, onCreated }: CreateAttributeSetDialogProps) {
+  const { t } = useTranslation();
+  const [nameEn, setNameEn] = useState("");
+  const [nameFr, setNameFr] = useState("");
+  const [nameFrEdited, setNameFrEdited] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function changeEnglishName(value: string) {
+    setNameEn(value);
+    if (!nameFrEdited) setNameFr(value);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>(
+        "POST",
+        "/attribute-sets",
+        { name: { en: nameEn, fr: nameFr } },
+      );
+      onCreated(result.attributeSet.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+          <DialogHeader>
+            <DialogTitle>{t("attributeSets.createSetTitle")}</DialogTitle>
+            <DialogDescription>{t("attributeSets.createSetDescription")}</DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            {error && error.details.length === 0 ? <ErrorAlert message={error.message} /> : null}
+            <FormField
+              label={t("common.nameEnglish")}
+              name="name.en"
+              value={nameEn}
+              onChange={changeEnglishName}
+              required
+              error={error?.fieldError("name.en")}
+              maxLength={100}
+            />
+            <FormField
+              label={t("common.nameFrench")}
+              name="name.fr"
+              value={nameFr}
+              onChange={(value) => {
+                setNameFr(value);
+                setNameFrEdited(true);
+              }}
+              required
+              error={error?.fieldError("name.fr")}
+              maxLength={100}
+            />
+          </FieldGroup>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">{t("common.cancel")}</Button>
+            </DialogClose>
+            <Button type="submit" disabled={submitting || !nameEn.trim() || !nameFr.trim()}>
+              {submitting ? t("common.saving") : t("attributeSets.createSetButton")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

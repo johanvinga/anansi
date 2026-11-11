@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useId, useState, type FormEvent } from "react";
 import { KeyRound, Pencil, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -46,36 +47,30 @@ export function UsersPage() {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [result, setResult] = useState<Page<CurrentUser> | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<CurrentUser | null>(null);
   const [resetting, setResetting] = useState<CurrentUser | null>(null);
   const [deactivating, setDeactivating] = useState<CurrentUser | null>(null);
 
-  const load = useCallback(async () => {
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-    if (search) {
-      params.set("q", search);
-    }
-    try {
-      setResult(await apiRequest<Page<CurrentUser>>("GET", `/users?${params.toString()}`));
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(errorMessage(err));
-    }
-  }, [page, search]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const usersQuery = useQuery({
+    queryKey: ["users", { page, pageSize: PAGE_SIZE, search }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (search) {
+        params.set("q", search);
+      }
+      return apiRequest<Page<CurrentUser>>("GET", `/users?${params.toString()}`);
+    },
+  });
+  const result = usersQuery.data;
+  const refresh = () => usersQuery.refetch();
 
   async function changeRole(target: CurrentUser, role: UserRole) {
     setRowError(null);
     try {
       await apiRequest<{ user: CurrentUser }>("PATCH", `/users/${target.id}`, { role });
-      await load();
+      await refresh();
     } catch (err) {
       setRowError(errorMessage(err));
     }
@@ -85,7 +80,7 @@ export function UsersPage() {
     setRowError(null);
     try {
       await apiRequest<{ user: CurrentUser }>("PATCH", `/users/${target.id}`, { isActive });
-      await load();
+      await refresh();
     } catch (err) {
       setRowError(errorMessage(err));
     }
@@ -121,9 +116,9 @@ export function UsersPage() {
       </div>
 
       <Card className="gap-0 py-0">
-        {loadError || rowError ? (
+        {usersQuery.error || rowError ? (
           <div className="flex flex-col gap-2 px-4 pb-4">
-            <ErrorAlert message={loadError} />
+            <ErrorAlert message={usersQuery.error ? errorMessage(usersQuery.error) : null} />
             <ErrorAlert message={rowError} />
           </div>
         ) : null}
@@ -202,7 +197,7 @@ export function UsersPage() {
         onOpenChange={setCreateOpen}
         onCreated={() => {
           setCreateOpen(false);
-          void load();
+          void refresh();
         }}
       />
       <ConfirmDialog
@@ -220,7 +215,7 @@ export function UsersPage() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            void load();
+            void refresh();
           }}
         />
       ) : null}
@@ -230,7 +225,7 @@ export function UsersPage() {
           onClose={() => setResetting(null)}
           onReset={() => {
             setResetting(null);
-            void load();
+            void refresh();
           }}
         />
       ) : null}

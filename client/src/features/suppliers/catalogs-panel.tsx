@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -32,24 +33,20 @@ interface CatalogsPanelProps {
 /** Lists, uploads, edits, downloads, and deletes a supplier's catalogs (FR-CLG-01..07). */
 export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
   const { t } = useTranslation();
-  const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Catalog | null>(null);
   const [deleting, setDeleting] = useState<Catalog | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const result = await apiRequest<{ items: Catalog[] }>("GET", `/suppliers/${supplierId}/catalogs`);
-      setCatalogs(result.items);
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [supplierId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const queryClient = useQueryClient();
+  const catalogsQuery = useQuery({
+    queryKey: ["catalogs", "supplier", supplierId],
+    queryFn: async () =>
+      (await apiRequest<{ items: Catalog[] }>("GET", `/suppliers/${supplierId}/catalogs`)).items,
+  });
+  const catalogs = catalogsQuery.data ?? [];
+  const refresh = () => {
+    setError(null);
+    void catalogsQuery.refetch();
+  };
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -57,7 +54,7 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
     setDeleting(null);
     try {
       await apiRequest<void>("DELETE", `/catalogs/${target.id}`);
-      await load();
+      await queryClient.invalidateQueries({ queryKey: ["catalogs", "supplier", supplierId] });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -65,9 +62,9 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {isAdmin ? <CatalogUploadForm supplierId={supplierId} onUploaded={load} /> : null}
+      {isAdmin ? <CatalogUploadForm supplierId={supplierId} onUploaded={refresh} /> : null}
 
-      <ErrorAlert message={error} />
+      <ErrorAlert message={error ?? (catalogsQuery.error ? errorMessage(catalogsQuery.error) : null)} />
 
       <Card className="gap-0 py-0">
         <Table aria-label={t("suppliers.catalogs")}>
@@ -124,7 +121,7 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            void load();
+            refresh();
           }}
         />
       ) : null}

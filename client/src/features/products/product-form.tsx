@@ -1,5 +1,5 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,24 +9,30 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FieldDescription, FieldGroup, FieldLegend, FieldSeparator, FieldSet } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSeparator,
+  FieldSet,
+} from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
 import { ErrorAlert } from "../../components/error-alert";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
-import { loadSettings } from "../../api/settings";
 import type {
   AttributeField,
-  AttributeSetDetail,
-  AttributeSetSummary,
   AttributeValue,
-  Page,
   ProductDetail,
-  Supplier,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { FormField } from "../../components/form-field";
 import { SelectField } from "../../components/select-field";
 import { AttributeInput } from "./attribute-input";
+import { useProductFormData } from "./use-product-form-data";
 
 interface ProductFormProps {
   /** When set, the form edits this product; otherwise it creates one. */
@@ -34,6 +40,39 @@ interface ProductFormProps {
   defaultSupplierId?: string;
   onClose: () => void;
   onSaved: (product: ProductDetail) => void;
+}
+
+interface ProductDescriptionFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string | undefined;
+}
+
+function ProductDescriptionField({ label, value, onChange, error }: ProductDescriptionFieldProps) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = `${id}-hint`;
+
+  return (
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Textarea
+        id={id}
+        value={value}
+        maxLength={2000}
+        rows={4}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={hintId}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {error ? (
+        <FieldError id={hintId}>{error}</FieldError>
+      ) : (
+        <FieldDescription id={hintId}>{t("products.descriptionLimit")}</FieldDescription>
+      )}
+    </Field>
+  );
 }
 
 function initialValues(product: ProductDetail | undefined): Record<string, AttributeValue> {
@@ -55,46 +94,23 @@ function toSubmitValue(field: AttributeField, value: AttributeValue): AttributeV
 export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: ProductFormProps) {
   const { t } = useTranslation();
   const [supplierId, setSupplierId] = useState<string | null>(product?.supplierId ?? defaultSupplierId ?? null);
-  const [name, setName] = useState(localize(product?.name));
+  const [nameEn, setNameEn] = useState(product?.name.en ?? "");
+  const [nameFr, setNameFr] = useState(product?.name.fr ?? "");
+  const [nameFrEdited, setNameFrEdited] = useState(Boolean(product));
+  const [descriptionEn, setDescriptionEn] = useState(product?.description.en ?? "");
+  const [descriptionFr, setDescriptionFr] = useState(product?.description.fr ?? "");
   const [supplierSku, setSupplierSku] = useState(product?.supplierSku ?? "");
   const [minQuantity, setMinQuantity] = useState(product ? String(product.minQuantity) : "1");
   const [cost, setCost] = useState(product?.cost ?? "");
   const [currency, setCurrency] = useState<string | null>(product?.currency ?? null);
   const [attributeSetId, setAttributeSetId] = useState<string | null>(product?.attributeSet?.id ?? null);
   const [values, setValues] = useState<Record<string, AttributeValue>>(() => initialValues(product));
-  const [fields, setFields] = useState<AttributeField[]>([]);
   const [pendingSetId, setPendingSetId] = useState<string | null | undefined>(undefined);
 
-  const [currencies, setCurrencies] = useState<string[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [sets, setSets] = useState<AttributeSetSummary[]>([]);
+  const { currencies, defaultCurrency, suppliers, sets, fields, error: dataError } =
+    useProductFormData(attributeSetId);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    loadSettings()
-      .then((settings) => {
-        setCurrencies(settings.currencies);
-        setCurrency((current) => current ?? settings.defaultCurrency);
-      })
-      .catch((err: unknown) => setError(new ApiError(500, "INTERNAL_ERROR", errorMessage(err))));
-    apiRequest<Page<Supplier>>("GET", "/suppliers?pageSize=100")
-      .then((result) => setSuppliers(result.items))
-      .catch(() => undefined);
-    apiRequest<{ items: AttributeSetSummary[] }>("GET", "/attribute-sets")
-      .then((result) => setSets(result.items))
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (!attributeSetId) {
-      setFields([]);
-      return;
-    }
-    apiRequest<{ attributeSet: AttributeSetDetail }>("GET", `/attribute-sets/${attributeSetId}`)
-      .then((result) => setFields(result.attributeSet.fields.filter((f) => !f.isArchived)))
-      .catch((err: unknown) => setError(new ApiError(500, "INTERNAL_ERROR", errorMessage(err))));
-  }, [attributeSetId]);
 
   const supplierOptions = useMemo(() => {
     const options = suppliers.map((s) => ({ value: s.id, label: s.name }));
@@ -106,6 +122,11 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
   }, [suppliers, product]);
   const currencyOptions = useMemo(() => currencies.map((c) => ({ value: c, label: c })), [currencies]);
   const setOptions = useMemo(() => [{ value: "", label: t("attributeSets.noneOption") }, ...sets.map((s) => ({ value: s.id, label: localize(s.name) }))], [sets, t]);
+
+  function changeEnglishName(value: string) {
+    setNameEn(value);
+    if (!nameFrEdited) setNameFr(value);
+  }
 
   function requestSetChange(next: string | null) {
     const normalized = next || null;
@@ -133,13 +154,15 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
       return;
     }
     const body = {
-      // Keeps the stored French name and description until the bilingual form lands (SPEC FR-I18N-04, FR-PRD-11).
-      name: { en: name, fr: product ? product.name.fr : name },
-      description: product ? product.description : undefined,
+      name: { en: nameEn, fr: nameFr },
+      description: {
+        en: descriptionEn.trim() || null,
+        fr: descriptionFr.trim() || null,
+      },
       supplierSku,
       minQuantity: minQuantity.trim() === "" ? null : Number(minQuantity),
       cost: cost.trim(),
-      currency,
+      currency: currency ?? defaultCurrency,
       attributeSetId,
       attributeValues: fields.map((field) => ({ fieldId: field.id, value: toSubmitValue(field, values[field.id] ?? null) })),
     };
@@ -158,18 +181,19 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
 
   const archivedValues = product?.attributeValues.filter((v) => v.isArchived && v.fieldId) ?? [];
   const unmatchedErrors = error?.details.filter((d) => !d.field) ?? [];
+  const displayedError = error ?? dataError;
 
   return (
     <>
       <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[95dvh] overflow-y-auto sm:max-w-2xl">
           <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
             <DialogHeader>
               <DialogTitle>{product ? t("products.editAria", { name: localize(product.name) }) : t("products.createProduct")}</DialogTitle>
             </DialogHeader>
             <FieldGroup>
-              {error && (error.details.length === 0 || unmatchedErrors.length > 0) ? (
-                <ErrorAlert message={error.message} />
+              {displayedError && (displayedError.details.length === 0 || unmatchedErrors.length > 0) ? (
+                <ErrorAlert message={displayedError.message} />
               ) : null}
               <ErrorAlert message={error?.fieldError("attributeValues")} />
 
@@ -183,7 +207,25 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                 error={error?.fieldError("supplierId")}
               />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <FormField label={t("suppliers.name")} value={name} onChange={setName} required error={error?.fieldError("name")} />
+                <FormField
+                  label={t("products.nameEn")}
+                  value={nameEn}
+                  onChange={changeEnglishName}
+                  required
+                  maxLength={200}
+                  error={error?.fieldError("name.en")}
+                />
+                <FormField
+                  label={t("products.nameFr")}
+                  value={nameFr}
+                  onChange={(value) => {
+                    setNameFr(value);
+                    setNameFrEdited(true);
+                  }}
+                  required
+                  maxLength={200}
+                  error={error?.fieldError("name.fr")}
+                />
                 <FormField label={t("products.supplierSku")} value={supplierSku} onChange={setSupplierSku} required error={error?.fieldError("supplierSku")} />
                 <FormField
                   label={t("products.minimumQuantity")}
@@ -204,12 +246,30 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                 <SelectField
                   label={t("products.currency")}
                   options={currencyOptions}
-                  value={currency}
+                  value={currency ?? defaultCurrency}
                   onChange={setCurrency}
                   required
                   error={error?.fieldError("currency")}
                 />
               </div>
+
+              <FieldSet>
+                <FieldLegend>{t("products.productDescription")}</FieldLegend>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ProductDescriptionField
+                    label={t("products.descriptionEn")}
+                    value={descriptionEn}
+                    onChange={setDescriptionEn}
+                    error={error?.fieldError("description.en")}
+                  />
+                  <ProductDescriptionField
+                    label={t("products.descriptionFr")}
+                    value={descriptionFr}
+                    onChange={setDescriptionFr}
+                    error={error?.fieldError("description.fr")}
+                  />
+                </div>
+              </FieldSet>
 
               <FieldSeparator />
               <FieldSet>

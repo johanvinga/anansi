@@ -1,4 +1,5 @@
 ﻿import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiRequest } from "../../api/client";
@@ -10,12 +11,16 @@ import { ChangePasswordForm } from "./change-password-form";
 export function AccountPage() {
   const { user, setUser } = useAuth();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   if (!user) {
     return null;
   }
 
   async function refreshProfile() {
-    const result = await apiRequest<{ user: CurrentUser }>("GET", "/auth/me");
+    const result = await queryClient.fetchQuery({
+      queryKey: ["current-user"],
+      queryFn: () => apiRequest<{ user: CurrentUser }>("GET", "/auth/me"),
+    });
     setUser(result.user);
   }
 

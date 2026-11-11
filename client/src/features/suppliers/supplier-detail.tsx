@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,6 @@ export function SupplierDetail({
   const { user } = useAuth();
   const { t } = useTranslation();
   const isAdmin = user?.role === "admin";
-  const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [internalTab, setInternalTab] = useState<DetailTab>("details");
   const tab = controlledTab ?? internalTab;
@@ -59,24 +59,24 @@ export function SupplierDetail({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const result = await apiRequest<{ supplier: Supplier }>("GET", `/suppliers/${supplierId}`);
-      setSupplier(result.supplier);
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [supplierId]);
+  const queryClient = useQueryClient();
+  const supplierQuery = useQuery({
+    queryKey: ["supplier", supplierId],
+    queryFn: async () =>
+      (await apiRequest<{ supplier: Supplier }>("GET", `/suppliers/${supplierId}`)).supplier,
+  });
+  const supplier = supplierQuery.data ?? null;
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  function updateSupplier(updated: Supplier) {
+    queryClient.setQueryData(["supplier", supplierId], updated);
+    void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+  }
 
   async function handleDelete() {
     setDeleting(true);
     try {
       await apiRequest<void>("DELETE", `/suppliers/${supplierId}`);
+      await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
       onDeleted();
     } catch (err) {
       setError(errorMessage(err));
@@ -110,7 +110,7 @@ export function SupplierDetail({
         }
       />
 
-      <ErrorAlert message={error} />
+      <ErrorAlert message={error ?? (supplierQuery.error ? errorMessage(supplierQuery.error) : null)} />
 
       {!supplier ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)} className="gap-4">
@@ -136,7 +136,7 @@ export function SupplierDetail({
                 supplier={supplier}
                 onCancel={() => setEditing(false)}
                 onSaved={(updated) => {
-                  setSupplier(updated);
+                  updateSupplier(updated);
                   setEditing(false);
                 }}
               />
@@ -174,7 +174,7 @@ export function SupplierDetail({
           </TabsContent>
 
           <TabsContent value="categories">
-            <CategoriesTab supplier={supplier} isAdmin={isAdmin} onSaved={setSupplier} onError={setError} />
+            <CategoriesTab supplier={supplier} isAdmin={isAdmin} onSaved={updateSupplier} onError={setError} />
           </TabsContent>
 
           <TabsContent value="assets">

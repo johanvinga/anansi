@@ -1,4 +1,5 @@
-﻿import { useEffect, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { FieldGroup } from "@/components/ui/field";
 import { ApiError, apiRequest, apiUpload, errorMessage } from "../../api/client";
-import type { Supplier } from "../../api/types";
+import type { Page, Supplier } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { PdfFileField } from "../../components/pdf-file-field";
@@ -33,7 +34,6 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [addNewSupplier, setAddNewSupplier] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState("");
@@ -41,14 +41,15 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    apiRequest<{ items: Supplier[] }>(
-      "GET",
-      `/suppliers?page=1&pageSize=${SUPPLIER_PICKER_LIMIT}`,
-    )
-      .then((res) => setSuppliers(res.items))
-      .catch((err) => setError(errorMessage(err)));
-  }, []);
+  const suppliersQuery = useQuery({
+    queryKey: ["suppliers", "picker", SUPPLIER_PICKER_LIMIT],
+    queryFn: async () =>
+      (await apiRequest<Page<Supplier>>(
+        "GET",
+        `/suppliers?page=1&pageSize=${SUPPLIER_PICKER_LIMIT}`,
+      )).items,
+  });
+  const suppliers = suppliersQuery.data ?? [];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +107,7 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
-            <ErrorAlert message={error} />
+            <ErrorAlert message={error ?? (suppliersQuery.error ? errorMessage(suppliersQuery.error) : null)} />
             <PdfFileField file={file} onChange={setFile} />
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label={t("catalogs.catalogName")} name="name" value={name} onChange={setName} required />

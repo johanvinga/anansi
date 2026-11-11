@@ -76,23 +76,23 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
     try {
       const result = field
         ? await apiRequest<{ attributeSet: AttributeSetDetail }>("PUT", `/attribute-sets/${attributeSetId}/fields/${field.id}`, {
-            // Keeps the stored French values until the bilingual editor lands (SPEC FR-I18N-04).
-            name: { en: name, fr: field.name.fr },
-            dataType: typeLocked ? undefined : dataType,
-            unit: unit.trim() || null,
-            isRequired,
-            options:
-              dataType === "select"
-                ? filledOptions.map((o) => ({ id: o.id, label: { en: o.label, fr: o.fr ?? o.label } }))
-                : undefined,
-          })
+          // Keeps the stored French values until the bilingual editor lands (SPEC FR-I18N-04).
+          name: { en: name, fr: field.name.fr },
+          dataType: typeLocked ? undefined : dataType,
+          unit: unit.trim() || null,
+          isRequired,
+          options:
+            dataType === "select"
+              ? filledOptions.map((o) => ({ id: o.id, label: { en: o.label, fr: o.fr ?? o.label } }))
+              : undefined,
+        })
         : await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", `/attribute-sets/${attributeSetId}/fields`, {
-            name: { en: name },
-            dataType,
-            unit: unit.trim() || null,
-            isRequired,
-            options: dataType === "select" ? filledOptions.map((o) => ({ en: o.label })) : undefined,
-          });
+          name: { en: name },
+          dataType,
+          unit: unit.trim() || null,
+          isRequired,
+          options: dataType === "select" ? filledOptions.map((o) => ({ en: o.label })) : undefined,
+        });
       onSaved(result.attributeSet);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));
