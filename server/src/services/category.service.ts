@@ -2,6 +2,7 @@ import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
+import type { Translated } from "../lib/translations.js";
 import {
   AuditAction,
   diffFields,
@@ -13,12 +14,17 @@ export type CategoryInput = { id: string } | { name: string };
 
 export interface CategoryDto {
   id: string;
-  name: string;
+  name: Translated;
   createdAt: string;
 }
 
-function toCategoryDto(row: { id: string; name: string; createdAt: Date }): CategoryDto {
-  return { id: row.id, name: row.name, createdAt: row.createdAt.toISOString() };
+function toCategoryDto(row: { id: string; nameEn: string; nameFr: string; createdAt: Date }): CategoryDto {
+  return { id: row.id, name: { en: row.nameEn, fr: row.nameFr }, createdAt: row.createdAt.toISOString() };
+}
+
+/** Audit snapshot of both names, so each locale's change is recorded (FR-I18N-08). */
+function namesOf(row: { nameEn: string; nameFr: string }): Record<string, string> {
+  return { "name.en": row.nameEn, "name.fr": row.nameFr };
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -29,8 +35,15 @@ const categoryConflict = () => errors.conflict("A category with this name alread
 
 export async function listCategories(db: Database, request: AuditRequestContext, q?: string) {
   const rows = await db.category.findMany({
-    where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
-    orderBy: { name: "asc" },
+    where: q
+      ? {
+          OR: [
+            { nameEn: { contains: q, mode: "insensitive" } },
+            { nameFr: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : undefined,
+    orderBy: { nameEn: "asc" },
     take: 500,
   });
   await recordAudit(db, request, { action: AuditAction.CATEGORY_LIST, outcome: "success" });
@@ -40,21 +53,23 @@ export async function listCategories(db: Database, request: AuditRequestContext,
 export async function createCategory(
   db: Database,
   request: AuditRequestContext,
-  name: string,
+  name: Translated,
 ): Promise<CategoryDto> {
-  const nameKey = nameKeyOf(name);
+  const nameKey = nameKeyOf(name.en);
   if (await db.category.findUnique({ where: { nameKey } })) {
     throw categoryConflict();
   }
   try {
     return await db.$transaction(async (tx) => {
-      const row = await tx.category.create({ data: { name: name.trim(), nameKey } });
+      const row = await tx.category.create({
+        data: { nameEn: name.en.trim(), nameFr: name.fr.trim(), nameKey },
+      });
       await recordAudit(tx, request, {
         action: AuditAction.CATEGORY_CREATE,
         outcome: "success",
         entityType: "Category",
         entityId: row.id,
-        changes: diffFields({}, { name: row.name }),
+        changes: diffFields({}, namesOf(row)),
       });
       return toCategoryDto(row);
     });
@@ -68,9 +83,9 @@ export async function renameCategory(
   db: Database,
   request: AuditRequestContext,
   id: string,
-  name: string,
+  name: Translated,
 ): Promise<CategoryDto> {
-  const nameKey = nameKeyOf(name);
+  const nameKey = nameKeyOf(name.en);
   try {
     return await db.$transaction(async (tx) => {
       const existing = await tx.category.findUnique({ where: { id } });
@@ -78,9 +93,9 @@ export async function renameCategory(
 
       const updated = await tx.category.update({
         where: { id },
-        data: { name: name.trim(), nameKey },
+        data: { nameEn: name.en.trim(), nameFr: name.fr.trim(), nameKey },
       });
-      const changes = diffFields({ name: existing.name }, { name: updated.name });
+      const changes = diffFields(namesOf(existing), namesOf(updated));
       if (changes) {
         await recordAudit(tx, request, {
           action: AuditAction.CATEGORY_UPDATE,
@@ -110,7 +125,7 @@ export async function deleteCategory(db: Database, request: AuditRequestContext,
       outcome: "success",
       entityType: "Category",
       entityId: id,
-      changes: diffFields({ name: existing.name }, { name: null }),
+      changes: diffFields(namesOf(existing), { "name.en": null, "name.fr": null }),
     });
   });
 }
@@ -135,19 +150,22 @@ export async function resolveCategoryIds(
       continue;
     }
 
+    // Inline creation from a supplier form has one name, so both locales get the same value (FR-I18N-02).
     const nameKey = nameKeyOf(input.name);
     const found = await tx.category.findUnique({ where: { nameKey } });
     if (found) {
       ids.add(found.id);
       continue;
     }
-    const created = await tx.category.create({ data: { name: input.name.trim(), nameKey } });
+    const created = await tx.category.create({
+      data: { nameEn: input.name.trim(), nameFr: input.name.trim(), nameKey },
+    });
     await recordAudit(tx, request, {
       action: AuditAction.CATEGORY_CREATE,
       outcome: "success",
       entityType: "Category",
       entityId: created.id,
-      changes: diffFields({}, { name: created.name }),
+      changes: diffFields({}, namesOf(created)),
     });
     ids.add(created.id);
   }

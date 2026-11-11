@@ -72,8 +72,9 @@ enum AttributeDataType {
 
 model AttributeSet {
   id        String   @id @default(uuid()) @db.Uuid
-  name      String   @db.VarChar(100)
-  /// Lowercased name; enforces case-insensitive uniqueness (FR-ATS-01).
+  nameEn    String   @map("name_en") @db.VarChar(100)
+  nameFr    String   @map("name_fr") @db.VarChar(100)
+  /// Lowercased English name; enforces case-insensitive uniqueness (FR-ATS-01, FR-I18N-07).
   nameKey   String   @unique @map("name_key") @db.VarChar(100)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -87,7 +88,8 @@ model AttributeSet {
 model AttributeField {
   id             String            @id @default(uuid()) @db.Uuid
   attributeSetId String            @map("attribute_set_id") @db.Uuid
-  name           String            @db.VarChar(100)
+  nameEn         String            @map("name_en") @db.VarChar(100)
+  nameFr         String            @map("name_fr") @db.VarChar(100)
   code           String            @db.VarChar(100)
   dataType       AttributeDataType @map("data_type")
   unit           String?           @db.VarChar(20)
@@ -107,20 +109,24 @@ model AttributeField {
 model AttributeOption {
   id               String @id @default(uuid()) @db.Uuid
   attributeFieldId String @map("attribute_field_id") @db.Uuid
-  label            String @db.VarChar(100)
+  labelEn          String @map("label_en") @db.VarChar(100)
+  labelFr          String @map("label_fr") @db.VarChar(100)
   sortOrder        Int    @map("sort_order")
 
   field  AttributeField          @relation(fields: [attributeFieldId], references: [id], onDelete: Cascade)
   values ProductAttributeValue[]
 
-  @@unique([attributeFieldId, label])
+  @@unique([attributeFieldId, labelEn])
   @@map("attribute_options")
 }
 
 model Product {
   id             String   @id @default(uuid()) @db.Uuid
   supplierId     String   @map("supplier_id") @db.Uuid
-  name           String   @db.VarChar(200)
+  nameEn         String   @map("name_en") @db.VarChar(200)
+  nameFr         String   @map("name_fr") @db.VarChar(200)
+  descriptionEn  String?  @map("description_en") @db.Text
+  descriptionFr  String?  @map("description_fr") @db.Text
   supplierSku    String   @map("supplier_sku") @db.VarChar(100)
   /// Lowercased SKU; enforces per-supplier case-insensitive uniqueness (FR-PRD-03).
   skuKey         String   @map("sku_key") @db.VarChar(100)
@@ -137,7 +143,7 @@ model Product {
 
   @@unique([supplierId, skuKey])
   @@index([supplierId])
-  @@index([name])
+  @@index([nameEn])
   @@map("products")
 }
 
@@ -161,8 +167,9 @@ model ProductAttributeValue {
 
 model Category {
   id        String   @id @default(uuid()) @db.Uuid
-  name      String   @db.VarChar(100)
-  /// Lowercased name; enforces case-insensitive uniqueness.
+  nameEn    String   @map("name_en") @db.VarChar(100)
+  nameFr    String   @map("name_fr") @db.VarChar(100)
+  /// Lowercased English name; enforces case-insensitive uniqueness (FR-I18N-07).
   nameKey   String   @unique @map("name_key") @db.VarChar(100)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 

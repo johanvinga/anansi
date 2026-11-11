@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Database } from "../db.js";
 import { parseInput, uuidSchema } from "../lib/validation.js";
+import { translatedNameInput, translatedNameUpdate } from "../lib/translations.js";
 import {
   addField,
   createAttributeSet,
@@ -15,11 +16,12 @@ import {
 } from "../services/attribute-set.service.js";
 import { auditContext, type Guards } from "./route-helpers.js";
 
-const setNameSchema = z.object({ name: z.string().trim().min(1, "Name is required.").max(100) });
+const setCreateSchema = z.object({ name: translatedNameInput(100) });
+const setUpdateSchema = z.object({ name: translatedNameUpdate(100) });
 const dataTypeSchema = z.enum(["text", "number", "decimal", "boolean", "date", "select"]);
-const fieldNameSchema = z.string().trim().min(1, "Name is required.").max(100);
+const fieldNameSchema = translatedNameInput(100);
 const unitSchema = z.string().trim().max(20).nullish();
-const optionLabelSchema = z.string().trim().min(1, "Option labels cannot be empty.").max(100);
+const optionLabelSchema = translatedNameInput(100);
 
 const createFieldSchema = z.object({
   name: fieldNameSchema,
@@ -31,7 +33,7 @@ const createFieldSchema = z.object({
 
 const updateFieldSchema = z
   .object({
-    name: fieldNameSchema.optional(),
+    name: translatedNameUpdate(100).optional(),
     dataType: dataTypeSchema.optional(),
     unit: unitSchema,
     isRequired: z.boolean().optional(),
@@ -52,7 +54,7 @@ export function registerAttributeSetRoutes(app: FastifyInstance, db: Database, g
   );
 
   app.post("/attribute-sets", { preHandler: guards.requireAdmin }, async (request, reply) => {
-    const body = parseInput(setNameSchema, request.body);
+    const body = parseInput(setCreateSchema, request.body);
     const attributeSet = await createAttributeSet(db, auditContext(request), body.name);
     return reply.status(201).send({ attributeSet });
   });
@@ -64,7 +66,7 @@ export function registerAttributeSetRoutes(app: FastifyInstance, db: Database, g
 
   app.put("/attribute-sets/:id", { preHandler: guards.requireAdmin }, async (request) => {
     const { id } = parseInput(setParams, request.params);
-    const body = parseInput(setNameSchema, request.body);
+    const body = parseInput(setUpdateSchema, request.body);
     return { attributeSet: await renameAttributeSet(db, auditContext(request), id, body.name) };
   });
 

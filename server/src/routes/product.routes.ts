@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Database } from "../db.js";
 import { isCurrencyCode } from "../lib/currency.js";
+import { translatedNameInput, translatedNameUpdate, translatedTextInput } from "../lib/translations.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import {
   createProduct,
@@ -33,7 +34,8 @@ const attributeValueSchema = z.object({
 });
 
 const productBodySchema = z.object({
-  name: z.string().trim().min(1, "Name is required.").max(200),
+  name: translatedNameInput(200),
+  description: translatedTextInput,
   supplierSku: z.string().trim().min(1, "Supplier SKU is required.").max(100),
   minQuantity: z
     .number({ error: "Minimum quantity must be a whole number." })
@@ -46,7 +48,10 @@ const productBodySchema = z.object({
   attributeValues: z.array(attributeValueSchema).max(200).optional(),
 });
 
-const productUpdateSchema = productBodySchema.extend({ supplierId: uuidSchema.optional() });
+const productUpdateSchema = productBodySchema.extend({
+  name: translatedNameUpdate(200),
+  supplierId: uuidSchema.optional(),
+});
 
 const listQuerySchema = paginationSchema.extend({
   q: z.string().trim().max(200).optional(),

@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next";
+﻿import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from "react";
 import { Archive, ArrowDown, ArrowLeft, ArrowUp, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import { FieldGroup } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import type { AttributeField, AttributeSetDetail } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert } from "../../components/error-alert";
@@ -145,7 +146,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
         `/attribute-sets/${attributeSetId}/fields/${target.id}`,
       );
       setDetail(result.attributeSet);
-      setStatus(result.result === "archived" ? t("attributeSets.wasArchived", { name: target.name }) : t("attributeSets.wasDeleted", { name: target.name }));
+      setStatus(result.result === "archived" ? t("attributeSets.wasArchived", { name: localize(target.name) }) : t("attributeSets.wasDeleted", { name: localize(target.name) }));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -164,8 +165,8 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
   return (
     <>
       <PageHeader
-        title={detail.name}
-        breadcrumbs={[{ label: t("attributeSets.title"), to: "/attribute-sets" }, { label: detail.name }]}
+        title={localize(detail.name)}
+        breadcrumbs={[{ label: t("attributeSets.title"), to: "/attribute-sets" }, { label: localize(detail.name) }]}
         actions={backButton}
       />
 
@@ -240,33 +241,33 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
                 {isAdmin ? <GripVertical aria-hidden="true" className="size-4 shrink-0 cursor-grab text-muted-foreground" /> : null}
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <strong className="text-sm font-medium">{field.name}</strong>
+                    <strong className="text-sm font-medium">{localize(field.name)}</strong>
                     <Badge variant="secondary">{TYPE_LABELS[field.dataType]}</Badge>
                     {field.isRequired ? <Badge variant="warning">{t("attributeSets.required")}</Badge> : null}
                     {field.unit ? <Badge variant="outline">{field.unit}</Badge> : null}
                   </div>
                   <span className="text-xs text-muted-foreground">
                     code: <span className="font-mono">{field.code}</span>
-                    {field.dataType === "select" ? ` Â· ${field.options.map((o) => o.label).join(", ")}` : ""}
+                    {field.dataType === "select" ? ` Â· ${field.options.map((o) => localize(o.label)).join(", ")}` : ""}
                   </span>
                 </div>
                 {isAdmin ? (
                   <div className="flex items-center gap-1">
                     <IconAction
-                      label={t("attributeSets.moveUp", { name: field.name })}
+                      label={t("attributeSets.moveUp", { name: localize(field.name) })}
                       icon={ArrowUp}
                       disabled={index === 0}
                       onClick={() => moveField(field.id, index - 1)}
                     />
                     <IconAction
-                      label={t("attributeSets.moveDown", { name: field.name })}
+                      label={t("attributeSets.moveDown", { name: localize(field.name) })}
                       icon={ArrowDown}
                       disabled={index === activeFields.length - 1}
                       onClick={() => moveField(field.id, index + 1)}
                     />
-                    <IconAction label={t("attributeSets.editFieldAria", { name: field.name })} icon={Pencil} onClick={() => setEditingField(field)} />
+                    <IconAction label={t("attributeSets.editFieldAria", { name: localize(field.name) })} icon={Pencil} onClick={() => setEditingField(field)} />
                     <IconAction
-                      label={field.hasValues ? t("attributeSets.archiveAria", { name: field.name }) : t("attributeSets.deleteAria2", { name: field.name })}
+                      label={field.hasValues ? t("attributeSets.archiveAria", { name: localize(field.name) }) : t("attributeSets.deleteAria2", { name: localize(field.name) })}
                       icon={field.hasValues ? Archive : Trash2}
                       destructive
                       onClick={() => setRemovingField(field)}
@@ -291,7 +292,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
             <ul className="flex flex-col gap-2 text-sm">
               {archivedFields.map((field) => (
                 <li key={field.id} className="flex flex-wrap items-center gap-2 text-muted-foreground">
-                  {field.name}
+                  {localize(field.name)}
                   <Badge variant="outline">{TYPE_LABELS[field.dataType]}</Badge>
                   <span className="font-mono text-xs">{field.code}</span>
                 </li>
@@ -327,7 +328,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
 
       <ConfirmDialog
         open={removingField !== null}
-        title={removingField?.hasValues ? t("attributeSets.archiveTitle", { name: removingField.name }) : t("attributeSets.confirmDeleteFieldTitle", { name: removingField?.name ?? t("attributeSets.fieldWord") })}
+        title={removingField?.hasValues ? t("attributeSets.archiveTitle", { name: localize(removingField.name) }) : t("attributeSets.confirmDeleteFieldTitle", { name: removingField ? localize(removingField.name) : t("attributeSets.fieldWord") })}
         description={
           removingField?.hasValues
             ? t("attributeSets.archiveDescription")
@@ -340,7 +341,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
 
       <ConfirmDialog
         open={confirmDelete}
-        title={t("attributeSets.confirmDeleteFieldTitle", { name: detail.name })}
+        title={t("attributeSets.confirmDeleteFieldTitle", { name: localize(detail.name) })}
         description={t("attributeSets.confirmDeleteSetDescription")}
         confirmLabel={t("attributeSets.deleteSet")}
         onConfirm={() => void handleDeleteSet()}
@@ -358,7 +359,7 @@ interface RenameSetDialogProps {
 
 function RenameSetDialog({ detail, onClose, onSaved }: RenameSetDialogProps) {
   const { t } = useTranslation();
-  const [name, setName] = useState(detail.name);
+  const [name, setName] = useState(localize(detail.name));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -367,7 +368,7 @@ function RenameSetDialog({ detail, onClose, onSaved }: RenameSetDialogProps) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("PUT", `/attribute-sets/${detail.id}`, { name });
+      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("PUT", `/attribute-sets/${detail.id}`, { name: { en: name, fr: detail.name.fr } });
       onSaved(result.attributeSet);
     } catch (err) {
       setError(errorMessage(err));

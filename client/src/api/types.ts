@@ -32,9 +32,20 @@ export interface AuditLogSummary {
   requestId: string;
 }
 
+/** A translatable value: one string per locale (FR-I18N-01). */
+export interface Translated {
+  en: string;
+  fr: string;
+}
+
+export interface TranslatedText {
+  en: string | null;
+  fr: string | null;
+}
+
 export interface CategoryRef {
   id: string;
-  name: string;
+  name: Translated;
 }
 
 export interface Category extends CategoryRef {
@@ -89,13 +100,13 @@ export type AttributeDataType = "text" | "number" | "decimal" | "boolean" | "dat
 
 export interface AttributeOption {
   id: string;
-  label: string;
+  label: Translated;
   sortOrder: number;
 }
 
 export interface AttributeField {
   id: string;
-  name: string;
+  name: Translated;
   code: string;
   dataType: AttributeDataType;
   unit: string | null;
@@ -108,7 +119,7 @@ export interface AttributeField {
 
 export interface AttributeSetSummary {
   id: string;
-  name: string;
+  name: Translated;
   fieldCount: number;
   productCount: number;
   createdAt: string;
@@ -117,7 +128,7 @@ export interface AttributeSetSummary {
 
 export interface AttributeSetDetail {
   id: string;
-  name: string;
+  name: Translated;
   createdAt: string;
   updatedAt: string;
   fields: AttributeField[];
@@ -129,12 +140,12 @@ export interface ProductSummary {
   id: string;
   supplierId: string;
   supplierName: string;
-  name: string;
+  name: Translated;
   supplierSku: string;
   minQuantity: number;
   cost: string;
   currency: string;
-  attributeSet: { id: string; name: string } | null;
+  attributeSet: { id: string; name: Translated } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -142,15 +153,16 @@ export interface ProductSummary {
 export interface ProductAttributeValue {
   fieldId: string;
   code: string;
-  name: string;
+  name: Translated;
   dataType: AttributeDataType;
   unit: string | null;
   isArchived: boolean;
   value: AttributeValue;
-  optionLabel: string | null;
+  optionLabel: Translated | null;
 }
 
 export interface ProductDetail extends ProductSummary {
+  description: TranslatedText;
   attributeValues: ProductAttributeValue[];
 }
 

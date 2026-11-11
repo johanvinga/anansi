@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { Database } from "../db.js";
 import { parseInput, uuidSchema } from "../lib/validation.js";
+import { translatedNameInput, translatedNameUpdate } from "../lib/translations.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import {
   createCategory,
@@ -15,13 +16,12 @@ interface Guards {
   requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
 }
 
-const categoryNameSchema = z.string().trim().min(1, "Name is required.").max(100);
-
 const listQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
 });
 
-const categoryBodySchema = z.object({ name: categoryNameSchema });
+const categoryCreateSchema = z.object({ name: translatedNameInput(100) });
+const categoryUpdateSchema = z.object({ name: translatedNameUpdate(100) });
 
 export function registerCategoryRoutes(app: FastifyInstance, db: Database, guards: Guards): void {
   const context = (request: FastifyRequest): AuditRequestContext => ({
@@ -36,14 +36,14 @@ export function registerCategoryRoutes(app: FastifyInstance, db: Database, guard
   });
 
   app.post("/categories", { preHandler: guards.requireAdmin }, async (request, reply) => {
-    const body = parseInput(categoryBodySchema, request.body);
+    const body = parseInput(categoryCreateSchema, request.body);
     const category = await createCategory(db, context(request), body.name);
     return reply.status(201).send({ category });
   });
 
   app.put("/categories/:id", { preHandler: guards.requireAdmin }, async (request) => {
     const { id } = parseInput(z.object({ id: uuidSchema }), request.params);
-    const body = parseInput(categoryBodySchema, request.body);
+    const body = parseInput(categoryUpdateSchema, request.body);
     return { category: await renameCategory(db, context(request), id, body.name) };
   });
 

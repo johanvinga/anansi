@@ -9,6 +9,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import type { AttributeSetDetail, AttributeSetSummary } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
@@ -48,7 +49,7 @@ export function AttributeSetsPage() {
     event.preventDefault();
     setCreateError(undefined);
     try {
-      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", "/attribute-sets", { name: newName });
+      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", "/attribute-sets", { name: { en: newName } });
       setNewName("");
       navigate(`/attribute-sets/${result.attributeSet.id}`);
     } catch (err) {
@@ -106,7 +107,7 @@ export function AttributeSetsPage() {
               <TableRow key={set.id}>
                 <TableCell className="pl-4 font-medium">
                   <Link to={`/attribute-sets/${set.id}`} className="hover:underline">
-                    {set.name}
+                    {localize(set.name)}
                   </Link>
                 </TableCell>
                 <TableCell className="text-right">
@@ -117,7 +118,7 @@ export function AttributeSetsPage() {
                 </TableCell>
                 <TableCell className="pr-4 text-right">
                   <IconAction
-                    label={isAdmin ? `Open builder for ${set.name}` : `View ${set.name}`}
+                    label={isAdmin ? `Open builder for ${localize(set.name)}` : `View ${localize(set.name)}`}
                     icon={isAdmin ? Settings2 : Eye}
                     onClick={() => navigate(`/attribute-sets/${set.id}`)}
                   />

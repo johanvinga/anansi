@@ -58,6 +58,8 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | D7 | Hosting | Local or on-premises only for now. |
 | D8 | Units | Attribute fields may specify a unit (for example `mm`), stored as metadata only. |
 | D9 | Audit log | Every action is logged (see §4.10). Viewable by admins only, retained indefinitely. |
+| D10 | Locales | English (`en`) and French (`fr`) are the supported locales for translatable data. Each translatable field is stored as one column per locale (see section 5). |
+| D11 | Creation UX | Creating a category, attribute set, product, or supplier opens a modal dialog, the same pattern as creating a catalog. List pages do not use inline text inputs for creation. |
 
 ---
 
@@ -99,12 +101,14 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-SUP-06 | The supplier list shall support filtering by free-text name match. |
 | FR-SUP-07 | The API shall support filtering suppliers by one or more categories (`GET /suppliers?category=<id>`) to enable future search. |
 | FR-SUP-08 | Supplier name shall be unique (case-insensitive) to prevent accidental duplicates. |
+| FR-SUP-09 | Supplier creation shall open a modal dialog (FR-MODAL-01). The categories editor and asset upload remain available inside the dialog. Supplier name and address are not translated. |
+| FR-SUP-10 | After a supplier is created from the dialog, the app shall navigate to the supplier detail page. |
 
 ### 4.3 Categories (FR-CAT)
 
 | ID | Requirement |
 |---|---|
-| FR-CAT-01 | The user shall be able to create a category with a unique name (case-insensitive). |
+| FR-CAT-01 | The user shall be able to create a category with an English name that is unique (case-insensitive) and a French name (see FR-I18N-02). |
 | FR-CAT-02 | The user shall be able to list all categories. |
 | FR-CAT-03 | The user shall be able to rename a category. |
 | FR-CAT-04 | The user shall be able to delete a category. Deleting it removes the association from all suppliers but does not delete the suppliers. |
@@ -142,7 +146,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 
 | ID | Requirement |
 |---|---|
-| FR-ATS-01 | The user shall be able to create an attribute set with a unique name. |
+| FR-ATS-01 | The user shall be able to create an attribute set with an English name that is unique (case-insensitive) and a French name (see FR-I18N-02). |
 | FR-ATS-02 | The user shall be able to list, view, rename, and delete attribute sets. |
 | FR-ATS-03 | The user shall be able to add fields to an attribute set. |
 | FR-ATS-04 | Each field shall have: **name** (required), **code** (auto-generated, unique within the set), **data type** (required), **unit** (optional), **required** flag, **options** (for select type), and **sort order**. |
@@ -169,7 +173,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | ID | Requirement |
 |---|---|
 | FR-PRD-01 | The user shall be able to create a product linked to exactly one supplier. |
-| FR-PRD-02 | A product shall have: **name** (required, 1–200 chars), **supplier SKU** (required), **minimum quantity** (integer ≥ 0, required), **cost** (decimal ≥ 0, up to 2 decimal places, required), and **currency** (any valid ISO 4217 code, required). |
+| FR-PRD-02 | A product shall have: **name** (English and French, both required, 1–200 chars), **supplier SKU** (required), **minimum quantity** (integer ≥ 0, required), **cost** (decimal ≥ 0, up to 2 decimal places, required), and **currency** (any valid ISO 4217 code, required). |
 | FR-PRD-03 | Supplier SKU shall be unique per supplier (case-insensitive). The same SKU may exist under different suppliers. |
 | FR-PRD-04 | A product may optionally be assigned one attribute set. |
 | FR-PRD-05 | When an attribute set is assigned, the product form shall render that set's fields and validate values against their types, units, and required flags. |
@@ -177,6 +181,8 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-PRD-07 | The user shall be able to edit a product, including changing its attribute set. Changing the set requires confirmation; values for fields not in the new set are removed. |
 | FR-PRD-08 | The user shall be able to delete a product. |
 | FR-PRD-09 | Products shall be listed on the supplier detail page and in a global product list with pagination and filtering by supplier and name/SKU. |
+| FR-PRD-10 | A product may have an optional **description** in English and French, each up to 2000 characters. |
+| FR-PRD-11 | The product create and edit forms shall include the name and description fields in both locales. The product detail view shows the description in the active language, falling back to English. |
 | FR-PRD-10 | Products shall display their cost with the product's own currency. |
 
 ### 4.7 Supplier Detail View (FR-UI)
@@ -244,6 +250,34 @@ Where other requirements say "the user", they apply to admins only. Standard use
 | FR-AUD-07 | The audit log UI shall support filtering by user, action, date range, and entity, with pagination. |
 | FR-AUD-08 | Audit entries shall be retained indefinitely. |
 | FR-AUD-09 | For actions that modify data, the audit entry shall be written in the same transaction as the change. |
+
+---
+
+### 4.11 Translations (FR-I18N)
+
+| ID | Requirement |
+|---|---|
+| FR-I18N-01 | A translatable field has two values: `en` and `fr`. For categories, attribute sets, attribute fields, and products, the name is required in both locales. |
+| FR-I18N-02 | On create, the `fr` value defaults to the `en` value. The server applies the same rule if `fr` is omitted, so `fr` is never empty. |
+| FR-I18N-03 | In create and edit dialogs, the `fr` input is pre-filled from `en` until the user edits `fr` manually. After that, the two inputs are no longer linked. |
+| FR-I18N-04 | Rename dialogs show both `en` and `fr` inputs side by side. |
+| FR-I18N-05 | Lists, filter chips, and detail views display the name in the active UI language, falling back to `en` when the active value is empty. |
+| FR-I18N-06 | Search matches text in either locale, case-insensitively. |
+| FR-I18N-07 | Name uniqueness (case-insensitive) applies to the `en` value only, for categories and attribute sets. Attribute field names are unique within a set on the `en` value. |
+| FR-I18N-08 | Audit entries for renames record before and after values for both `en` and `fr`. |
+| FR-I18N-09 | Attribute option labels follow the same rules as attribute field names. Supplier name and address are not translated. |
+
+### 4.12 Creation Dialogs (FR-MODAL)
+
+| ID | Requirement |
+|---|---|
+| FR-MODAL-01 | Creating a category, attribute set, product, or supplier shall open a shadcn `Dialog` with a title, a description, a form body, and a footer with Cancel and Save. This matches the catalog upload dialog. |
+| FR-MODAL-02 | List page headers keep a single primary button that opens the dialog. Inline text inputs for creation are removed from the category and attribute set pages. |
+| FR-MODAL-03 | Validation errors are shown in an error alert inside the dialog, and field errors are shown under the field. The dialog stays open on error. |
+| FR-MODAL-04 | Save is disabled while the request is in flight. On success the dialog closes and the list reloads. |
+| FR-MODAL-05 | Escape and the close button dismiss the dialog without saving. |
+| FR-MODAL-06 | Rename uses the same dialog component as create, with fields pre-filled. |
+| FR-MODAL-07 | Only admins see create entry points (existing role rule). |
 
 ---
 
@@ -468,8 +502,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Method | Path | Description |
 |---|---|---|
 | GET | `/categories?q` | List. |
-| POST | `/categories` | Create. |
-| PUT | `/categories/{id}` | Rename. |
+| POST | `/categories` | Create. Body `name: { en, fr? }`; `fr` defaults to `en` (FR-I18N-02). |
+| PUT | `/categories/{id}` | Rename. Body `name: { en, fr }`. |
 | DELETE | `/categories/{id}` | Delete and unlink. |
 
 ### 6.4 Supplier Assets
@@ -498,9 +532,9 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Method | Path | Description |
 |---|---|---|
 | GET | `/attribute-sets` | List. |
-| POST | `/attribute-sets` | Create. |
+| POST | `/attribute-sets` | Create. Body `name: { en, fr? }`; `fr` defaults to `en`. |
 | GET | `/attribute-sets/{id}` | Detail including fields and options. |
-| PUT | `/attribute-sets/{id}` | Rename. |
+| PUT | `/attribute-sets/{id}` | Rename. Body `name: { en, fr }`. |
 | DELETE | `/attribute-sets/{id}` | Delete if unused. |
 | POST | `/attribute-sets/{id}/fields` | Add field. |
 | PUT | `/attribute-sets/{id}/fields/{fieldId}` | Update field. |
@@ -513,9 +547,9 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 |---|---|---|
 | GET | `/products?page&pageSize&supplierId&q` | Global list. |
 | GET | `/suppliers/{id}/products` | Products for one supplier. |
-| POST | `/suppliers/{id}/products` | Create product under supplier. |
+| POST | `/suppliers/{id}/products` | Create product under supplier. Body `name: { en, fr? }` (`fr` defaults to `en`) and optional `description: { en?, fr? }` (FR-PRD-10). |
 | GET | `/products/{id}` | Detail including attribute values. |
-| PUT | `/products/{id}` | Update. Body may include `attributeSetId` and `attributeValues`. |
+| PUT | `/products/{id}` | Update. Body may include `name`, `description`, `attributeSetId`, and `attributeValues`. |
 | DELETE | `/products/{id}` | Delete. |
 
 ---

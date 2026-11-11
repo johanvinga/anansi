@@ -9,7 +9,16 @@ import { addField, createAttributeSet, type CreateFieldInput } from "../services
  * Creates the example attribute sets from SPEC §4.5. Sets that already exist are skipped.
  * Usage: npm run seed:attribute-sets
  */
-const EXAMPLES: { name: string; fields: CreateFieldInput[] }[] = [
+/** Example data is English only; the French value defaults to the English one (FR-I18N-02). */
+type SeedField = Omit<CreateFieldInput, "name" | "options"> & { name: string; options?: string[] };
+
+const both = (value: string) => ({ en: value, fr: value });
+
+function toFieldInput(field: SeedField): CreateFieldInput {
+  return { ...field, name: both(field.name), options: field.options?.map(both) };
+}
+
+const EXAMPLES: { name: string; fields: SeedField[] }[] = [
   {
     name: "MDF Panel",
     fields: [
@@ -42,9 +51,9 @@ try {
       console.log(`Skipped "${example.name}" (already exists).`);
       continue;
     }
-    const set = await createAttributeSet(db, context, example.name);
+    const set = await createAttributeSet(db, context, both(example.name));
     for (const field of example.fields) {
-      await addField(db, context, set.id, field);
+      await addField(db, context, set.id, toFieldInput(field));
     }
     console.log(`Created "${example.name}" with ${example.fields.length} fields.`);
   }

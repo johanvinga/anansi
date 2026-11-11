@@ -2,6 +2,7 @@ import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
+import type { Translated, TranslatedText } from "../lib/translations.js";
 import { loadFieldDefinitions } from "./attribute-set.service.js";
 import {
   fromValueColumns,
@@ -20,7 +21,9 @@ import {
 type Tx = Prisma.TransactionClient;
 
 export interface ProductInput {
-  name: string;
+  name: Translated;
+  /** Optional in both locales; omitted or empty values are stored as null (FR-PRD-10). */
+  description: TranslatedText;
   supplierSku: string;
   minQuantity: number;
   /** Decimal string with at most 2 decimal places; validated by the route schema. */
@@ -46,7 +49,7 @@ export interface ListProductsFilters {
 
 const listInclude = {
   supplier: { select: { id: true, name: true } },
-  attributeSet: { select: { id: true, name: true } },
+  attributeSet: { select: { id: true, nameEn: true, nameFr: true } },
 } satisfies Prisma.ProductInclude;
 
 const detailInclude = {
@@ -62,12 +65,14 @@ function toProductSummary(row: ListRow) {
     id: row.id,
     supplierId: row.supplierId,
     supplierName: row.supplier.name,
-    name: row.name,
+    name: { en: row.nameEn, fr: row.nameFr },
     supplierSku: row.supplierSku,
     minQuantity: row.minQuantity,
     cost: row.cost.toFixed(2),
     currency: row.currency,
-    attributeSet: row.attributeSet,
+    attributeSet: row.attributeSet
+      ? { id: row.attributeSet.id, name: { en: row.attributeSet.nameEn, fr: row.attributeSet.nameFr } }
+      : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -78,18 +83,19 @@ export type ProductSummaryDto = ReturnType<typeof toProductSummary>;
 function toProductDetail(row: DetailRow) {
   return {
     ...toProductSummary(row),
+    description: { en: row.descriptionEn, fr: row.descriptionFr },
     // Includes archived fields: their values are preserved and returned (SPEC §8.1).
     attributeValues: [...row.values]
       .sort((a, b) => a.field.sortOrder - b.field.sortOrder)
       .map((value) => ({
         fieldId: value.attributeFieldId,
         code: value.field.code,
-        name: value.field.name,
+        name: { en: value.field.nameEn, fr: value.field.nameFr },
         dataType: value.field.dataType,
         unit: value.field.unit,
         isArchived: value.field.isArchived,
         value: fromValueColumns(value.field.dataType as AttributeDataType, value),
-        optionLabel: value.option?.label ?? null,
+        optionLabel: value.option ? { en: value.option.labelEn, fr: value.option.labelFr } : null,
       })),
   };
 }
@@ -100,21 +106,33 @@ export type ProductDetailDto = ReturnType<typeof toProductDetail>;
 function snapshotOf(row: DetailRow): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {
     supplier: row.supplier.name,
-    name: row.name,
+    "name.en": row.nameEn,
+    "name.fr": row.nameFr,
+    "description.en": row.descriptionEn,
+    "description.fr": row.descriptionFr,
     supplierSku: row.supplierSku,
     minQuantity: row.minQuantity,
     cost: row.cost.toFixed(2),
     currency: row.currency,
-    attributeSet: row.attributeSet?.name ?? null,
+    attributeSet: row.attributeSet?.nameEn ?? null,
   };
   for (const value of row.values) {
     const output = fromValueColumns(value.field.dataType as AttributeDataType, value);
-    snapshot[`attribute.${value.field.code}`] = value.option?.label ?? output;
+    snapshot[`attribute.${value.field.code}`] = value.option?.labelEn ?? output;
   }
   return snapshot;
 }
 
 const duplicateSku = () => errors.conflict("This supplier already has a product with this SKU.");
+
+function nameAndDescriptionColumns(input: ProductInput) {
+  return {
+    nameEn: input.name.en.trim(),
+    nameFr: input.name.fr.trim(),
+    descriptionEn: input.description.en,
+    descriptionFr: input.description.fr,
+  };
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === PRISMA_UNIQUE_VIOLATION;
@@ -170,7 +188,8 @@ export async function listProducts(db: Database, request: AuditRequestContext, f
     supplierId: filters.supplierId,
     OR: filters.q
       ? [
-          { name: { contains: filters.q, mode: "insensitive" } },
+          { nameEn: { contains: filters.q, mode: "insensitive" } },
+          { nameFr: { contains: filters.q, mode: "insensitive" } },
           { supplierSku: { contains: filters.q, mode: "insensitive" } },
         ]
       : undefined,
@@ -180,7 +199,7 @@ export async function listProducts(db: Database, request: AuditRequestContext, f
     db.product.findMany({
       where,
       include: listInclude,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
+      orderBy: [{ nameEn: "asc" }, { id: "asc" }],
       skip: (filters.page - 1) * filters.pageSize,
       take: filters.pageSize,
     }),
@@ -225,7 +244,7 @@ export async function createProduct(
       const created = await tx.product.create({
         data: {
           supplierId,
-          name: input.name.trim(),
+          ...nameAndDescriptionColumns(input),
           supplierSku: input.supplierSku.trim(),
           skuKey: nameKeyOf(input.supplierSku),
           minQuantity: input.minQuantity,
@@ -285,7 +304,7 @@ export async function updateProduct(
         where: { id },
         data: {
           supplierId,
-          name: input.name.trim(),
+          ...nameAndDescriptionColumns(input),
           supplierSku: input.supplierSku.trim(),
           skuKey: nameKeyOf(input.supplierSku),
           minQuantity: input.minQuantity,

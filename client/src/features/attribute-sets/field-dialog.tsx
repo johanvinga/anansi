@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { FieldError, FieldGroup, FieldLegend, FieldSet } from "@/components/ui/field";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import type { AttributeDataType, AttributeField, AttributeSetDetail } from "../../api/types";
 import { CheckboxField } from "../../components/checkbox-field";
 import { ErrorAlert } from "../../components/error-alert";
@@ -35,6 +36,8 @@ interface OptionRow {
   key: string;
   id?: string;
   label: string;
+  /** Stored French label, kept until the bilingual option editor lands. */
+  fr?: string;
 }
 
 interface FieldDialogProps {
@@ -52,12 +55,14 @@ const nextKey = () => `row-${(rowKey += 1)}`;
 export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDialogProps) {
   const { t } = useTranslation();
   const DATA_TYPES = useDataTypes();
-  const [name, setName] = useState(field?.name ?? "");
+  const [name, setName] = useState(localize(field?.name));
   const [dataType, setDataType] = useState<AttributeDataType>(field?.dataType ?? "text");
   const [unit, setUnit] = useState(field?.unit ?? "");
   const [isRequired, setIsRequired] = useState(field?.isRequired ?? false);
   const [options, setOptions] = useState<OptionRow[]>(
-    field?.options.length ? field.options.map((o) => ({ key: nextKey(), id: o.id, label: o.label })) : [{ key: nextKey(), label: "" }],
+    field?.options.length
+      ? field.options.map((o) => ({ key: nextKey(), id: o.id, label: localize(o.label), fr: o.label.fr }))
+      : [{ key: nextKey(), label: "" }],
   );
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -71,18 +76,22 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
     try {
       const result = field
         ? await apiRequest<{ attributeSet: AttributeSetDetail }>("PUT", `/attribute-sets/${attributeSetId}/fields/${field.id}`, {
-            name,
+            // Keeps the stored French values until the bilingual editor lands (SPEC FR-I18N-04).
+            name: { en: name, fr: field.name.fr },
             dataType: typeLocked ? undefined : dataType,
             unit: unit.trim() || null,
             isRequired,
-            options: dataType === "select" ? filledOptions.map((o) => ({ id: o.id, label: o.label })) : undefined,
+            options:
+              dataType === "select"
+                ? filledOptions.map((o) => ({ id: o.id, label: { en: o.label, fr: o.fr ?? o.label } }))
+                : undefined,
           })
         : await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", `/attribute-sets/${attributeSetId}/fields`, {
-            name,
+            name: { en: name },
             dataType,
             unit: unit.trim() || null,
             isRequired,
-            options: dataType === "select" ? filledOptions.map((o) => o.label) : undefined,
+            options: dataType === "select" ? filledOptions.map((o) => ({ en: o.label })) : undefined,
           });
       onSaved(result.attributeSet);
     } catch (err) {
@@ -99,7 +108,7 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>{field ? t("attributeSets.editFieldAria", { name: field.name }) : t("attributeSets.addField")}</DialogTitle>
+            <DialogTitle>{field ? t("attributeSets.editFieldAria", { name: localize(field.name) }) : t("attributeSets.addField")}</DialogTitle>
             {field ? <DialogDescription>{t("attributeSets.codeLabel")}: {field.code}</DialogDescription> : null}
           </DialogHeader>
           <FieldGroup>

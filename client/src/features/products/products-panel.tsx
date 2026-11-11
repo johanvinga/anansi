@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import { formatDate, formatMoney } from "../../api/format";
 import type { Page, ProductDetail, ProductSummary, Supplier } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
@@ -70,7 +71,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
     setDeleting(null);
     try {
       await apiRequest<void>("DELETE", `/products/${target.id}`);
-      setStatus(`${target.name} was deleted.`);
+      setStatus(`${localize(target.name)} was deleted.`);
       await load();
     } catch (err) {
       setError(errorMessage(err));
@@ -154,21 +155,21 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
           {result && result.items.length === 0 ? <TableEmptyRow colSpan={columnCount} message="No products found." /> : null}
           {result?.items.map((product) => (
             <TableRow key={product.id}>
-              <TableCell className="pl-4 font-medium">{product.name}</TableCell>
+              <TableCell className="pl-4 font-medium">{localize(product.name)}</TableCell>
               <TableCell className="font-mono text-xs">{product.supplierSku}</TableCell>
               {supplierId ? null : <TableCell>{product.supplierName}</TableCell>}
               <TableCell className="text-right tabular-nums">{product.minQuantity}</TableCell>
               <TableCell className="text-right tabular-nums">{formatMoney(product.cost, product.currency)}</TableCell>
               <TableCell>
-                {product.attributeSet ? <Badge variant="info">{product.attributeSet.name}</Badge> : "—"}
+                {product.attributeSet ? <Badge variant="info">{localize(product.attributeSet.name)}</Badge> : "—"}
               </TableCell>
               <TableCell>{formatDate(product.updatedAt)}</TableCell>
               {isAdmin ? (
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
-                    <IconAction label={t("products.editAria", { name: product.name })} icon={Pencil} onClick={() => void openEdit(product)} />
+                    <IconAction label={t("products.editAria", { name: localize(product.name) })} icon={Pencil} onClick={() => void openEdit(product)} />
                     <IconAction
-                      label={t("products.deleteAria", { name: product.name })}
+                      label={t("products.deleteAria", { name: localize(product.name) })}
                       icon={Trash2}
                       destructive
                       onClick={() => setDeleting(product)}
@@ -191,7 +192,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
             setEditing(null);
-            setStatus(`${saved.name} was saved.`);
+            setStatus(`${localize(saved.name)} was saved.`);
             void load();
           }}
         />
@@ -199,7 +200,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
 
       <ConfirmDialog
         open={deleting !== null}
-        title={t("products.confirmDeleteTitle", { name: deleting?.name ?? t("products.title") })}
+        title={t("products.confirmDeleteTitle", { name: deleting ? localize(deleting.name) : t("products.title") })}
         description={t("products.confirmDeleteDescription")}
         confirmLabel={t("products.deleteProduct")}
         onConfirm={() => void confirmDelete()}

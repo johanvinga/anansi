@@ -102,11 +102,11 @@ export async function listAllCatalogs(
     [...new Set(rows.map((row) => row.supplierId))].map(async (supplierId) => {
       const supplier = await db.supplier.findUnique({
         where: { id: supplierId },
-        select: { categories: { select: { category: { select: { name: true } } } } },
+        select: { categories: { select: { category: { select: { nameEn: true } } } } },
       });
       categoryNamesBySupplier.set(
         supplierId,
-        supplier?.categories.map((link) => link.category.name).sort() ?? [],
+        supplier?.categories.map((link) => link.category.nameEn).sort() ?? [],
       );
     }),
   );

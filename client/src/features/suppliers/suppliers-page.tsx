@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Eye, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import type { Category, Page, Supplier } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
@@ -116,7 +117,7 @@ export function SuppliersPage() {
                 aria-pressed={active}
                 onClick={() => toggleCategory(category.id)}
               >
-                {category.name}
+                {localize(category.name)}
               </Button>
             );
           })}
@@ -161,7 +162,7 @@ export function SuppliersPage() {
                     <div className="flex flex-wrap gap-1">
                       {supplier.categories.map((category) => (
                         <Badge key={category.id} variant="secondary">
-                          {category.name}
+                          {localize(category.name)}
                         </Badge>
                       ))}
                     </div>

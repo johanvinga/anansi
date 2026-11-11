@@ -49,8 +49,8 @@ function toSupplierDto(row: SupplierRow) {
     postalCode: row.postalCode,
     country: row.country,
     categories: row.categories
-      .map((link) => ({ id: link.category.id, name: link.category.name }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .map((link) => ({ id: link.category.id, name: { en: link.category.nameEn, fr: link.category.nameFr } }))
+      .sort((a, b) => a.name.en.localeCompare(b.name.en)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -65,7 +65,7 @@ function snapshotOf(row: SupplierRow): Record<string, unknown> {
     stateRegion: row.stateRegion,
     postalCode: row.postalCode,
     country: row.country,
-    categories: row.categories.map((link) => link.category.name).sort(),
+    categories: row.categories.map((link) => link.category.nameEn).sort(),
   };
 }
 

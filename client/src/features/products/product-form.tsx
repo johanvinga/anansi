@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next";
+﻿import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,7 @@ import {
 import { FieldDescription, FieldGroup, FieldLegend, FieldSeparator, FieldSet } from "@/components/ui/field";
 import { ErrorAlert } from "../../components/error-alert";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import { loadSettings } from "../../api/settings";
 import type {
   AttributeField,
@@ -54,7 +55,7 @@ function toSubmitValue(field: AttributeField, value: AttributeValue): AttributeV
 export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: ProductFormProps) {
   const { t } = useTranslation();
   const [supplierId, setSupplierId] = useState<string | null>(product?.supplierId ?? defaultSupplierId ?? null);
-  const [name, setName] = useState(product?.name ?? "");
+  const [name, setName] = useState(localize(product?.name));
   const [supplierSku, setSupplierSku] = useState(product?.supplierSku ?? "");
   const [minQuantity, setMinQuantity] = useState(product ? String(product.minQuantity) : "1");
   const [cost, setCost] = useState(product?.cost ?? "");
@@ -104,7 +105,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
     return options;
   }, [suppliers, product]);
   const currencyOptions = useMemo(() => currencies.map((c) => ({ value: c, label: c })), [currencies]);
-  const setOptions = useMemo(() => [{ value: "", label: t("attributeSets.noneOption") }, ...sets.map((s) => ({ value: s.id, label: s.name }))], [sets, t]);
+  const setOptions = useMemo(() => [{ value: "", label: t("attributeSets.noneOption") }, ...sets.map((s) => ({ value: s.id, label: localize(s.name) }))], [sets, t]);
 
   function requestSetChange(next: string | null) {
     const normalized = next || null;
@@ -132,7 +133,9 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
       return;
     }
     const body = {
-      name,
+      // Keeps the stored French name and description until the bilingual form lands (SPEC FR-I18N-04, FR-PRD-11).
+      name: { en: name, fr: product ? product.name.fr : name },
+      description: product ? product.description : undefined,
       supplierSku,
       minQuantity: minQuantity.trim() === "" ? null : Number(minQuantity),
       cost: cost.trim(),
@@ -162,7 +165,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
             <DialogHeader>
-              <DialogTitle>{product ? t("products.editAria", { name: product.name }) : t("products.createProduct")}</DialogTitle>
+              <DialogTitle>{product ? t("products.editAria", { name: localize(product.name) }) : t("products.createProduct")}</DialogTitle>
             </DialogHeader>
             <FieldGroup>
               {error && (error.details.length === 0 || unmatchedErrors.length > 0) ? (
@@ -234,7 +237,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                 {archivedValues.length > 0 && attributeSetId === product?.attributeSet?.id ? (
                   <FieldDescription>
                     {t("products.archivedKept")}:{" "}
-                    {archivedValues.map((v) => `${v.name}: ${v.optionLabel ?? String(v.value)}`).join(", ")}
+                    {archivedValues.map((v) => `${localize(v.name)}: ${v.optionLabel ? localize(v.optionLabel) : String(v.value)}`).join(", ")}
                   </FieldDescription>
                 ) : null}
               </FieldSet>

@@ -1,4 +1,5 @@
 ﻿import { useTranslation } from "react-i18next";
+import { localize } from "../../api/translations";
 import type { AttributeField, AttributeValue } from "../../api/types";
 import { CheckboxField } from "../../components/checkbox-field";
 import { FormField } from "../../components/form-field";
@@ -14,7 +15,8 @@ interface AttributeInputProps {
 /** Renders the input that matches a field's data type (FR-PRD-05). */
 export function AttributeInput({ field, value, onChange, error }: AttributeInputProps) {
   const { t } = useTranslation();
-  const label = field.unit ? `${field.name} (${field.unit})` : field.name;
+  const fieldName = localize(field.name);
+  const label = field.unit ? `${fieldName} (${field.unit})` : fieldName;
   const text = typeof value === "string" || typeof value === "number" ? String(value) : "";
 
   switch (field.dataType) {
@@ -29,7 +31,7 @@ export function AttributeInput({ field, value, onChange, error }: AttributeInput
           onChange={(next) => onChange(next)}
           options={[
             ...(field.isRequired ? [] : [{ value: "", label: "— None —" }]),
-            ...field.options.map((o) => ({ value: o.id, label: o.label })),
+            ...field.options.map((o) => ({ value: o.id, label: localize(o.label) })),
           ]}
           error={error}
         />

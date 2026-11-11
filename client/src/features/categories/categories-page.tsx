@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import type { Category } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ConfirmDialog } from "../../components/confirm-dialog";
@@ -61,7 +62,7 @@ export function CategoriesPage() {
     event.preventDefault();
     setCreating(true);
     try {
-      await apiRequest("POST", "/categories", { name: newName });
+      await apiRequest("POST", "/categories", { name: { en: newName } });
       setNewName("");
       await load();
     } catch (err) {
@@ -138,14 +139,14 @@ export function CategoriesPage() {
             {loaded && categories.length === 0 ? <TableEmptyRow colSpan={columns} message={t("categories.noCategories")} /> : null}
             {categories.map((category) => (
               <TableRow key={category.id}>
-                <TableCell className="pl-4 font-medium">{category.name}</TableCell>
+                <TableCell className="pl-4 font-medium">{localize(category.name)}</TableCell>
                 <TableCell>{new Date(category.createdAt).toLocaleDateString()}</TableCell>
                 {isAdmin ? (
                   <TableCell className="pr-4">
                     <div className="flex justify-end gap-1">
-                      <IconAction label={t("categories.renameAria", { name: category.name })} icon={Pencil} onClick={() => setRenaming(category)} />
+                      <IconAction label={t("categories.renameAria", { name: localize(category.name) })} icon={Pencil} onClick={() => setRenaming(category)} />
                       <IconAction
-                        label={t("suppliers.deleteAria", { name: category.name })}
+                        label={t("suppliers.deleteAria", { name: localize(category.name) })}
                         icon={Trash2}
                         destructive
                         onClick={() => setDeleting(category)}
@@ -172,7 +173,7 @@ export function CategoriesPage() {
 
       <ConfirmDialog
         open={deleting !== null}
-        title={t("categories.confirmDeleteTitle", { name: deleting?.name ?? t("categories.title") })}
+        title={t("categories.confirmDeleteTitle", { name: deleting ? localize(deleting.name) : t("categories.title") })}
         description={t("categories.confirmDeleteDescription")}
         confirmLabel={t("categories.deleteCategory")}
         onConfirm={() => void confirmDelete()}
@@ -190,7 +191,7 @@ interface RenameCategoryDialogProps {
 
 function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDialogProps) {
   const { t } = useTranslation();
-  const [name, setName] = useState(category.name);
+  const [name, setName] = useState(localize(category.name));
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -199,7 +200,8 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest("PUT", `/categories/${category.id}`, { name });
+      // Keeps the stored French name until the bilingual rename dialog lands (SPEC FR-I18N-04).
+      await apiRequest("PUT", `/categories/${category.id}`, { name: { en: name, fr: category.name.fr } });
       onRenamed();
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));

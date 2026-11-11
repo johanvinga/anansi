@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
+import { localize } from "../../api/translations";
 import { formatDateTime } from "../../api/format";
 import type { CatalogWithSupplier, Category, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
@@ -97,7 +98,7 @@ export function CatalogsPage() {
                 className="cursor-pointer"
                 onClick={() => toggleCategory(category.id)}
               >
-                {category.name}
+                {localize(category.name)}
               </Badge>
             );
           })}
