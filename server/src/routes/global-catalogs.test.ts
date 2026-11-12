@@ -18,6 +18,7 @@ import {
 } from "../test/helpers.js";
 
 const PDF = Buffer.from("%PDF-1.4 global catalog\n%%EOF\n");
+const translated = (value: string) => ({ en: value, fr: value });
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,7 +63,7 @@ describe("global catalogs list", () => {
     const res = await request(app.server)
       .post("/api/v1/categories")
       .set(unsafeHeaders(adminCookie))
-      .send({ name });
+      .send({ name: translated(name) });
     const { category } = res.body as { category: { id: string } };
     if (res.status !== 201) throw new Error(`category create failed: ${res.status} ${JSON.stringify(res.body)}`);
     return { id: category.id };

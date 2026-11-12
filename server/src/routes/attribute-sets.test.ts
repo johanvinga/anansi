@@ -17,14 +17,24 @@ const NIL_UUID = "9f1c2a4e-1111-4222-8333-444455556666";
 
 interface FieldDto {
   id: string;
-  name: string;
+  name: { en: string; fr: string };
   code: string;
   dataType: string;
   isArchived: boolean;
   hasValues: boolean;
   sortOrder: number;
-  options: { id: string; label: string }[];
+  options: { id: string; label: { en: string; fr: string } }[];
 }
+
+interface FieldInput {
+  name: string;
+  dataType: string;
+  unit?: string;
+  isRequired?: boolean;
+  options?: string[];
+}
+
+const translated = (value: string) => ({ en: value, fr: value });
 
 describe("attribute sets", () => {
   let db: Database;
@@ -53,13 +63,17 @@ describe("attribute sets", () => {
     request(app.server)[method](`/api/v1${path}`).set(unsafeHeaders(adminCookie)).send(body);
 
   async function createSet(name = "MDF Panel"): Promise<string> {
-    const res = await admin("post", "/attribute-sets", { name });
+    const res = await admin("post", "/attribute-sets", { name: translated(name) });
     expect(res.status).toBe(201);
     return res.body.attributeSet.id as string;
   }
 
-  async function addField(setId: string, body: object): Promise<FieldDto[]> {
-    const res = await admin("post", `/attribute-sets/${setId}/fields`, body);
+  async function addField(setId: string, input: FieldInput): Promise<FieldDto[]> {
+    const res = await admin("post", `/attribute-sets/${setId}/fields`, {
+      ...input,
+      name: translated(input.name),
+      options: input.options?.map(translated),
+    });
     expect(res.status).toBe(201);
     return res.body.attributeSet.fields as FieldDto[];
   }
@@ -68,7 +82,7 @@ describe("attribute sets", () => {
   async function useField(setId: string, fieldId: string, value: string | number | boolean) {
     const supplier = await admin("post", "/suppliers", { name: `Supplier ${Math.random()}` });
     const res = await admin("post", `/suppliers/${supplier.body.supplier.id}/products`, {
-      name: "Panel",
+      name: translated("Panel"),
       supplierSku: `SKU-${Math.random()}`,
       minQuantity: 1,
       cost: "10.00",
@@ -82,13 +96,15 @@ describe("attribute sets", () => {
   describe("FR-ATS-01/02 sets", () => {
     it("creates, lists, views, and renames a set, auditing each write", async () => {
       const id = await createSet();
-      const renamed = await admin("put", `/attribute-sets/${id}`, { name: "MDF Board" });
+      const renamed = await admin("put", `/attribute-sets/${id}`, { name: translated("MDF Board") });
       expect(renamed.status).toBe(200);
-      expect(renamed.body.attributeSet.name).toBe("MDF Board");
+      expect(renamed.body.attributeSet.name).toEqual(translated("MDF Board"));
 
       const list = await request(app.server).get("/api/v1/attribute-sets").set("Cookie", readerCookie);
       expect(list.status).toBe(200);
-      expect(list.body.items).toEqual([expect.objectContaining({ id, name: "MDF Board", fieldCount: 0, productCount: 0 })]);
+      expect(list.body.items).toEqual([
+        expect.objectContaining({ id, name: translated("MDF Board"), fieldCount: 0, productCount: 0 }),
+      ]);
 
       const detail = await request(app.server).get(`/api/v1/attribute-sets/${id}`).set("Cookie", readerCookie);
       expect(detail.status).toBe(200);
@@ -96,31 +112,34 @@ describe("attribute sets", () => {
 
       expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_SET_CREATE" } })).toBe(1);
       const update = await db.auditLog.findFirstOrThrow({ where: { action: "ATTRIBUTE_SET_UPDATE" } });
-      expect(update.changes).toMatchObject({ name: { before: "MDF Panel", after: "MDF Board" } });
+      expect(update.changes).toMatchObject({
+        "name.en": { before: "MDF Panel", after: "MDF Board" },
+        "name.fr": { before: "MDF Panel", after: "MDF Board" },
+      });
       expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_SET_VIEW" } })).toBe(1);
     });
 
     it("rejects duplicate names case-insensitively", async () => {
       await createSet("Paint");
-      const res = await admin("post", "/attribute-sets", { name: "PAINT" });
+      const res = await admin("post", "/attribute-sets", { name: translated("PAINT") });
       expect(res.status).toBe(409);
     });
 
     it("validates the name", async () => {
-      const res = await admin("post", "/attribute-sets", { name: "  " });
+      const res = await admin("post", "/attribute-sets", { name: translated("  ") });
       expect(res.status).toBe(400);
     });
 
     it("returns 403 to standard users for every write", async () => {
       const id = await createSet();
       const responses = await Promise.all([
-        request(app.server).post("/api/v1/attribute-sets").set(unsafeHeaders(readerCookie)).send({ name: "X" }),
-        request(app.server).put(`/api/v1/attribute-sets/${id}`).set(unsafeHeaders(readerCookie)).send({ name: "X" }),
+        request(app.server).post("/api/v1/attribute-sets").set(unsafeHeaders(readerCookie)).send({ name: translated("X") }),
+        request(app.server).put(`/api/v1/attribute-sets/${id}`).set(unsafeHeaders(readerCookie)).send({ name: translated("X") }),
         request(app.server).delete(`/api/v1/attribute-sets/${id}`).set(unsafeHeaders(readerCookie)),
         request(app.server)
           .post(`/api/v1/attribute-sets/${id}/fields`)
           .set(unsafeHeaders(readerCookie))
-          .send({ name: "W", dataType: "text" }),
+          .send({ name: translated("W"), dataType: "text" }),
         request(app.server)
           .post(`/api/v1/attribute-sets/${id}/fields/reorder`)
           .set(unsafeHeaders(readerCookie))
@@ -169,28 +188,47 @@ describe("attribute sets", () => {
       expect(fields.map((f) => f.code)).toEqual(["width", "width_2", "in_stock", "released", "notes", "texture"]);
       expect(fields.map((f) => f.sortOrder)).toEqual([1, 2, 3, 4, 5, 6]);
       expect(fields[0]).toMatchObject({ dataType: "number", isRequired: true, hasValues: false });
-      expect(fields[5]?.options.map((o) => o.label)).toEqual(["matte", "satin", "gloss"]);
+      expect(fields[5]?.options.map((o) => o.label.en)).toEqual(["matte", "satin", "gloss"]);
       expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_FIELD_CREATE" } })).toBe(6);
     });
 
     it("requires options for select fields and rejects them for other types", async () => {
       const id = await createSet();
-      const noOptions = await admin("post", `/attribute-sets/${id}/fields`, { name: "Texture", dataType: "select" });
+      const noOptions = await admin("post", `/attribute-sets/${id}/fields`, {
+        name: translated("Texture"),
+        dataType: "select",
+      });
       expect(noOptions.status).toBe(400);
       expect(noOptions.body.error.details[0].field).toBe("options");
 
-      const extra = await admin("post", `/attribute-sets/${id}/fields`, { name: "W", dataType: "text", options: ["a"] });
+      const extra = await admin("post", `/attribute-sets/${id}/fields`, {
+        name: translated("W"),
+        dataType: "text",
+        options: [translated("a")],
+      });
       expect(extra.status).toBe(400);
 
-      const dupes = await admin("post", `/attribute-sets/${id}/fields`, { name: "T", dataType: "select", options: ["a", "A"] });
+      const dupes = await admin("post", `/attribute-sets/${id}/fields`, {
+        name: translated("T"),
+        dataType: "select",
+        options: [translated("a"), translated("A")],
+      });
       expect(dupes.status).toBe(400);
     });
 
     it("rejects unknown data types and over-long units", async () => {
       const id = await createSet();
-      expect((await admin("post", `/attribute-sets/${id}/fields`, { name: "X", dataType: "currency" })).status).toBe(400);
       expect(
-        (await admin("post", `/attribute-sets/${id}/fields`, { name: "X", dataType: "text", unit: "x".repeat(21) })).status,
+        (await admin("post", `/attribute-sets/${id}/fields`, { name: translated("X"), dataType: "currency" })).status,
+      ).toBe(400);
+      expect(
+        (
+          await admin("post", `/attribute-sets/${id}/fields`, {
+            name: translated("X"),
+            dataType: "text",
+            unit: "x".repeat(21),
+          })
+        ).status,
       ).toBe(400);
     });
   });
@@ -202,20 +240,21 @@ describe("attribute sets", () => {
       const matte = texture!.options[0]!;
 
       const res = await admin("put", `/attribute-sets/${id}/fields/${texture!.id}`, {
-        name: "Surface",
+        name: translated("Surface"),
         unit: "n/a",
         isRequired: true,
-        options: [{ id: matte.id, label: "Matte" }, { label: "gloss" }],
+        options: [{ id: matte.id, label: translated("Matte") }, { label: translated("gloss") }],
       });
       expect(res.status).toBe(200);
       const field = res.body.attributeSet.fields[0] as FieldDto & { unit: string; isRequired: boolean };
-      expect(field).toMatchObject({ name: "Surface", unit: "n/a", isRequired: true, code: "texture" });
-      expect(field.options.map((o) => o.label)).toEqual(["Matte", "gloss"]);
+      expect(field).toMatchObject({ name: translated("Surface"), unit: "n/a", isRequired: true, code: "texture" });
+      expect(field.options.map((o) => o.label.en)).toEqual(["Matte", "gloss"]);
       expect(field.options[0]?.id).toBe(matte.id);
 
       const audit = await db.auditLog.findFirstOrThrow({ where: { action: "ATTRIBUTE_FIELD_UPDATE" } });
       expect(audit.changes).toMatchObject({
-        name: { before: "Texture", after: "Surface" },
+        "name.en": { before: "Texture", after: "Surface" },
+        "name.fr": { before: "Texture", after: "Surface" },
         options: { before: ["matte", "satin"], after: ["Matte", "gloss"] },
       });
     });
@@ -225,7 +264,7 @@ describe("attribute sets", () => {
       const [field] = await addField(id, { name: "T", dataType: "select", options: ["a", "b"] });
       const [a, b] = field!.options;
       const res = await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, {
-        options: [{ id: a!.id, label: "b" }, { id: b!.id, label: "a" }],
+        options: [{ id: a!.id, label: translated("b") }, { id: b!.id, label: translated("a") }],
       });
       expect(res.status).toBe(200);
     });
@@ -256,7 +295,9 @@ describe("attribute sets", () => {
       const [matte, gloss] = field!.options;
       await useField(id, field!.id, matte!.id);
 
-      const res = await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, { options: [{ id: gloss!.id, label: "gloss" }] });
+      const res = await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, {
+        options: [{ id: gloss!.id, label: translated("gloss") }],
+      });
       expect(res.status).toBe(409);
       expect(res.body.error.message).toContain("matte");
     });
@@ -266,7 +307,7 @@ describe("attribute sets", () => {
       const other = await createSet("Other");
       const [field] = await addField(other, { name: "W", dataType: "text" });
       expect((await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, {})).status).toBe(400);
-      expect((await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, { name: "X" })).status).toBe(404);
+      expect((await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, { name: translated("X") })).status).toBe(404);
     });
   });
 
@@ -324,7 +365,7 @@ describe("attribute sets", () => {
       const list = await request(app.server).get("/api/v1/attribute-sets").set("Cookie", adminCookie);
       expect(list.body.items[0].fieldCount).toBe(0);
 
-      const edit = await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, { name: "W" });
+      const edit = await admin("put", `/attribute-sets/${id}/fields/${field!.id}`, { name: translated("W") });
       expect(edit.status).toBe(409);
     });
   });

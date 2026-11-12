@@ -18,8 +18,18 @@ const NIL_UUID = "9f1c2a4e-1111-4222-8333-444455556666";
 interface Field {
   id: string;
   code: string;
-  options: { id: string; label: string }[];
+  options: { id: string; label: { en: string; fr: string } }[];
 }
+
+interface FieldInput {
+  name: string;
+  dataType: string;
+  unit?: string;
+  isRequired?: boolean;
+  options?: string[];
+}
+
+const translated = (value: string) => ({ en: value, fr: value });
 
 describe("products", () => {
   let db: Database;
@@ -45,11 +55,17 @@ describe("products", () => {
   const admin = (method: "post" | "put" | "delete", path: string, body?: object) =>
     request(app.server)[method](`/api/v1${path}`).set(unsafeHeaders(adminCookie)).send(body);
 
-  async function createSet(name: string, fields: object[]) {
-    const set = await admin("post", "/attribute-sets", { name });
+  async function createSet(name: string, fields: FieldInput[]) {
+    const set = await admin("post", "/attribute-sets", { name: translated(name) });
     let detail = set.body.attributeSet;
     for (const field of fields) {
-      detail = (await admin("post", `/attribute-sets/${set.body.attributeSet.id}/fields`, field)).body.attributeSet;
+      detail = (
+        await admin("post", `/attribute-sets/${set.body.attributeSet.id}/fields`, {
+          ...field,
+          name: translated(field.name),
+          options: field.options?.map(translated),
+        })
+      ).body.attributeSet;
     }
     const byCode = Object.fromEntries((detail.fields as Field[]).map((f) => [f.code, f]));
     return { id: detail.id as string, byCode };
@@ -81,8 +97,9 @@ describe("products", () => {
   });
 
   function mdfProduct(overrides: Record<string, unknown> = {}) {
+    const { name = "MDF Board 18mm", ...otherOverrides } = overrides;
     return {
-      name: "MDF Board 18mm",
+      name: translated(typeof name === "string" ? name : "MDF Board 18mm"),
       supplierSku: "MDF-18",
       minQuantity: 10,
       cost: "42.50",
@@ -93,7 +110,7 @@ describe("products", () => {
         { fieldId: mdf.length.id, value: 2440 },
         { fieldId: mdf.thickness.id, value: "18.5" },
       ],
-      ...overrides,
+      ...otherOverrides,
     };
   }
 
@@ -106,12 +123,12 @@ describe("products", () => {
       expect(res.body.product).toMatchObject({
         supplierId,
         supplierName: "Panel Co",
-        name: "MDF Board 18mm",
+        name: translated("MDF Board 18mm"),
         supplierSku: "MDF-18",
         minQuantity: 10,
         cost: "42.50",
         currency: "EUR",
-        attributeSet: { id: mdfSetId, name: "MDF Panel" },
+        attributeSet: { id: mdfSetId, name: translated("MDF Panel") },
       });
       const values = res.body.product.attributeValues as { code: string; value: unknown; unit: string }[];
       expect(values.map((v) => [v.code, v.value, v.unit])).toEqual([
@@ -128,14 +145,14 @@ describe("products", () => {
     });
 
     it("creates a product without an attribute set", async () => {
-      const res = await createProduct({ name: "Screws", supplierSku: "S-1", minQuantity: 0, cost: 0, currency: "usd" });
+      const res = await createProduct({ name: translated("Screws"), supplierSku: "S-1", minQuantity: 0, cost: 0, currency: "usd" });
       expect(res.status).toBe(201);
       expect(res.body.product).toMatchObject({ cost: "0.00", currency: "USD", attributeSet: null, attributeValues: [] });
     });
 
     it("stores select values as options and returns their labels", async () => {
       const res = await createProduct({
-        name: "Wall Paint",
+        name: translated("Wall Paint"),
         supplierSku: "P-1",
         minQuantity: 1,
         cost: "19.99",
@@ -148,11 +165,11 @@ describe("products", () => {
       });
       expect(res.status).toBe(201);
       const texture = res.body.product.attributeValues.find((v: { code: string }) => v.code === "texture");
-      expect(texture).toMatchObject({ value: paint.texture.options[1]!.id, optionLabel: "satin" });
+      expect(texture).toMatchObject({ value: paint.texture.options[1]!.id, optionLabel: translated("satin") });
     });
 
     it.each([
-      ["missing name", { name: "" }, "name"],
+      ["missing name", { name: "" }, "name.en"],
       ["negative minimum quantity", { minQuantity: -1 }, "minQuantity"],
       ["fractional minimum quantity", { minQuantity: 1.5 }, "minQuantity"],
       ["negative cost", { cost: "-1.00" }, "cost"],
@@ -189,7 +206,7 @@ describe("products", () => {
       expect(wrongSet.status).toBe(400);
 
       const badOption = await createProduct({
-        name: "Paint",
+        name: translated("Paint"),
         supplierSku: "P-2",
         minQuantity: 1,
         cost: "1",
@@ -252,7 +269,7 @@ describe("products", () => {
       const res = await request(app.server).get("/api/v1/products?pageSize=2").set("Cookie", readerCookie);
       expect(res.status).toBe(200);
       expect(res.body.total).toBe(3);
-      expect(res.body.items.map((p: { name: string }) => p.name)).toEqual(["Birch Plywood", "MDF Board 18mm"]);
+      expect(res.body.items.map((p: { name: { en: string; fr: string } }) => p.name.en)).toEqual(["Birch Plywood", "MDF Board 18mm"]);
       expect(res.body.items[0]).not.toHaveProperty("attributeValues");
       expect(await db.auditLog.count({ where: { action: "PRODUCT_LIST" } })).toBe(1);
     });
@@ -261,10 +278,10 @@ describe("products", () => {
       const bySupplier = await request(app.server)
         .get(`/api/v1/products?supplierId=${otherSupplierId}`)
         .set("Cookie", readerCookie);
-      expect(bySupplier.body.items.map((p: { name: string }) => p.name)).toEqual(["Oak Veneer"]);
+      expect(bySupplier.body.items.map((p: { name: { en: string; fr: string } }) => p.name.en)).toEqual(["Oak Veneer"]);
 
       const bySku = await request(app.server).get("/api/v1/products?q=ply-9").set("Cookie", readerCookie);
-      expect(bySku.body.items.map((p: { name: string }) => p.name)).toEqual(["Birch Plywood"]);
+      expect(bySku.body.items.map((p: { name: { en: string; fr: string } }) => p.name.en)).toEqual(["Birch Plywood"]);
 
       const byName = await request(app.server).get("/api/v1/products?q=oak").set("Cookie", readerCookie);
       expect(byName.body.total).toBe(1);
@@ -337,7 +354,7 @@ describe("products", () => {
         attributeValues: [{ fieldId: paint.color.id, value: "Grey" }],
       });
       expect(res.status).toBe(200);
-      expect(res.body.product.attributeSet.name).toBe("Paint");
+      expect(res.body.product.attributeSet.name).toEqual(translated("Paint"));
       expect(res.body.product.attributeValues.map((v: { code: string }) => v.code)).toEqual(["color"]);
       expect(await db.productAttributeValue.count({ where: { productId: id } })).toBe(1);
 
@@ -421,7 +438,7 @@ describe("products", () => {
       expect(res.status).toBe(204);
       expect(await db.productAttributeValue.count()).toBe(0);
       const audit = await db.auditLog.findFirstOrThrow({ where: { action: "PRODUCT_DELETE", entityId: id } });
-      expect(audit.changes).toMatchObject({ name: { before: "MDF Board 18mm", after: null } });
+      expect(audit.changes).toMatchObject({ "name.en": { before: "MDF Board 18mm", after: null } });
     });
 
     it("returns 403 to standard users and 404 for unknown products", async () => {

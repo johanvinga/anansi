@@ -14,6 +14,7 @@ import {
 } from "../test/helpers.js";
 
 const NIL_UUID = "9f1c2a4e-1111-4222-8333-444455556666";
+const translated = (value: string) => ({ en: value, fr: value });
 
 describe("suppliers and categories", () => {
   let db: Database;
@@ -60,7 +61,7 @@ describe("suppliers and categories", () => {
       expect(res.status).toBe(201);
       expect(res.body.supplier.name).toBe("Acme Panels");
       expect(res.body.supplier.city).toBe("Springfield");
-      expect(res.body.supplier.categories).toEqual([expect.objectContaining({ name: "Wood" })]);
+      expect(res.body.supplier.categories).toEqual([expect.objectContaining({ name: translated("Wood") })]);
 
       const audit = await db.auditLog.findFirst({
         where: { action: "SUPPLIER_CREATE", entityId: res.body.supplier.id },
@@ -135,12 +136,12 @@ describe("suppliers and categories", () => {
       const created = await request(app.server)
         .post("/api/v1/categories")
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "Glass" });
+        .send({ name: translated("Glass") });
       const res = await createSupplier({
         name: "Glassworks",
         categories: [{ id: created.body.category.id }],
       });
-      expect(res.body.supplier.categories[0].name).toBe("Glass");
+      expect(res.body.supplier.categories[0].name).toEqual(translated("Glass"));
     });
 
     it("returns 400 for an unknown category id", async () => {
@@ -226,7 +227,7 @@ describe("suppliers and categories", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.supplier.city).toBe("Austin");
-      expect(res.body.supplier.categories[0].name).toBe("Tools");
+      expect(res.body.supplier.categories[0].name).toEqual(translated("Tools"));
       expect(await db.auditLog.count({ where: { action: "SUPPLIER_VIEW" } })).toBe(1);
     });
 
@@ -253,7 +254,7 @@ describe("suppliers and categories", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.supplier.name).toBe("New Name");
-      expect(res.body.supplier.categories.map((c: { name: string }) => c.name)).toEqual(["B"]);
+      expect(res.body.supplier.categories.map((c: { name: { en: string; fr: string } }) => c.name.en)).toEqual(["B"]);
 
       const audit = await db.auditLog.findFirstOrThrow({ where: { action: "SUPPLIER_UPDATE", entityId: id } });
       expect(audit.changes).toMatchObject({
@@ -269,7 +270,7 @@ describe("suppliers and categories", () => {
         .put(`/api/v1/suppliers/${created.body.supplier.id}`)
         .set(unsafeHeaders(adminCookie))
         .send({ name: "Keeper Renamed" });
-      expect(res.body.supplier.categories.map((c: { name: string }) => c.name)).toEqual(["Keep"]);
+      expect(res.body.supplier.categories.map((c: { name: { en: string; fr: string } }) => c.name.en)).toEqual(["Keep"]);
     });
 
     it("writes no audit entry when nothing changed", async () => {
@@ -328,24 +329,30 @@ describe("suppliers and categories", () => {
 
   describe("FR-CAT-01..04 category management", () => {
     it("lists categories for any signed-in user, filtered by q", async () => {
-      await request(app.server).post("/api/v1/categories").set(unsafeHeaders(adminCookie)).send({ name: "Wood" });
-      await request(app.server).post("/api/v1/categories").set(unsafeHeaders(adminCookie)).send({ name: "Metal" });
+      await request(app.server)
+        .post("/api/v1/categories")
+        .set(unsafeHeaders(adminCookie))
+        .send({ name: translated("Wood") });
+      await request(app.server)
+        .post("/api/v1/categories")
+        .set(unsafeHeaders(adminCookie))
+        .send({ name: translated("Metal") });
       const res = await request(app.server).get("/api/v1/categories?q=wo").set("Cookie", readerCookie);
       expect(res.status).toBe(200);
-      expect(res.body.items.map((c: { name: string }) => c.name)).toEqual(["Wood"]);
+      expect(res.body.items.map((c: { name: { en: string; fr: string } }) => c.name.en)).toEqual(["Wood"]);
     });
 
     it("creates a category and rejects a case-insensitive duplicate", async () => {
       const first = await request(app.server)
         .post("/api/v1/categories")
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "Paint" });
+        .send({ name: translated("Paint") });
       expect(first.status).toBe(201);
 
       const dupe = await request(app.server)
         .post("/api/v1/categories")
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "PAINT" });
+        .send({ name: translated("PAINT") });
       expect(dupe.status).toBe(409);
     });
 
@@ -353,15 +360,18 @@ describe("suppliers and categories", () => {
       const created = await request(app.server)
         .post("/api/v1/categories")
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "Tile" });
+        .send({ name: translated("Tile") });
       const res = await request(app.server)
         .put(`/api/v1/categories/${created.body.category.id}`)
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "Ceramic Tile" });
+        .send({ name: translated("Ceramic Tile") });
 
       expect(res.status).toBe(200);
       const audit = await db.auditLog.findFirstOrThrow({ where: { action: "CATEGORY_UPDATE" } });
-      expect(audit.changes).toMatchObject({ name: { before: "Tile", after: "Ceramic Tile" } });
+      expect(audit.changes).toMatchObject({
+        "name.en": { before: "Tile", after: "Ceramic Tile" },
+        "name.fr": { before: "Tile", after: "Ceramic Tile" },
+      });
     });
 
     it("deletes a category, removes it from suppliers, and keeps the suppliers", async () => {
@@ -384,7 +394,7 @@ describe("suppliers and categories", () => {
       const create = await request(app.server)
         .post("/api/v1/categories")
         .set(unsafeHeaders(readerCookie))
-        .send({ name: "Nope" });
+        .send({ name: translated("Nope") });
       expect(create.status).toBe(403);
     });
 
@@ -392,7 +402,7 @@ describe("suppliers and categories", () => {
       const rename = await request(app.server)
         .put(`/api/v1/categories/${NIL_UUID}`)
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "Ghost" });
+        .send({ name: translated("Ghost") });
       expect(rename.status).toBe(404);
 
       const remove = await request(app.server)
