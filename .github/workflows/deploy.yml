@@ -1,32 +1,134 @@
-name: Deploy
+name: CI and Deploy
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: supplier-app-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  client-checks:
+    name: Client checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Lint
+        working-directory: client
+        run: npm run lint
+
+      - name: Build
+        working-directory: client
+        run: npm run build
+
+  server-checks:
+    name: Server checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: supplier_app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d supplier_app_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://app:app@localhost:5432/supplier_app_test
+      SESSION_SECRET: test-session-secret-that-is-long-enough
+      APP_ORIGIN: http://localhost:5173
+      NODE_ENV: test
+      LOG_LEVEL: silent
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Lint
+        working-directory: server
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: server
+        run: npm run build
+
+      - name: Test
+        working-directory: server
+        run: npm test
+
+  deploy:
+    name: Deploy production
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: [client-checks, server-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
+          envs: DEPLOY_SHA
           script: |
             set -e
             cd /opt/supplier-app
-            git pull --ff-only origin main
+            git fetch origin main
+            git merge --ff-only "$DEPLOY_SHA"
 
-            cd server
+            cd client
+            npm ci
+            npm run build
+
+            cd ../server
             npm ci
             npm run build
             npm run db:deploy
-            sudo systemctl restart supplier-app
 
-            cd ../client
-            npm ci
-            npm run build
+            sudo nginx -t
+            sudo systemctl restart supplier-app
+            sudo systemctl is-active --quiet supplier-app
             sudo systemctl reload nginx

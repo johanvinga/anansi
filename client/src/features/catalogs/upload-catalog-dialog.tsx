@@ -17,6 +17,7 @@ import type { Page, Supplier } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { PdfFileField } from "../../components/pdf-file-field";
+import { ScrollArea } from "../../components/ui/scroll-area";
 import { SelectField } from "../../components/select-field";
 import { CategoryEditor } from "../suppliers/category-editor";
 import { type CategoryChip } from "../suppliers/category-chips";
@@ -98,64 +99,67 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
 
   return (
     <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden sm:max-w-lg">
+        <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col gap-6">
           <DialogHeader>
             <DialogTitle>{t("catalogs.uploadCatalog")}</DialogTitle>
             <DialogDescription>
               {t("catalogs.uploadDescription")}
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <ErrorAlert message={error ?? (suppliersQuery.error ? errorMessage(suppliersQuery.error) : null)} />
-            <PdfFileField file={file} onChange={setFile} />
-            <div className="grid gap-4 md:grid-cols-2">
-              <FormField label={t("catalogs.catalogName")} name="name" value={name} onChange={setName} required />
-              <FormField label={t("catalogs.versionOptional")} name="version" value={version} onChange={setVersion} />
-            </div>
-            {addNewSupplier ? (
-              <div className="flex flex-col gap-4 rounded-lg border p-4">
-                <FormField
-                  label={t("catalogs.supplierName")}
-                  name="newSupplierName"
-                  value={newSupplierName}
-                  onChange={setNewSupplierName}
-                  required
-                />
-                <CategoryEditor value={categories} onChange={setCategories} />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setAddNewSupplier(false);
-                    setNewSupplierName("");
-                    setCategories([]);
-                  }}
-                >
-                  {t("catalogs.existingSupplier")}
-                </Button>
+          <ScrollArea className="min-h-0 flex-1">
+            <FieldGroup className="px-1 pb-1">
+              <ErrorAlert message={error ?? (suppliersQuery.error ? errorMessage(suppliersQuery.error) : null)} />
+              {addNewSupplier ? (
+                <div className="flex flex-col gap-4 rounded-lg border p-4">
+                  <FormField
+                    label={t("catalogs.supplierName")}
+                    name="newSupplierName"
+                    value={newSupplierName}
+                    onChange={setNewSupplierName}
+                    required
+                  />
+                  <CategoryEditor value={categories} onChange={setCategories} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAddNewSupplier(false);
+                      setNewSupplierName("");
+                      setCategories([]);
+                    }}
+                  >
+                    {t("catalogs.existingSupplier")}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <SelectField
+                    label={t("catalogs.supplier")}
+                    options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
+                    value={supplierId}
+                    onChange={setSupplierId}
+                    required
+                  />
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="justify-start px-0 -mt-4"
+                    onClick={() => setAddNewSupplier(true)}
+                  >
+                    {t("catalogs.addNewSupplier")}
+                  </Button>
+                </>
+              )}
+
+              <PdfFileField file={file} onChange={setFile} />
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField label={t("catalogs.catalogName")} name="name" value={name} onChange={setName} required />
+                <FormField label={t("catalogs.versionOptional")} name="version" value={version} onChange={setVersion} />
               </div>
-            ) : (
-              <SelectField
-                label={t("catalogs.supplier")}
-                options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
-                value={supplierId}
-                onChange={setSupplierId}
-                required
-              />
-            )}
-            {!addNewSupplier ? (
-              <Button
-                type="button"
-                variant="link"
-                className="justify-start px-0"
-                onClick={() => setAddNewSupplier(true)}
-              >
-                {t("catalogs.addNewSupplier")}
-              </Button>
-            ) : null}
-          </FieldGroup>
+            </FieldGroup>
+          </ScrollArea>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">{t("common.cancel")}</Button>

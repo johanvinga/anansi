@@ -89,7 +89,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("-mx-6 -mt-4 flex flex-col-reverse gap-2 rounded-t-xl px-6 py-6 sm:flex-row sm:justify-start border-b", className)}
+      className={cn("-mx-6 -mt-4 flex flex-col-reverse gap-2 rounded-t-xl px-6 py-6 sm:flex-col sm:justify-start border-b", className)}
       {...props}
     />
   )
@@ -146,7 +146,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        "text-xs text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className
       )}
       {...props}
