@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Pencil, Trash2 } from "lucide-react";
+import { Download, Eye, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { apiRequest, apiUpload, errorMessage, ApiError } from "../../api/client";
 import { formatSize } from "../../api/format";
 import type { Catalog } from "../../api/types";
+import { CatalogExtractionDialog } from "../catalogs/catalog-extraction-dialog";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
@@ -36,6 +37,7 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Catalog | null>(null);
   const [deleting, setDeleting] = useState<Catalog | null>(null);
+  const [reviewing, setReviewing] = useState<Catalog | null>(null);
   const queryClient = useQueryClient();
   const catalogsQuery = useQuery({
     queryKey: ["catalogs", "supplier", supplierId],
@@ -75,11 +77,12 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
               <TableHead>{t("catalogs.file")}</TableHead>
               <TableHead>{t("suppliers.size")}</TableHead>
               <TableHead>{t("suppliers.lastUpdated")}</TableHead>
+              <TableHead>{t("catalogs.analysis")}</TableHead>
               <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {catalogs.length === 0 ? <TableEmptyRow colSpan={6} message={t("suppliers.noCatalogs")} /> : null}
+            {catalogs.length === 0 ? <TableEmptyRow colSpan={7} message={t("suppliers.noCatalogs")} /> : null}
             {catalogs.map((catalog) => (
               <TableRow key={catalog.id}>
                 <TableCell className="pl-4 font-medium">{catalog.name}</TableCell>
@@ -89,8 +92,17 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
                 <TableCell>{catalog.originalFileName}</TableCell>
                 <TableCell>{formatSize(catalog.sizeBytes)}</TableCell>
                 <TableCell>{new Date(catalog.updatedAt).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
+                    {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}
+                  </Badge>
+                </TableCell>
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setReviewing(catalog)}>
+                      <Eye />
+                      {t("catalogs.reviewButton")}
+                    </Button>
                     <IconAction
                       label={t("suppliers.downloadAria", { name: catalog.name })}
                       icon={Download}
@@ -122,6 +134,17 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
           onSaved={() => {
             setEditing(null);
             refresh();
+          }}
+        />
+      ) : null}
+
+      {reviewing ? (
+        <CatalogExtractionDialog
+          catalog={reviewing}
+          isAdmin={isAdmin}
+          onClose={() => {
+            setReviewing(null);
+            void queryClient.invalidateQueries({ queryKey: ["catalogs", "supplier", supplierId] });
           }}
         />
       ) : null}

@@ -1,5 +1,5 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useId, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,11 +26,14 @@ import { localize } from "../../api/translations";
 import type {
   AttributeField,
   AttributeValue,
+  CatalogProductCandidate,
   ProductDetail,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { FormField } from "../../components/form-field";
 import { SelectField } from "../../components/select-field";
+import { CategoryEditor } from "../suppliers/category-editor";
+import { chipsFrom, toCategoryInputs, type CategoryChip } from "../suppliers/category-chips";
 import { AttributeInput } from "./attribute-input";
 import { useProductFormData } from "./use-product-form-data";
 
@@ -38,6 +41,8 @@ interface ProductFormProps {
   /** When set, the form edits this product; otherwise it creates one. */
   product?: ProductDetail;
   defaultSupplierId?: string;
+  defaultAttributeSetId?: string;
+  initialProduct?: Pick<CatalogProductCandidate, "name" | "sku" | "description" | "attributes" | "categories">;
   onClose: () => void;
   onSaved: (product: ProductDetail) => void;
 }
@@ -91,26 +96,59 @@ function toSubmitValue(field: AttributeField, value: AttributeValue): AttributeV
 }
 
 /** Create or edit a product, including its attribute set values (FR-PRD-01..07). */
-export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: ProductFormProps) {
+export function ProductForm({
+  product,
+  defaultSupplierId,
+  defaultAttributeSetId,
+  initialProduct,
+  onClose,
+  onSaved,
+}: ProductFormProps) {
   const { t } = useTranslation();
   const [supplierId, setSupplierId] = useState<string | null>(product?.supplierId ?? defaultSupplierId ?? null);
-  const [nameEn, setNameEn] = useState(product?.name.en ?? "");
-  const [nameFr, setNameFr] = useState(product?.name.fr ?? "");
+  const [nameEn, setNameEn] = useState(product?.name.en ?? initialProduct?.name ?? "");
+  const [nameFr, setNameFr] = useState(product?.name.fr ?? initialProduct?.name ?? "");
   const [nameFrEdited, setNameFrEdited] = useState(Boolean(product));
-  const [descriptionEn, setDescriptionEn] = useState(product?.description.en ?? "");
+  const [descriptionEn, setDescriptionEn] = useState(product?.description.en ?? initialProduct?.description ?? "");
   const [descriptionFr, setDescriptionFr] = useState(product?.description.fr ?? "");
-  const [supplierSku, setSupplierSku] = useState(product?.supplierSku ?? "");
+  const [supplierSku, setSupplierSku] = useState(product?.supplierSku ?? initialProduct?.sku ?? "");
   const [minQuantity, setMinQuantity] = useState(product ? String(product.minQuantity) : "1");
   const [cost, setCost] = useState(product?.cost ?? "");
   const [currency, setCurrency] = useState<string | null>(product?.currency ?? null);
-  const [attributeSetId, setAttributeSetId] = useState<string | null>(product?.attributeSet?.id ?? null);
+  const [attributeSetId, setAttributeSetId] = useState<string | null>(
+    product?.attributeSet?.id ?? defaultAttributeSetId ?? null,
+  );
   const [values, setValues] = useState<Record<string, AttributeValue>>(() => initialValues(product));
+  const [categories, setCategories] = useState<CategoryChip[]>(
+    product
+      ? chipsFrom(product.categories)
+      : (initialProduct?.categories ?? []).map((name) => ({ name })),
+  );
   const [pendingSetId, setPendingSetId] = useState<string | null | undefined>(undefined);
+  const candidateValuesApplied = useRef(
+    !initialProduct || !defaultAttributeSetId || initialProduct.attributes.length === 0,
+  );
 
   const { currencies, defaultCurrency, suppliers, sets, fields, error: dataError } =
     useProductFormData(attributeSetId);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (candidateValuesApplied.current || fields.length === 0 || !initialProduct) return;
+    const normalize = (value: string) => value.trim().toLocaleLowerCase();
+    const candidateAttributes = new Map(
+      initialProduct.attributes.map((attribute) => [normalize(attribute.name), attribute.value]),
+    );
+    const extractedValues: Record<string, AttributeValue> = {};
+    for (const field of fields) {
+      const value = candidateAttributes.get(normalize(field.name.en)) ??
+        candidateAttributes.get(normalize(field.name.fr));
+      if (value !== undefined) extractedValues[field.id] = value;
+    }
+    setValues((current) => ({ ...extractedValues, ...current }));
+    candidateValuesApplied.current = true;
+  }, [fields, initialProduct]);
 
   const supplierOptions = useMemo(() => {
     const options = suppliers.map((s) => ({ value: s.id, label: s.name }));
@@ -163,6 +201,7 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
       minQuantity: minQuantity.trim() === "" ? null : Number(minQuantity),
       cost: cost.trim(),
       currency: currency ?? defaultCurrency,
+      categories: toCategoryInputs(categories),
       attributeSetId,
       attributeValues: fields.map((field) => ({ fieldId: field.id, value: toSubmitValue(field, values[field.id] ?? null) })),
     };
@@ -206,6 +245,11 @@ export function ProductForm({ product, defaultSupplierId, onClose, onSaved }: Pr
                 disabled={!product && Boolean(defaultSupplierId)}
                 error={error?.fieldError("supplierId")}
               />
+              <FieldSet>
+                <FieldLegend>{t("categories.title")}</FieldLegend>
+                <CategoryEditor value={categories} onChange={setCategories} />
+                {error?.fieldError("categories") ? <FieldError>{error.fieldError("categories")}</FieldError> : null}
+              </FieldSet>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <FormField
                   label={t("products.nameEn")}

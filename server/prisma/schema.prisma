@@ -17,6 +17,14 @@ enum AuditOutcome {
   failure
 }
 
+enum CatalogAnalysisStatus {
+  not_processed
+  queued
+  processing
+  processed
+  failed
+}
+
 model User {
   id                 String    @id @default(uuid()) @db.Uuid
   email              String    @unique @db.VarChar(254)
@@ -140,6 +148,7 @@ model Product {
   supplier     Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   attributeSet AttributeSet?           @relation(fields: [attributeSetId], references: [id], onDelete: Restrict)
   values       ProductAttributeValue[]
+  categories   ProductCategory[]
 
   @@unique([supplierId, skuKey])
   @@index([supplierId])
@@ -174,6 +183,7 @@ model Category {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   suppliers SupplierCategory[]
+  products  ProductCategory[]
 
   @@map("categories")
 }
@@ -188,6 +198,18 @@ model SupplierCategory {
   @@id([supplierId, categoryId])
   @@index([categoryId])
   @@map("supplier_categories")
+}
+
+model ProductCategory {
+  productId  String @map("product_id") @db.Uuid
+  categoryId String @map("category_id") @db.Uuid
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@index([categoryId])
+  @@map("product_categories")
 }
 
 model SupplierAsset {
@@ -222,14 +244,40 @@ model Catalog {
   /// File size in bytes; read-only after upload.
   sizeBytes        BigInt   @map("size_bytes")
   uploadedById     String?  @map("uploaded_by_id") @db.Uuid
+  analysisStatus   CatalogAnalysisStatus @default(not_processed) @map("analysis_status")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   uploadedBy User?    @relation("CatalogUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  extractionJobs CatalogExtractionJob[]
 
   @@index([supplierId])
+  @@index([analysisStatus])
   @@map("catalogs")
+}
+
+model CatalogExtractionJob {
+  id                 String                @id @default(uuid()) @db.Uuid
+  catalogId          String                @map("catalog_id") @db.Uuid
+  status             CatalogAnalysisStatus @default(queued)
+  stage              String                @default("queued") @db.VarChar(50)
+  progress           Int                   @default(0)
+  currentPage        Int                   @default(0) @map("current_page")
+  totalPages         Int                   @default(0) @map("total_pages")
+  productsIdentified Int                   @default(0) @map("products_identified")
+  processingError    String?               @map("processing_error") @db.Text
+  results            Json?
+  startedAt          DateTime?             @map("started_at") @db.Timestamptz(6)
+  completedAt        DateTime?             @map("completed_at") @db.Timestamptz(6)
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  catalog Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+
+  @@index([catalogId, createdAt])
+  @@index([status, createdAt])
+  @@map("catalog_extraction_jobs")
 }
 
 model Session {

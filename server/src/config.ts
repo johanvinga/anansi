@@ -3,7 +3,23 @@ import { isCurrencyCode } from "./lib/currency.js";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
+  REDIS_URL: z.url().default("redis://127.0.0.1:6379"),
+  CATALOG_OCR_LANGUAGES: z.string().min(1).default("eng+fra"),
+  CATALOG_EXTRACTION_MAX_PAGES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(500)
+    .default(200),
+  CATALOG_EXTRACTION_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(2)
+    .default(1),
+  SESSION_SECRET: z
+    .string()
+    .min(32, "SESSION_SECRET must be at least 32 characters"),
   SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(480),
   UPLOAD_DIR: z.string().min(1).default("./storage/assets"),
   STORAGE_BACKEND: z.enum(["local", "r2"]).default("local"),
@@ -19,12 +35,20 @@ const envSchema = z.object({
   LOGIN_RATE_LIMIT: z.coerce.number().int().positive().default(10),
   APP_ORIGIN: z.url().default("http://localhost:5173"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .default("info"),
 });
 
 export interface AppConfig {
   databaseUrl: string;
+  redisUrl: string;
+  catalogOcrLanguages: string;
+  catalogExtractionMaxPages: number;
+  catalogExtractionConcurrency: number;
   sessionSecret: string;
   sessionIdleMinutes: number;
   uploadDir: string;
@@ -45,7 +69,9 @@ export interface AppConfig {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
-    const problems = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+    const problems = parsed.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join("; ");
     throw new Error(`Invalid configuration: ${problems}`);
   }
   const e = parsed.data;
@@ -59,11 +85,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .filter(([, value]) => !value)
       .map(([name]) => name);
     if (missing.length > 0) {
-      throw new Error(`Invalid configuration: STORAGE_BACKEND=r2 requires ${missing.join(", ")}`);
+      throw new Error(
+        `Invalid configuration: STORAGE_BACKEND=r2 requires ${missing.join(", ")}`,
+      );
     }
   }
   return {
     databaseUrl: e.DATABASE_URL,
+    redisUrl: e.REDIS_URL,
+    catalogOcrLanguages: e.CATALOG_OCR_LANGUAGES,
+    catalogExtractionMaxPages: e.CATALOG_EXTRACTION_MAX_PAGES,
+    catalogExtractionConcurrency: e.CATALOG_EXTRACTION_CONCURRENCY,
     sessionSecret: e.SESSION_SECRET,
     sessionIdleMinutes: e.SESSION_IDLE_MINUTES,
     uploadDir: e.UPLOAD_DIR,

@@ -33,6 +33,11 @@ const attributeValueSchema = z.object({
   value: z.union([z.string().max(5000), z.number(), z.boolean(), z.null()]),
 });
 
+const categoryInputSchema = z.union([
+  z.object({ id: uuidSchema }),
+  z.object({ name: z.string().trim().min(1).max(100) }),
+]);
+
 const productBodySchema = z.object({
   name: translatedNameInput(200),
   description: translatedTextInput,
@@ -44,6 +49,7 @@ const productBodySchema = z.object({
     .max(2_147_483_647),
   cost: costSchema,
   currency: currencySchema,
+  categories: z.array(categoryInputSchema).max(100).optional(),
   attributeSetId: uuidSchema.nullish(),
   attributeValues: z.array(attributeValueSchema).max(200).optional(),
 });

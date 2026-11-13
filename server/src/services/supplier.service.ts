@@ -36,10 +36,19 @@ const detailInclude = {
 } satisfies Prisma.SupplierInclude;
 
 type SupplierRow = Prisma.SupplierGetPayload<{ include: typeof detailInclude }>;
+type CategoryRefDto = { id: string; name: { en: string; fr: string } };
 
 export type SupplierDto = ReturnType<typeof toSupplierDto>;
 
-function toSupplierDto(row: SupplierRow) {
+function toCategoryRef(category: { id: string; nameEn: string; nameFr: string }): CategoryRefDto {
+  return { id: category.id, name: { en: category.nameEn, fr: category.nameFr } };
+}
+
+function toSupplierDto(row: SupplierRow, inheritedCategories: CategoryRefDto[] = []) {
+  const assignedCategories = row.categories.map((link) => toCategoryRef(link.category));
+  const effective = new Map(
+    [...assignedCategories, ...inheritedCategories].map((category) => [category.id, category]),
+  );
   return {
     id: row.id,
     name: row.name,
@@ -48,12 +57,43 @@ function toSupplierDto(row: SupplierRow) {
     stateRegion: row.stateRegion,
     postalCode: row.postalCode,
     country: row.country,
-    categories: row.categories
-      .map((link) => ({ id: link.category.id, name: { en: link.category.nameEn, fr: link.category.nameFr } }))
+    categories: [...effective.values()].sort((a, b) => a.name.en.localeCompare(b.name.en)),
+    assignedCategories: assignedCategories.sort((a, b) => a.name.en.localeCompare(b.name.en)),
+    inheritedCategories: inheritedCategories
+      .filter((category) => !row.categories.some((link) => link.categoryId === category.id))
       .sort((a, b) => a.name.en.localeCompare(b.name.en)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+async function inheritedCategoriesBySupplier(
+  db: Database | Prisma.TransactionClient,
+  supplierIds: string[],
+): Promise<Map<string, CategoryRefDto[]>> {
+  const categoriesBySupplier = new Map<string, Map<string, CategoryRefDto>>();
+  if (supplierIds.length === 0) return new Map<string, CategoryRefDto[]>();
+  const links = await db.productCategory.findMany({
+    where: { product: { supplierId: { in: supplierIds } } },
+    select: {
+      product: { select: { supplierId: true } },
+      category: { select: { id: true, nameEn: true, nameFr: true } },
+    },
+  });
+  for (const link of links) {
+    let categories = categoriesBySupplier.get(link.product.supplierId);
+    if (!categories) {
+      categories = new Map();
+      categoriesBySupplier.set(link.product.supplierId, categories);
+    }
+    categories.set(link.category.id, toCategoryRef(link.category));
+  }
+  return new Map(
+    [...categoriesBySupplier].map(([supplierId, categories]) => [
+      supplierId,
+      [...categories.values()].sort((a, b) => a.name.en.localeCompare(b.name.en)),
+    ]),
+  );
 }
 
 /** Audit snapshot of the editable fields. Categories are recorded by name for readability. */
@@ -85,9 +125,12 @@ function isUniqueViolation(error: unknown): boolean {
 export async function listSuppliers(db: Database, request: AuditRequestContext, filters: ListSuppliersFilters) {
   const where: Prisma.SupplierWhereInput = {
     name: filters.q ? { contains: filters.q, mode: "insensitive" } : undefined,
-    categories:
+    OR:
       filters.categoryIds.length > 0
-        ? { some: { categoryId: { in: filters.categoryIds } } }
+        ? [
+            { categories: { some: { categoryId: { in: filters.categoryIds } } } },
+            { products: { some: { categories: { some: { categoryId: { in: filters.categoryIds } } } } } },
+          ]
         : undefined,
   };
 
@@ -102,13 +145,20 @@ export async function listSuppliers(db: Database, request: AuditRequestContext, 
     }),
   ]);
 
+  const inherited = await inheritedCategoriesBySupplier(db, rows.map((row) => row.id));
   await recordAudit(db, request, { action: AuditAction.SUPPLIER_LIST, outcome: "success" });
-  return { items: rows.map(toSupplierDto), total, page: filters.page, pageSize: filters.pageSize };
+  return {
+    items: rows.map((row) => toSupplierDto(row, inherited.get(row.id))),
+    total,
+    page: filters.page,
+    pageSize: filters.pageSize,
+  };
 }
 
 export async function getSupplier(db: Database, request: AuditRequestContext, id: string): Promise<SupplierDto> {
   const row = await db.supplier.findUnique({ where: { id }, include: detailInclude });
   if (!row) throw errors.notFound("Supplier");
+  const inherited = await inheritedCategoriesBySupplier(db, [id]);
 
   await recordAudit(db, request, {
     action: AuditAction.SUPPLIER_VIEW,
@@ -116,7 +166,7 @@ export async function getSupplier(db: Database, request: AuditRequestContext, id
     entityType: "Supplier",
     entityId: id,
   });
-  return toSupplierDto(row);
+  return toSupplierDto(row, inherited.get(id));
 }
 
 export async function createSupplier(
@@ -206,7 +256,8 @@ export async function updateSupplier(
           changes,
         });
       }
-      return toSupplierDto(row);
+      const inherited = await inheritedCategoriesBySupplier(tx, [id]);
+      return toSupplierDto(row, inherited.get(id));
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw duplicateName();

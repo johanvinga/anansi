@@ -43,7 +43,9 @@ export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps)
     postalCode: supplier?.postalCode ?? "",
     country: supplier?.country ?? "",
   });
-  const [categories, setCategories] = useState<CategoryChip[]>(supplier ? chipsFrom(supplier.categories) : []);
+  const [categories, setCategories] = useState<CategoryChip[]>(
+    supplier ? chipsFrom(supplier.assignedCategories) : [],
+  );
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 

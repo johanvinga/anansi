@@ -22,6 +22,11 @@ import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerCategoryRoutes } from "./routes/category.routes.js";
 import { registerSupplierRoutes } from "./routes/supplier.routes.js";
 import { registerUserRoutes } from "./routes/user.routes.js";
+import {
+  createCatalogExtractionRuntime,
+  type CatalogExtractionRuntime,
+} from "./services/catalog-extraction.runtime.js";
+import type { CatalogExtractionQueue } from "./services/catalog-extraction.queue.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -30,6 +35,7 @@ const BYTES_PER_MB = 1024 * 1024;
 export interface BuildAppOptions {
   db?: Database;
   storage?: AssetStorage;
+  catalogExtractionQueue?: CatalogExtractionQueue;
   logger?: boolean;
 }
 
@@ -65,6 +71,11 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
     genReqId: () => randomUUID(),
     trustProxy: false,
   });
+  const extractionRuntime: CatalogExtractionRuntime | undefined = options.catalogExtractionQueue
+    ? undefined
+    : createCatalogExtractionRuntime(db, storage, config, app.log);
+  const extractionQueue = options.catalogExtractionQueue ?? extractionRuntime?.queue;
+  if (!extractionQueue) throw new Error("Catalog extraction queue was not initialized.");
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("x-request-id", request.id);
@@ -144,7 +155,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       registerCategoryRoutes(v1, db, guards);
       registerSupplierRoutes(v1, { db, config, storage, log: app.log }, guards);
       registerAssetRoutes(v1, { db, storage, log: app.log }, guards);
-      registerCatalogRoutes(v1, { db, storage, log: app.log }, guards);
+      registerCatalogRoutes(v1, { db, storage, log: app.log, extractionQueue }, guards);
       registerAttributeSetRoutes(v1, db, guards);
       registerProductRoutes(v1, db, guards);
       registerSettingsRoutes(v1, config, guards);
@@ -153,6 +164,11 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   );
 
   app.addHook("onClose", async () => {
+    if (extractionRuntime) {
+      await extractionRuntime.close();
+    } else {
+      await extractionQueue.close();
+    }
     await db.$disconnect();
   });
 

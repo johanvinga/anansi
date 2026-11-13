@@ -4,6 +4,7 @@ import { AppError, errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated, TranslatedText } from "../lib/translations.js";
 import { loadFieldDefinitions } from "./attribute-set.service.js";
+import { resolveCategoryIds, type CategoryInput } from "./category.service.js";
 import {
   fromValueColumns,
   toValueColumns,
@@ -29,6 +30,8 @@ export interface ProductInput {
   /** Decimal string with at most 2 decimal places; validated by the route schema. */
   cost: string;
   currency: string;
+  /** Replaces product categories when supplied on update. */
+  categories?: CategoryInput[] | undefined;
   /** `undefined` keeps the current set on update; `null` removes it. */
   attributeSetId?: string | null | undefined;
   /** When omitted on update and the set is unchanged, existing values are kept. */
@@ -50,6 +53,7 @@ export interface ListProductsFilters {
 const listInclude = {
   supplier: { select: { id: true, name: true } },
   attributeSet: { select: { id: true, nameEn: true, nameFr: true } },
+  categories: { include: { category: true } },
 } satisfies Prisma.ProductInclude;
 
 const detailInclude = {
@@ -73,6 +77,12 @@ function toProductSummary(row: ListRow) {
     attributeSet: row.attributeSet
       ? { id: row.attributeSet.id, name: { en: row.attributeSet.nameEn, fr: row.attributeSet.nameFr } }
       : null,
+    categories: row.categories
+      .map((link) => ({
+        id: link.category.id,
+        name: { en: link.category.nameEn, fr: link.category.nameFr },
+      }))
+      .sort((a, b) => a.name.en.localeCompare(b.name.en)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -115,6 +125,7 @@ function snapshotOf(row: DetailRow): Record<string, unknown> {
     cost: row.cost.toFixed(2),
     currency: row.currency,
     attributeSet: row.attributeSet?.nameEn ?? null,
+    categories: row.categories.map((link) => link.category.nameEn).sort(),
   };
   for (const value of row.values) {
     const output = fromValueColumns(value.field.dataType as AttributeDataType, value);
@@ -241,6 +252,7 @@ export async function createProduct(
     return await db.$transaction(async (tx) => {
       const attributeSetId = input.attributeSetId ?? null;
       const values = await prepareValues(tx, attributeSetId, input.attributeValues ?? []);
+      const categoryIds = await resolveCategoryIds(tx, request, input.categories ?? []);
       const created = await tx.product.create({
         data: {
           supplierId,
@@ -252,6 +264,7 @@ export async function createProduct(
           currency: input.currency,
           attributeSetId,
           values: { create: values },
+          categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
         },
       });
       const row = await loadDetail(tx, created.id);
@@ -287,6 +300,13 @@ export async function updateProduct(
 
       const attributeSetId = input.attributeSetId === undefined ? existing.attributeSetId : input.attributeSetId;
       const setChanged = attributeSetId !== existing.attributeSetId;
+      if (input.categories !== undefined) {
+        const categoryIds = await resolveCategoryIds(tx, request, input.categories);
+        await tx.productCategory.deleteMany({ where: { productId: id } });
+        await tx.productCategory.createMany({
+          data: categoryIds.map((categoryId) => ({ productId: id, categoryId })),
+        });
+      }
 
       if (setChanged) {
         // Values for fields outside the new set are removed (FR-PRD-07, SPEC §8.2).
