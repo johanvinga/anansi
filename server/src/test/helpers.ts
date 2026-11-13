@@ -4,6 +4,7 @@ import { buildApp } from "../app.js";
 import { loadConfig, type AppConfig } from "../config.js";
 import { createDatabase, type Database } from "../db.js";
 import type { UserRole } from "../generated/prisma/client.js";
+import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
 import { createUser } from "../services/user.service.js";
 
 export const TEST_DATABASE_URL = "postgresql://app:app@localhost:5432/supplier_app_test";
@@ -13,6 +14,10 @@ export const ADMIN = { email: "admin@test.local", password: "AdminPassword123!" 
 export const READER = { email: "reader@test.local", password: "ReaderPassword123!" } as const;
 
 const SYSTEM_ACTOR = { userId: null, email: "system:test" };
+const testExtractionQueue: CatalogExtractionQueue = {
+  async enqueue() {},
+  async close() {},
+};
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const base = loadConfig({
@@ -37,7 +42,11 @@ export async function createTestApp(
   db: Database,
   overrides: Partial<AppConfig> = {},
 ): Promise<FastifyInstance> {
-  const app = await buildApp(testConfig(overrides), { db, logger: false });
+  const app = await buildApp(testConfig(overrides), {
+    db,
+    logger: false,
+    catalogExtractionQueue: testExtractionQueue,
+  });
   await app.ready();
   return app;
 }
@@ -46,7 +55,7 @@ export async function createTestApp(
 export async function resetDatabase(db: Database): Promise<void> {
   await db.$executeRawUnsafe("ALTER TABLE audit_logs DISABLE TRIGGER USER");
   await db.$executeRawUnsafe(
-    "TRUNCATE audit_logs, sessions, product_attribute_values, products, attribute_options, attribute_fields, attribute_sets, catalogs, supplier_assets, supplier_categories, suppliers, categories, users CASCADE",
+    "TRUNCATE audit_logs, sessions, product_attribute_values, products, attribute_options, attribute_fields, attribute_sets, catalog_extraction_jobs, catalogs, supplier_assets, supplier_categories, suppliers, categories, users CASCADE",
   );
   await db.$executeRawUnsafe("ALTER TABLE audit_logs ENABLE TRIGGER USER");
 }

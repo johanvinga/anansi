@@ -15,7 +15,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 ### 1.1 Goals
 
 - Secure login for users.
-- Create and maintain suppliers with a name, an address, and a list of categories.
+- Create and maintain suppliers with a name, an address, and directly assigned categories; supplier category summaries also include product categories.
 - Attach supporting files (PDF catalogs) to each supplier.
 - Link products to suppliers with a name, supplier SKU, minimum quantity, and cost.
 - Define reusable **attribute sets** (for example, "MDF Panel" or "Paint") containing custom fields, and apply them to products.
@@ -34,7 +34,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | Term | Definition |
 |---|---|
 | Supplier | An organization that provides products. Previously referred to as "vendor". |
-| Category | A label applied to suppliers, used for grouping and future search. |
+| Category | A label applied directly to suppliers or products. Supplier category summaries also include categories inherited from their products. |
 | Asset | A file attached to a supplier (currently PDF only). |
 | Catalog | A named, versioned PDF price or product catalog attached to a supplier. A catalog is a separate entity from an asset. |
 | Product | An item provided by a supplier. |
@@ -93,7 +93,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 
 | ID | Requirement |
 |---|---|
-| FR-SUP-01 | The user shall be able to create a supplier with: **name** (required, 1–200 chars), **address** (street, city, state/region, postal code, country), and zero or more **categories**. |
+| FR-SUP-01 | The user shall be able to create a supplier with: **name** (required, 1–200 chars), **address** (street, city, state/region, postal code, country), and zero or more directly assigned **categories**. |
 | FR-SUP-02 | The user shall be able to view a list of suppliers with pagination (default 25 per page). |
 | FR-SUP-03 | The user shall be able to view a single supplier's details. |
 | FR-SUP-04 | The user shall be able to edit a supplier's name, address, and categories. |
@@ -103,6 +103,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-SUP-08 | Supplier name shall be unique (case-insensitive) to prevent accidental duplicates. |
 | FR-SUP-09 | Supplier creation shall open a modal dialog (FR-MODAL-01). The categories editor and asset upload remain available inside the dialog. Supplier name and address are not translated. |
 | FR-SUP-10 | After a supplier is created from the dialog, the app shall navigate to the supplier detail page. |
+| FR-SUP-11 | Supplier category summaries and category filters shall include the union of directly assigned categories and categories assigned to the supplier's products. Editing a supplier changes only its directly assigned categories. |
 
 ### 4.3 Categories (FR-CAT)
 
@@ -111,9 +112,9 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-CAT-01 | The user shall be able to create a category with an English name that is unique (case-insensitive) and a French name (see FR-I18N-02). |
 | FR-CAT-02 | The user shall be able to list all categories. |
 | FR-CAT-03 | The user shall be able to rename a category. |
-| FR-CAT-04 | The user shall be able to delete a category. Deleting it removes the association from all suppliers but does not delete the suppliers. |
-| FR-CAT-05 | A supplier may have any number of categories; a category may be applied to any number of suppliers. |
-| FR-CAT-06 | Categories may be created inline while assigning them to a supplier. |
+| FR-CAT-04 | The user shall be able to delete a category. Deleting it removes associations from suppliers and products but does not delete them. |
+| FR-CAT-05 | Suppliers and products may each have any number of categories; a category may be applied to any number of suppliers and products. |
+| FR-CAT-06 | Categories may be created inline while assigning them to a supplier or product. |
 
 ### 4.4 Supplier Assets (FR-AST)
 
@@ -141,6 +142,9 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-CLG-05 | The user shall be able to download a catalog. |
 | FR-CLG-06 | The user shall be able to edit a catalog's name and version. **Last updated** is set automatically to the time of the most recent change. |
 | FR-CLG-07 | The user shall be able to delete a catalog (file and metadata). |
+| FR-CLG-08 | On upload, a catalog PDF shall be queued for asynchronous analysis. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
+| FR-CLG-09 | Analysis shall extract selectable PDF text before using OCR, and use English/French OCR for scanned pages. It shall identify product candidates and labeled attributes when recognizable, preserving source page references and excerpts. |
+| FR-CLG-10 | Extracted products and suggested attribute fields shall remain review candidates; analysis shall not create products or attribute sets automatically. An admin may review candidates, create products from selected candidates, create an attribute set from suggested fields, and retry a failed or completed analysis. |
 
 ### 4.5 Attribute Sets (FR-ATS)
 
@@ -184,6 +188,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-PRD-10 | A product may have an optional **description** in English and French, each up to 2000 characters. |
 | FR-PRD-11 | The product create and edit forms shall include the name and description fields in both locales. The product detail view shows the description in the active language, falling back to English. |
 | FR-PRD-10 | Products shall display their cost with the product's own currency. |
+| FR-PRD-12 | A product may have zero or more categories. Product create/edit forms shall allow admins to assign categories; supplier category summaries inherit the categories of their products (FR-SUP-11). |
 
 ### 4.7 Supplier Detail View (FR-UI)
 
@@ -453,6 +458,14 @@ Unique: (supplier_id, lower(supplier_sku)).
 
 PK: (product_id, attribute_field_id). Exactly one value column (or `option_id`) is populated, matching the field's `data_type`; enforced in the service layer.
 
+**ProductCategory** (join table)
+
+| Column | Type | Constraints |
+|---|---|---|
+| product_id | UUID | FK → Product, on delete cascade |
+| category_id | UUID | FK → Category, on delete cascade |
+| | | PK (product_id, category_id) |
+
 ---
 
 **AuditLog** (append-only)
@@ -491,10 +504,10 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/suppliers?page&pageSize&q&category` | List with filters. `category` accepts one or more category IDs. |
+| GET | `/suppliers?page&pageSize&q&category` | List with filters. `category` accepts one or more category IDs and matches directly assigned or product-inherited categories. |
 | POST | `/suppliers` | Create. |
-| GET | `/suppliers/{id}` | Detail including categories. |
-| PUT | `/suppliers/{id}` | Update name, address, categories. |
+| GET | `/suppliers/{id}` | Detail including effective `categories`, directly assigned `assignedCategories`, and product-derived `inheritedCategories`. |
+| PUT | `/suppliers/{id}` | Update name, address, and directly assigned categories. |
 | DELETE | `/suppliers/{id}` | Delete (see §8.3). |
 
 ### 6.3 Categories
@@ -520,9 +533,11 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/catalogs` | Global list across all suppliers (the Catalogs page). Query: `q` (searches name, version, supplier name), repeated `category` (supplier category ids), `page`, `pageSize`. Ordered newest first. Each item includes `supplierName` and `supplierCategoryNames`. |
-| GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes` and `updatedAt`. |
-| POST | `/suppliers/{id}/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; `version` is optional). Admin only. |
+| GET | `/catalogs` | Global list across all suppliers (the Catalogs page). Query: `q` (searches name, version, supplier name), repeated `category` (effective supplier category ids), `page`, `pageSize`. Ordered newest first. Each item includes `supplierName`, effective `supplierCategoryNames`, and `analysisStatus`. |
+| GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes`, `updatedAt`, and `analysisStatus`. |
+| POST | `/suppliers/{id}/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; `version` is optional). Admin only. The PDF is queued for asynchronous analysis. |
+| GET | `/catalogs/{catalogId}/extraction` | Get analysis status, progress, errors, and extracted product candidates. |
+| POST | `/catalogs/{catalogId}/extraction` | Queue a new analysis or retry after a completed/failed run. Admin only. |
 | GET | `/catalogs/{catalogId}/download` | Download with `Content-Disposition: attachment`. |
 | PATCH | `/catalogs/{catalogId}` | Update `name` and/or `version` (at least one required). Admin only. |
 | DELETE | `/catalogs/{catalogId}` | Delete the catalog and its file. Admin only. |
@@ -532,7 +547,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Method | Path | Description |
 |---|---|---|
 | GET | `/attribute-sets` | List. |
-| POST | `/attribute-sets` | Create. Body `name: { en, fr? }`; `fr` defaults to `en`. |
+| POST | `/attribute-sets` | Create. Body `name: { en, fr? }`; `fr` defaults to `en`. Optional `fields` creates initial fields in the same transaction. |
 | GET | `/attribute-sets/{id}` | Detail including fields and options. |
 | PUT | `/attribute-sets/{id}` | Rename. Body `name: { en, fr }`. |
 | DELETE | `/attribute-sets/{id}` | Delete if unused. |
@@ -547,9 +562,9 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 |---|---|---|
 | GET | `/products?page&pageSize&supplierId&q` | Global list. |
 | GET | `/suppliers/{id}/products` | Products for one supplier. |
-| POST | `/suppliers/{id}/products` | Create product under supplier. Body `name: { en, fr? }` (`fr` defaults to `en`) and optional `description: { en?, fr? }` (FR-PRD-10). |
-| GET | `/products/{id}` | Detail including attribute values. |
-| PUT | `/products/{id}` | Update. Body may include `name`, `description`, `attributeSetId`, and `attributeValues`. |
+| POST | `/suppliers/{id}/products` | Create product under supplier. Body `name: { en, fr? }` (`fr` defaults to `en`), optional `description: { en?, fr? }` (FR-PRD-10), and optional `categories` (category IDs or names). |
+| GET | `/products/{id}` | Detail including categories and attribute values. |
+| PUT | `/products/{id}` | Update. Body may include `name`, `description`, `categories`, `attributeSetId`, and `attributeValues`. |
 | DELETE | `/products/{id}` | Delete. |
 
 ---
@@ -663,7 +678,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 |---|---|---|
 | Supplier | `lower(name)` unique | Duplicate prevention, search. |
 | Category | `lower(name)` unique | Duplicate prevention. |
-| SupplierCategory | `category_id` | Future category search. |
+| SupplierCategory | `category_id` | Supplier category search. |
+| ProductCategory | `category_id` | Product and inherited supplier category search. |
 | Product | `supplier_id` | Supplier product list. |
 | Product | `(supplier_id, lower(supplier_sku))` unique | SKU uniqueness. |
 | Product | `lower(name)` | Name search. |

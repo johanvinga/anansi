@@ -1,7 +1,7 @@
 ﻿import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { Download, Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,6 +17,7 @@ import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { UploadCatalogDialog } from "./upload-catalog-dialog";
+import { CatalogExtractionDialog } from "./catalog-extraction-dialog";
 
 const PAGE_SIZE = 25;
 
@@ -31,6 +32,7 @@ export function CatalogsPage() {
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [reviewing, setReviewing] = useState<CatalogWithSupplier | null>(null);
   const queryClient = useQueryClient();
   const categoriesQuery = useQuery({
     queryKey: ["categories"],
@@ -116,12 +118,13 @@ export function CatalogsPage() {
               <TableHead>{t("catalogs.supplier")}</TableHead>
               <TableHead>{t("suppliers.categoriesLabel")}</TableHead>
               <TableHead>{t("catalogs.uploadedAt")}</TableHead>
+              <TableHead>{t("catalogs.analysis")}</TableHead>
               <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {result && result.items.length === 0 ? (
-              <TableEmptyRow colSpan={6} message="No catalogs found." />
+              <TableEmptyRow colSpan={7} message="No catalogs found." />
             ) : null}
             {result?.items.map((catalog) => (
               <TableRow key={catalog.id}>
@@ -138,7 +141,16 @@ export function CatalogsPage() {
                   )}
                 </TableCell>
                 <TableCell>{formatDateTime(catalog.createdAt)}</TableCell>
+                <TableCell>
+                  <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
+                    {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}
+                  </Badge>
+                </TableCell>
                 <TableCell className="pr-4 text-right">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setReviewing(catalog)}>
+                    <Eye />
+                    {t("catalogs.reviewButton")}
+                  </Button>
                   <IconAction
                     label={t("catalogs.downloadAria", { name: catalog.name })}
                     icon={Download}
@@ -161,6 +173,16 @@ export function CatalogsPage() {
           onUploaded={() => {
             setUploadOpen(false);
             setPage(1);
+            void queryClient.invalidateQueries({ queryKey: ["catalogs", "all"] });
+          }}
+        />
+      ) : null}
+      {reviewing ? (
+        <CatalogExtractionDialog
+          catalog={reviewing}
+          isAdmin={isAdmin}
+          onClose={() => {
+            setReviewing(null);
             void queryClient.invalidateQueries({ queryKey: ["catalogs", "all"] });
           }}
         />

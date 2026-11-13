@@ -5,6 +5,8 @@ import type { FastifyInstance } from "fastify";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../db.js";
+import { createLocalAssetStorage } from "../lib/asset-storage.js";
+import { processCatalogExtraction } from "../services/catalog-extraction.js";
 import {
   ADMIN,
   READER,
@@ -18,6 +20,38 @@ import {
 
 const NIL_UUID = "9f1c2a4e-1111-4222-8333-444455556666";
 const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj\n<< >>\nendobj\n%%EOF\n");
+
+function textPdf(lines: string[]): Buffer {
+  const content = [
+    "BT",
+    "/F1 12 Tf",
+    "72 740 Td",
+    ...lines.flatMap((line, index) => [index === 0 ? "" : "0 -18 Td", `(${line.replace(/[\\()]/g, "\\$&")}) Tj`]),
+    "ET",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(content, "ascii")} >>\nstream\n${content}\nendstream`,
+  ];
+  let output = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(output, "ascii"));
+    output += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(output, "ascii");
+  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) {
+    output += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  }
+  output += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(output, "ascii");
+}
 
 describe("supplier catalogs", () => {
   let db: Database;
@@ -75,7 +109,12 @@ describe("supplier catalogs", () => {
   async function uploadAsAdmin(fields?: Record<string, string>) {
     const res = await upload(adminCookie, PDF_BYTES, { fields });
     expect(res.status).toBe(201);
-    return res.body.catalog as { id: string; updatedAt: string; createdAt: string };
+    return res.body.catalog as {
+      id: string;
+      updatedAt: string;
+      createdAt: string;
+      analysisStatus: string;
+    };
   }
 
   async function storedFiles(): Promise<string[]> {
@@ -230,6 +269,223 @@ describe("supplier catalogs", () => {
         .get(`/api/v1/suppliers/${other.body.supplier.id}/catalogs`)
         .set(unsafeHeaders(readerCookie));
       expect(res.body.items).toEqual([]);
+    });
+  });
+
+  describe("catalog analysis jobs", () => {
+    it("queues analysis after upload and lets authenticated users check progress", async () => {
+      const catalog = await uploadAsAdmin();
+      expect(catalog.analysisStatus).toBe("queued");
+
+      const res = await request(app.server)
+        .get(`/api/v1/catalogs/${catalog.id}/extraction`)
+        .set("Cookie", readerCookie);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        analysisStatus: "queued",
+        job: {
+          status: "queued",
+          stage: "queued",
+          progress: 0,
+          currentPage: 0,
+          totalPages: 0,
+          productsIdentified: 0,
+        },
+      });
+      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_VIEW", entityId: catalog.id } })).toBe(1);
+    });
+
+    it("allows admins to retry a failed analysis and denies retry to standard users", async () => {
+      const catalog = await uploadAsAdmin();
+      await db.catalogExtractionJob.updateMany({
+        where: { catalogId: catalog.id },
+        data: { status: "failed", stage: "failed", processingError: "Test failure" },
+      });
+      await db.catalog.update({ where: { id: catalog.id }, data: { analysisStatus: "failed" } });
+
+      const denied = await request(app.server)
+        .post(`/api/v1/catalogs/${catalog.id}/extraction`)
+        .set(unsafeHeaders(readerCookie));
+      expect(denied.status).toBe(403);
+
+      const retried = await request(app.server)
+        .post(`/api/v1/catalogs/${catalog.id}/extraction`)
+        .set(unsafeHeaders(adminCookie));
+      expect(retried.status).toBe(202);
+      expect(retried.body.job).toMatchObject({ status: "queued", stage: "queued", progress: 0 });
+      expect(await db.catalogExtractionJob.count({ where: { catalogId: catalog.id } })).toBe(2);
+      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_START", entityId: catalog.id } })).toBe(1);
+    });
+
+    it("allows admins to rerun a completed analysis", async () => {
+      const catalog = await uploadAsAdmin();
+      await db.catalogExtractionJob.updateMany({
+        where: { catalogId: catalog.id },
+        data: { status: "processed", stage: "completed", progress: 100, completedAt: new Date() },
+      });
+      await db.catalog.update({ where: { id: catalog.id }, data: { analysisStatus: "processed" } });
+
+      const retried = await request(app.server)
+        .post(`/api/v1/catalogs/${catalog.id}/extraction`)
+        .set(unsafeHeaders(adminCookie));
+
+      expect(retried.status).toBe(202);
+      expect(retried.body.job).toMatchObject({ status: "queued", stage: "queued", progress: 0 });
+      expect(await db.catalogExtractionJob.count({ where: { catalogId: catalog.id } })).toBe(2);
+      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_START", entityId: catalog.id } })).toBe(1);
+    });
+
+    it("requires authentication and returns 404 for an unknown catalog", async () => {
+      const anonymous = await request(app.server).get(`/api/v1/catalogs/${NIL_UUID}/extraction`);
+      expect(anonymous.status).toBe(401);
+
+      const missing = await request(app.server)
+        .get(`/api/v1/catalogs/${NIL_UUID}/extraction`)
+        .set("Cookie", readerCookie);
+      expect(missing.status).toBe(404);
+    });
+
+    it("extracts product candidates and labeled attributes from selectable PDF text", async () => {
+      const pdf = textPdf([
+        "DRL-2040",
+        "Cordless Drill 20V",
+        "Maximum Torque: 450 in-lbs",
+        "Variable Speed: 0-1800 RPM",
+        "Chuck Size: 1/2 inch",
+        "Lithium-ion battery powered tool designed for regular workshop use.",
+      ]);
+      const uploadResult = await upload(adminCookie, pdf);
+      expect(uploadResult.status).toBe(201);
+      const catalogId = uploadResult.body.catalog.id as string;
+      const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId } });
+
+      await processCatalogExtraction(
+        job.id,
+        { db, storage: createLocalAssetStorage(uploadDir), maxPages: 100 },
+        async () => {
+          throw new Error("OCR should not run for selectable PDF text.");
+        },
+      );
+
+      const processed = await db.catalogExtractionJob.findUniqueOrThrow({ where: { id: job.id } });
+      expect(processed.status).toBe("processed");
+      expect(processed.totalPages).toBe(1);
+      expect(processed.productsIdentified).toBe(1);
+      const results = processed.results as {
+        products: { sku: string | null; name: string; attributes: { name: string; value: string }[] }[];
+        pages: { pageNumber: number; textSource: string }[];
+      };
+      expect(results.products[0]).toMatchObject({
+        sku: "DRL-2040",
+        name: "Cordless Drill 20V",
+        attributes: [
+          { name: "Maximum Torque", value: "450 in-lbs" },
+          { name: "Variable Speed", value: "0-1800 RPM" },
+          { name: "Chuck Size", value: "1/2 inch" },
+        ],
+      });
+      expect(results.pages).toEqual([{ pageNumber: 1, textSource: "pdf", confidence: null }]);
+      expect((await db.catalog.findUniqueOrThrow({ where: { id: catalogId } })).analysisStatus).toBe("processed");
+      expect(await db.product.count()).toBe(0);
+      expect(await db.attributeSet.count()).toBe(0);
+    });
+
+    it("uses OCR for scanned pages and stores recognized candidates for review", async () => {
+      const uploadResult = await upload(adminCookie, textPdf([]));
+      expect(uploadResult.status).toBe(201);
+      const catalogId = uploadResult.body.catalog.id as string;
+      const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId } });
+
+      await processCatalogExtraction(
+        job.id,
+        { db, storage: createLocalAssetStorage(uploadDir), maxPages: 100 },
+        async () => ({
+          recognize: async () => ({
+            data: {
+              text: "SKU: OCR-2040\nCordless Drill OCR\nMaterial: Steel",
+              confidence: 92,
+            },
+          }),
+        }),
+      );
+
+      const processed = await db.catalogExtractionJob.findUniqueOrThrow({ where: { id: job.id } });
+      expect(processed.status).toBe("processed");
+      expect(processed.results).toMatchObject({
+        products: [
+          {
+            sku: "OCR-2040",
+            name: "Cordless Drill OCR",
+            attributes: [{ name: "Material", value: "Steel", sourcePage: 1 }],
+            validationStatus: "pending",
+          },
+        ],
+        pages: [{ pageNumber: 1, textSource: "ocr", confidence: 0.92 }],
+      });
+      expect(await db.product.count()).toBe(0);
+      expect(await db.attributeSet.count()).toBe(0);
+    });
+
+    it("extracts a labeled hinge product, its page category, and specs from OCR", async () => {
+      const uploadResult = await upload(adminCookie, textPdf([]));
+      expect(uploadResult.status).toBe(201);
+      const catalogId = uploadResult.body.catalog.id as string;
+      const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId } });
+
+      await processCatalogExtraction(
+        job.id,
+        { db, storage: createLocalAssetStorage(uploadDir), maxPages: 100 },
+        async () => ({
+          recognize: async () => ({
+            data: {
+              text: [
+                "MONSOON VY Jd Furniture Hinges gy",
+                "Make trust as nature",
+                "35MM CLIP ON HINGE Sa",
+                "Item NO.: MO2105 BS Jo",
+                "Materials:lron Optional Plates: p 7",
+                "Finish: Nickel plated 6 > @y Zs",
+                "Diameter of hinge cup:$p35mm NA / : i a",
+                "Opening degree: 98° er 748)",
+                "Door thinckness:14-20mm ~ 7/4 a 4 Full Overlay A",
+                "Quality grade:Comply with BS EN15570,ANSI/BIFMA X5.5",
+                "Product features: Open and close with clear voice, Easy disassemble. Fr NE",
+              ].join("\n"),
+              confidence: 57,
+            },
+          }),
+        }),
+      );
+
+      const processed = await db.catalogExtractionJob.findUniqueOrThrow({ where: { id: job.id } });
+      const results = processed.results as {
+        products: {
+          sku: string | null;
+          name: string;
+          categories: string[];
+          attributes: { name: string; value: string }[];
+        }[];
+        suggestedAttributeFields: { name: string; type: string }[];
+      };
+      expect(results.products).toHaveLength(1);
+      expect(results.products[0]).toMatchObject({
+        sku: "MO2105",
+        name: "35MM CLIP ON HINGE",
+        categories: ["Furniture Hinges"],
+      });
+      expect(results.products[0]!.attributes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "Material", value: "Iron" }),
+        expect.objectContaining({ name: "Finish", value: "Nickel plated" }),
+        expect.objectContaining({ name: "Diameter Of Hinge Cup", value: "Ø35mm" }),
+        expect.objectContaining({ name: "Opening Degree", value: "98°" }),
+        expect.objectContaining({ name: "Door thickness", value: "14-20mm" }),
+        expect.objectContaining({ name: "Quality Grade", value: "Comply with BS EN15570,ANSI/BIFMA X5.5" }),
+        expect.objectContaining({ name: "Product Features", value: "Open and close with clear voice, Easy disassemble." }),
+      ]));
+      expect(results.suggestedAttributeFields).toEqual(expect.arrayContaining([
+        { name: "Material", type: "text" },
+        { name: "Finish", type: "text" },
+      ]));
     });
   });
 

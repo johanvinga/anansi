@@ -82,6 +82,9 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
       await apiRequest<void>("DELETE", `/products/${target.id}`);
       setStatus(`${localize(target.name)} was deleted.`);
       await queryClient.invalidateQueries({ queryKey: ["products"] });
+      await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+      await queryClient.invalidateQueries({ queryKey: ["supplier"] });
+      await queryClient.invalidateQueries({ queryKey: ["catalogs"] });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -223,6 +226,9 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
             setEditing(null);
             setStatus(`${localize(saved.name)} was saved.`);
             void queryClient.invalidateQueries({ queryKey: ["products"] });
+            void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+            void queryClient.invalidateQueries({ queryKey: ["supplier"] });
+            void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
             queryClient.setQueryData(["product", saved.id], saved);
           }}
         />
@@ -246,6 +252,16 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                   <div>
                     <dt className="text-muted-foreground">{t("products.supplierSku")}</dt>
                     <dd className="font-mono text-sm">{viewing.supplierSku}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("categories.title")}</dt>
+                    <dd className="mt-1 flex flex-wrap gap-1">
+                      {viewing.categories.length > 0
+                        ? viewing.categories.map((category) => (
+                            <Badge key={category.id} variant="secondary">{localize(category.name)}</Badge>
+                          ))
+                        : "—"}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">{t("products.minimumQuantity")}</dt>

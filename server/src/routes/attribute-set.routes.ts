@@ -16,7 +16,6 @@ import {
 } from "../services/attribute-set.service.js";
 import { auditContext, type Guards } from "./route-helpers.js";
 
-const setCreateSchema = z.object({ name: translatedNameInput(100) });
 const setUpdateSchema = z.object({ name: translatedNameUpdate(100) });
 const dataTypeSchema = z.enum(["text", "number", "decimal", "boolean", "date", "select"]);
 const fieldNameSchema = translatedNameInput(100);
@@ -29,6 +28,10 @@ const createFieldSchema = z.object({
   unit: unitSchema,
   isRequired: z.boolean().optional(),
   options: z.array(optionLabelSchema).max(100).optional(),
+});
+const setCreateSchema = z.object({
+  name: translatedNameInput(100),
+  fields: z.array(createFieldSchema).max(100).optional(),
 });
 
 const updateFieldSchema = z
@@ -55,7 +58,7 @@ export function registerAttributeSetRoutes(app: FastifyInstance, db: Database, g
 
   app.post("/attribute-sets", { preHandler: guards.requireAdmin }, async (request, reply) => {
     const body = parseInput(setCreateSchema, request.body);
-    const attributeSet = await createAttributeSet(db, auditContext(request), body.name);
+    const attributeSet = await createAttributeSet(db, auditContext(request), body.name, body.fields);
     return reply.status(201).send({ attributeSet });
   });
 

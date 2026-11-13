@@ -60,6 +60,11 @@ export interface Supplier {
   stateRegion: string | null;
   postalCode: string | null;
   country: string | null;
+  /** Direct categories assigned to the supplier. */
+  assignedCategories: CategoryRef[];
+  /** Categories inherited from associated products, excluding duplicates of assigned ones. */
+  inheritedCategories: CategoryRef[];
+  /** Union of assigned and inherited categories. */
   categories: CategoryRef[];
   createdAt: string;
   updatedAt: string;
@@ -86,8 +91,56 @@ export interface Catalog {
   mimeType: string;
   sizeBytes: number;
   uploadedById: string | null;
+  analysisStatus: CatalogAnalysisStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export type CatalogAnalysisStatus = "not_processed" | "queued" | "processing" | "processed" | "failed";
+
+export interface CatalogExtractionAttribute {
+  name: string;
+  value: string;
+  confidence: number | null;
+  sourcePage: number;
+}
+
+export interface CatalogProductCandidate {
+  sku: string | null;
+  name: string;
+  description: string | null;
+  categories: string[];
+  attributes: CatalogExtractionAttribute[];
+  source: { pageNumbers: number[]; excerpt: string };
+  confidence: { overall: number | null; name: number | null; sku: number | null; attributes: number | null };
+  validationStatus: "pending";
+}
+
+export interface CatalogExtractionResults {
+  products: CatalogProductCandidate[];
+  suggestedAttributeFields: { name: string; type: "text" }[];
+  pages: { pageNumber: number; textSource: "pdf" | "ocr"; confidence: number | null }[];
+}
+
+export interface CatalogExtractionJob {
+  jobId: string;
+  status: CatalogAnalysisStatus;
+  stage: string;
+  progress: number;
+  currentPage: number;
+  totalPages: number;
+  productsIdentified: number;
+  error: string | null;
+  results: CatalogExtractionResults | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CatalogExtraction {
+  analysisStatus: CatalogAnalysisStatus;
+  job: CatalogExtractionJob | null;
 }
 
 /** A catalog joined with its supplier summary, as returned by the global catalogs list. */
@@ -145,6 +198,7 @@ export interface ProductSummary {
   minQuantity: number;
   cost: string;
   currency: string;
+  categories: CategoryRef[];
   attributeSet: { id: string; name: Translated } | null;
   createdAt: string;
   updatedAt: string;

@@ -5,11 +5,14 @@ import { attachmentDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import type { AssetDeps } from "../services/asset.service.js";
+import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
 import {
   deleteCatalog,
+  getCatalogExtraction,
   listAllCatalogs,
   listCatalogs,
   prepareCatalogDownload,
+  startCatalogExtraction,
   updateCatalog,
   uploadCatalog,
 } from "../services/catalog.service.js";
@@ -59,7 +62,11 @@ const globalListQuerySchema = paginationSchema.extend({
     .default([]),
 });
 
-export function registerCatalogRoutes(app: FastifyInstance, deps: AssetDeps, guards: Guards): void {
+interface CatalogRouteDeps extends AssetDeps {
+  extractionQueue: CatalogExtractionQueue;
+}
+
+export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDeps, guards: Guards): void {
   const context = (request: FastifyRequest): AuditRequestContext => ({
     requestId: request.id,
     ipAddress: request.ip,
@@ -107,8 +114,19 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: AssetDeps, gua
       throw errors.validation([{ field: "file", message: "A PDF file is required." }]);
     }
     const metadata = parseInput(createCatalogSchema, fields);
-    const catalog = await uploadCatalog(deps, context(request), id, file, metadata);
+    const catalog = await uploadCatalog(deps, context(request), id, file, metadata, deps.extractionQueue);
     return reply.status(201).send({ catalog });
+  });
+
+  app.get("/catalogs/:catalogId/extraction", { preHandler: guards.requireUser }, async (request) => {
+    const { catalogId } = parseInput(catalogParamsSchema, request.params);
+    return getCatalogExtraction(deps.db, context(request), catalogId);
+  });
+
+  app.post("/catalogs/:catalogId/extraction", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { catalogId } = parseInput(catalogParamsSchema, request.params);
+    const job = await startCatalogExtraction(deps, context(request), catalogId, deps.extractionQueue);
+    return reply.status(202).send({ job });
   });
 
   app.get("/catalogs/:catalogId/download", { preHandler: guards.requireUser }, async (request, reply) => {

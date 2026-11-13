@@ -119,6 +119,43 @@ describe("attribute sets", () => {
       expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_SET_VIEW" } })).toBe(1);
     });
 
+    it("creates an attribute set and its initial fields atomically", async () => {
+      const res = await admin("post", "/attribute-sets", {
+        name: translated("Drill"),
+        fields: [
+          { name: translated("Torque"), dataType: "number", unit: "Nm" },
+          { name: translated("Finish"), dataType: "text" },
+        ],
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.attributeSet.fields).toHaveLength(2);
+      expect(res.body.attributeSet.fields.map((field: { name: { en: string }; dataType: string }) => ({
+        name: field.name.en,
+        dataType: field.dataType,
+      }))).toEqual([
+        { name: "Torque", dataType: "number" },
+        { name: "Finish", dataType: "text" },
+      ]);
+      expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_SET_CREATE" } })).toBe(1);
+      expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_FIELD_CREATE" } })).toBe(2);
+    });
+
+    it("rolls back a set when an initial field is invalid", async () => {
+      const res = await admin("post", "/attribute-sets", {
+        name: translated("Incomplete set"),
+        fields: [
+          { name: translated("Finish"), dataType: "text" },
+          { name: translated("Texture"), dataType: "select" },
+        ],
+      });
+
+      expect(res.status).toBe(400);
+      expect(await db.attributeSet.count()).toBe(0);
+      expect(await db.attributeField.count()).toBe(0);
+      expect(await db.auditLog.count({ where: { action: "ATTRIBUTE_SET_CREATE" } })).toBe(0);
+    });
+
     it("rejects duplicate names case-insensitively", async () => {
       await createSet("Paint");
       const res = await admin("post", "/attribute-sets", { name: translated("PAINT") });

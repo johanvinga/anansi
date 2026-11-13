@@ -1,9 +1,10 @@
 ﻿import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
-import type { Catalog, Prisma } from "../generated/prisma/client.js";
+import type { Catalog, CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
 import { hasPdfSignature, PDF_MIME_TYPE, sanitizeFileName } from "../lib/pdf.js";
+import type { CatalogExtractionQueue } from "./catalog-extraction.queue.js";
 import {
   AuditAction,
   diffFields,
@@ -32,6 +33,7 @@ export interface CatalogDto {
   mimeType: string;
   sizeBytes: number;
   uploadedById: string | null;
+  analysisStatus: CatalogAnalysisStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,6 +62,68 @@ export interface CatalogDownload {
   stream: Readable;
 }
 
+export interface CatalogExtractionJobDto {
+  jobId: string;
+  status: CatalogAnalysisStatus;
+  stage: string;
+  progress: number;
+  currentPage: number;
+  totalPages: number;
+  productsIdentified: number;
+  error: string | null;
+  results: Prisma.JsonValue | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toExtractionJobDto(job: CatalogExtractionJob): CatalogExtractionJobDto {
+  return {
+    jobId: job.id,
+    status: job.status,
+    stage: job.stage,
+    progress: job.progress,
+    currentPage: job.currentPage,
+    totalPages: job.totalPages,
+    productsIdentified: job.productsIdentified,
+    error: job.processingError,
+    results: job.results,
+    startedAt: job.startedAt?.toISOString() ?? null,
+    completedAt: job.completedAt?.toISOString() ?? null,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+  };
+}
+
+async function enqueueExtraction(
+  db: Database,
+  queue: CatalogExtractionQueue,
+  job: { id: string; catalogId: string },
+  log: AssetDeps["log"],
+): Promise<void> {
+  try {
+    await queue.enqueue(job.id);
+  } catch (error) {
+    await db.$transaction([
+      db.catalogExtractionJob.update({
+        where: { id: job.id },
+        data: {
+          status: "failed",
+          stage: "failed",
+          processingError: "The extraction job could not be queued. Retry the analysis.",
+          completedAt: new Date(),
+        },
+      }),
+      db.catalog.update({ where: { id: job.catalogId }, data: { analysisStatus: "failed" } }),
+    ]);
+    log.error(
+      { catalogId: job.catalogId, errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not queue catalog extraction",
+    );
+  }
+}
+
 /**
  * Lists catalogs across all suppliers (the catalogs page). Search matches catalog name,
  * version, or supplier name; categoryIds keeps catalogs whose supplier belongs to any of the
@@ -81,7 +145,12 @@ export async function listAllCatalogs(
       : undefined,
     supplier:
       categoryIds.length > 0
-        ? { categories: { some: { categoryId: { in: categoryIds } } } }
+        ? {
+            OR: [
+              { categories: { some: { categoryId: { in: categoryIds } } } },
+              { products: { some: { categories: { some: { categoryId: { in: categoryIds } } } } } },
+            ],
+          }
         : undefined,
   };
 
@@ -100,13 +169,18 @@ export async function listAllCatalogs(
   const categoryNamesBySupplier = new Map<string, string[]>();
   await Promise.all(
     [...new Set(rows.map((row) => row.supplierId))].map(async (supplierId) => {
-      const supplier = await db.supplier.findUnique({
-        where: { id: supplierId },
-        select: { categories: { select: { category: { select: { nameEn: true } } } } },
+      const categories = await db.category.findMany({
+        where: {
+          OR: [
+            { suppliers: { some: { supplierId } } },
+            { products: { some: { product: { supplierId } } } },
+          ],
+        },
+        select: { nameEn: true },
       });
       categoryNamesBySupplier.set(
         supplierId,
-        supplier?.categories.map((link) => link.category.nameEn).sort() ?? [],
+        categories.map((category) => category.nameEn).sort(),
       );
     }),
   );
@@ -135,6 +209,7 @@ function toCatalogDto(row: Catalog): CatalogDto {
     mimeType: row.mimeType,
     sizeBytes: Number(row.sizeBytes),
     uploadedById: row.uploadedById,
+    analysisStatus: row.analysisStatus,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -170,6 +245,7 @@ export async function uploadCatalog(
   supplierId: string,
   file: UploadedFile,
   metadata: CatalogMetadata,
+  extractionQueue: CatalogExtractionQueue,
 ): Promise<CatalogDto> {
   if (file.mimeType !== PDF_MIME_TYPE || !hasPdfSignature(file.buffer)) {
     throw new AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only PDF files can be uploaded.");
@@ -181,41 +257,117 @@ export async function uploadCatalog(
   const storageKey = `${randomUUID()}.pdf`;
   await deps.storage.save(storageKey, file.buffer);
 
+  let saved: Awaited<ReturnType<typeof createCatalogWithExtractionJob>>;
   try {
-    return await deps.db.$transaction(async (tx) => {
-      const row = await tx.catalog.create({
-        data: {
-          supplierId,
-          name: metadata.name,
-          version: metadata.version,
-          originalFileName: sanitizeFileName(file.originalFileName),
-          storageKey,
-          mimeType: PDF_MIME_TYPE,
-          sizeBytes: BigInt(file.buffer.byteLength),
-          uploadedById: request.actor.userId,
-        },
-      });
-      await recordAudit(tx, request, {
-        action: AuditAction.CATALOG_UPLOAD,
-        outcome: "success",
-        entityType: "Catalog",
-        entityId: row.id,
-        changes: diffFields(
-          {},
-          {
-            name: row.name,
-            version: row.version,
-            originalFileName: row.originalFileName,
-            sizeBytes: Number(row.sizeBytes),
-          },
-        ),
-      });
-      return toCatalogDto(row);
-    });
+    saved = await createCatalogWithExtractionJob(deps.db, request, supplierId, file, metadata, storageKey);
   } catch (error) {
     await removeStoredFiles(deps.storage, [storageKey], deps.log);
     throw error;
   }
+  await enqueueExtraction(deps.db, extractionQueue, saved.extractionJob, deps.log);
+  const catalog = await deps.db.catalog.findUniqueOrThrow({ where: { id: saved.catalog.id } });
+  return toCatalogDto(catalog);
+}
+
+async function createCatalogWithExtractionJob(
+  db: Database,
+  request: AuditRequestContext,
+  supplierId: string,
+  file: UploadedFile,
+  metadata: CatalogMetadata,
+  storageKey: string,
+) {
+  return db.$transaction(async (tx) => {
+  const row = await tx.catalog.create({
+    data: {
+      supplierId,
+      name: metadata.name,
+      version: metadata.version,
+      originalFileName: sanitizeFileName(file.originalFileName),
+      storageKey,
+      mimeType: PDF_MIME_TYPE,
+      sizeBytes: BigInt(file.buffer.byteLength),
+      uploadedById: request.actor.userId,
+      analysisStatus: "queued",
+    },
+  });
+  const extractionJob = await tx.catalogExtractionJob.create({
+    data: { catalogId: row.id },
+  });
+  await recordAudit(tx, request, {
+    action: AuditAction.CATALOG_UPLOAD,
+    outcome: "success",
+    entityType: "Catalog",
+    entityId: row.id,
+    changes: diffFields(
+      {},
+      {
+        name: row.name,
+        version: row.version,
+        originalFileName: row.originalFileName,
+        sizeBytes: Number(row.sizeBytes),
+      },
+    ),
+  });
+  return { catalog: row, extractionJob };
+  });
+}
+
+export async function getCatalogExtraction(
+  db: Database,
+  request: AuditRequestContext,
+  catalogId: string,
+): Promise<{ analysisStatus: CatalogAnalysisStatus; job: CatalogExtractionJobDto | null }> {
+  const catalog = await db.catalog.findUnique({
+  where: { id: catalogId },
+  include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
+  });
+  if (!catalog) throw errors.notFound("Catalog");
+  await recordAudit(db, request, {
+  action: AuditAction.CATALOG_ANALYSIS_VIEW,
+  outcome: "success",
+  entityType: "Catalog",
+  entityId: catalogId,
+  });
+  const job = catalog.extractionJobs[0];
+  return { analysisStatus: catalog.analysisStatus, job: job ? toExtractionJobDto(job) : null };
+}
+
+export async function startCatalogExtraction(
+  deps: AssetDeps,
+  request: AuditRequestContext,
+  catalogId: string,
+  extractionQueue: CatalogExtractionQueue,
+): Promise<CatalogExtractionJobDto> {
+  const existing = await deps.db.catalog.findUnique({
+  where: { id: catalogId },
+  include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
+  });
+  if (!existing) throw errors.notFound("Catalog");
+  const latest = existing.extractionJobs[0];
+  if (latest?.status === "processing") {
+  throw errors.conflict("Catalog analysis is already running.");
+  }
+  if (latest?.status === "queued") {
+  await enqueueExtraction(deps.db, extractionQueue, latest, deps.log);
+  const current = await deps.db.catalogExtractionJob.findUniqueOrThrow({ where: { id: latest.id } });
+  return toExtractionJobDto(current);
+  }
+
+  const job = await deps.db.$transaction(async (tx) => {
+  const created = await tx.catalogExtractionJob.create({ data: { catalogId } });
+  await tx.catalog.update({ where: { id: catalogId }, data: { analysisStatus: "queued" } });
+  await recordAudit(tx, request, {
+    action: AuditAction.CATALOG_ANALYSIS_START,
+    outcome: "success",
+    entityType: "Catalog",
+    entityId: catalogId,
+  });
+  return created;
+  });
+  await enqueueExtraction(deps.db, extractionQueue, job, deps.log);
+  const queued = await deps.db.catalogExtractionJob.findUniqueOrThrow({ where: { id: job.id } });
+  return toExtractionJobDto(queued);
 }
 
 /** Updates name and/or version. The file and its size are not changed here. */

@@ -7,7 +7,9 @@ Full-stack web application for managing suppliers, supplier assets (PDF catalogs
 - Milestone M1 (project setup, database, authentication, roles, user management, audit logging) is implemented.
 - Milestones M1 (setup, auth, roles, users, audit), M2 (suppliers, categories, assets), and M3 (attribute sets, products) are implemented on the server and client.
 - Not yet implemented: M4 (UI polish, Docker app image, security review, Playwright E2E tests).
+- Catalog uploads are analyzed asynchronously using a BullMQ worker, Redis, PDF.js, and Tesseract.js; admins can review candidates and explicitly create products or attribute sets from them, but analysis never imports records automatically.
 - Supplier deletion is blocked while the supplier has products (SPEC §8.3).
+- Products have independent category assignments; supplier category summaries inherit the union of categories assigned to their products.
 - Attribute value validation lives in `server/src/services/attribute-values.ts`. Product saves go through `product.service.ts`.
 - Seed the example attribute sets (SPEC §4.5) with `npm run seed:attribute-sets` in `server/`.
 - Docker Compose currently runs PostgreSQL only. The app runs with `npm run dev` in each package.
@@ -20,7 +22,7 @@ Full-stack web application for managing suppliers, supplier assets (PDF catalogs
 - Database: PostgreSQL with Prisma 7 (versioned migrations only)
 - Validation: Zod for API inputs
 - Testing: Vitest (unit, API via Supertest), Playwright (E2E, planned)
-- Local run: Docker Compose for PostgreSQL
+- Local run: Docker Compose for PostgreSQL and Redis
 
 ## Layout
 
@@ -46,7 +48,7 @@ Run from the repository root unless noted.
 
 | Task | Command |
 |---|---|
-| Start PostgreSQL | `docker compose up -d db` |
+| Start PostgreSQL and Redis | `docker compose up -d db redis` |
 | Install server | `cd server && npm install` (runs `prisma generate` automatically) |
 | Install client | `cd client && npm install` |
 | Configure server | Copy `server/.env.example` to `server/.env`; set `SESSION_SECRET` (32+ chars) |
@@ -89,6 +91,8 @@ Before committing, run the typecheck, lint, and test commands for the packages y
 - Multi-step writes run in a transaction. Audit entries for data changes are written inside the same transaction.
 - Case-insensitive unique names use a lowercased `name_key` column with a unique index (Prisma cannot model functional indexes).
 - Uploaded files are saved before the metadata transaction. If the transaction fails, the file is removed.
+- Catalog analysis uses `REDIS_URL` (default `redis://127.0.0.1:6379`), English/French OCR, and a single worker by default. Keep Redis private; the Compose service binds to loopback, caps memory at 384 MB, and persists its queue data.
+- Catalog upload responses and catalog lists include `analysisStatus`. `GET /api/v1/catalogs/:catalogId/extraction` returns progress and extracted candidates; admins can retry with `POST` to the same endpoint.
 - Case-insensitive unique names use a lowercased 
 ame_key column with a unique index (Prisma cannot model functional indexes).
 - Uploaded files are saved before the metadata transaction. If the transaction fails, the file is removed.
@@ -116,4 +120,3 @@ ame_key column with a unique index (Prisma cannot model functional indexes).
 - Do not add dependencies outside the stack above without discussing first.
 - Do not edit applied migrations.
 - Do not use inline styles in the frontend.
-

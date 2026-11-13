@@ -150,6 +150,41 @@ describe("products", () => {
       expect(res.body.product).toMatchObject({ cost: "0.00", currency: "USD", attributeSet: null, attributeValues: [] });
     });
 
+    it("assigns product categories and exposes them as inherited supplier categories", async () => {
+      const created = await createProduct(
+        mdfProduct({ categories: [{ name: "Furniture Hinges" }] }),
+      );
+      expect(created.status).toBe(201);
+      expect(created.body.product.categories).toMatchObject([
+        { name: translated("Furniture Hinges") },
+      ]);
+
+      const supplier = await request(app.server)
+        .get(`/api/v1/suppliers/${supplierId}`)
+        .set("Cookie", readerCookie);
+      expect(supplier.body.supplier).toMatchObject({
+        categories: [{ name: translated("Furniture Hinges") }],
+        assignedCategories: [],
+        inheritedCategories: [{ name: translated("Furniture Hinges") }],
+      });
+
+      const filtered = await request(app.server)
+        .get(`/api/v1/suppliers?category=${created.body.product.categories[0].id}`)
+        .set("Cookie", readerCookie);
+      expect(filtered.body.items.map((item: { id: string }) => item.id)).toContain(supplierId);
+    });
+
+    it("replaces product categories on update", async () => {
+      const created = await createProduct(mdfProduct({ categories: [{ name: "Furniture Hinges" }] }));
+      const updated = await admin("put", `/products/${created.body.product.id}`, {
+        ...mdfProduct({ categories: [{ name: "Cabinet Hardware" }] }),
+        supplierId,
+      });
+      expect(updated.status).toBe(200);
+      expect(updated.body.product.categories.map((category: { name: { en: string } }) => category.name.en))
+        .toEqual(["Cabinet Hardware"]);
+    });
+
     it("stores select values as options and returns their labels", async () => {
       const res = await createProduct({
         name: translated("Wall Paint"),

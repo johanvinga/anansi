@@ -186,7 +186,53 @@ export async function getAttributeSet(db: Database, request: AuditRequestContext
   return toSetDetail(row);
 }
 
-export async function createAttributeSet(db: Database, request: AuditRequestContext, name: Translated) {
+async function addFieldInTransaction(
+  tx: Tx,
+  request: AuditRequestContext,
+  setId: string,
+  input: CreateFieldInput,
+): Promise<void> {
+  const labels = normalizeOptionLabels(input.options ?? [], input.dataType);
+  const set = await loadSet(tx, setId);
+  const code = generateFieldCode(input.name.en, set.fields.map((field) => field.code));
+  const sortOrder = set.fields.reduce((max, field) => Math.max(max, field.sortOrder), 0) + 1;
+  const field = await tx.attributeField.create({
+    data: {
+      attributeSetId: setId,
+      nameEn: input.name.en.trim(),
+      nameFr: input.name.fr.trim(),
+      code,
+      dataType: input.dataType,
+      unit: input.unit?.trim() || null,
+      isRequired: input.isRequired ?? false,
+      sortOrder,
+      options: {
+        create: labels.map((label, index) => ({
+          labelEn: label.en,
+          labelFr: label.fr,
+          sortOrder: index + 1,
+        })),
+      },
+    },
+  });
+  await recordAudit(tx, request, {
+    action: AuditAction.ATTRIBUTE_FIELD_CREATE,
+    outcome: "success",
+    entityType: "AttributeField",
+    entityId: field.id,
+    changes: diffFields(
+      {},
+      { attributeSet: set.nameEn, code, ...fieldSnapshot(field, labels.map((label) => label.en)) },
+    ),
+  });
+}
+
+export async function createAttributeSet(
+  db: Database,
+  request: AuditRequestContext,
+  name: Translated,
+  fields: CreateFieldInput[] = [],
+) {
   const nameKey = nameKeyOf(name.en);
   if (await db.attributeSet.findUnique({ where: { nameKey } })) throw duplicateSetName();
   try {
@@ -202,7 +248,10 @@ export async function createAttributeSet(db: Database, request: AuditRequestCont
         entityId: row.id,
         changes: diffFields({}, { "name.en": row.nameEn, "name.fr": row.nameFr }),
       });
-      return toSetDetail(row);
+      for (const field of fields) {
+        await addFieldInTransaction(tx, request, row.id, field);
+      }
+      return toSetDetail(await loadSet(tx, row.id));
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw duplicateSetName();
@@ -266,38 +315,9 @@ export async function deleteAttributeSet(db: Database, request: AuditRequestCont
 }
 
 export async function addField(db: Database, request: AuditRequestContext, setId: string, input: CreateFieldInput) {
-  const labels = normalizeOptionLabels(input.options ?? [], input.dataType);
   try {
     return await db.$transaction(async (tx) => {
-      const set = await loadSet(tx, setId);
-      const code = generateFieldCode(input.name.en, set.fields.map((f) => f.code));
-      const sortOrder = set.fields.reduce((max, f) => Math.max(max, f.sortOrder), 0) + 1;
-
-      const field = await tx.attributeField.create({
-        data: {
-          attributeSetId: setId,
-          nameEn: input.name.en.trim(),
-          nameFr: input.name.fr.trim(),
-          code,
-          dataType: input.dataType,
-          unit: input.unit?.trim() || null,
-          isRequired: input.isRequired ?? false,
-          sortOrder,
-          options: {
-            create: labels.map((label, index) => ({ labelEn: label.en, labelFr: label.fr, sortOrder: index + 1 })),
-          },
-        },
-      });
-      await recordAudit(tx, request, {
-        action: AuditAction.ATTRIBUTE_FIELD_CREATE,
-        outcome: "success",
-        entityType: "AttributeField",
-        entityId: field.id,
-        changes: diffFields(
-          {},
-          { attributeSet: set.nameEn, code, ...fieldSnapshot(field, labels.map((label) => label.en)) },
-        ),
-      });
+      await addFieldInTransaction(tx, request, setId, input);
       return toSetDetail(await loadSet(tx, setId));
     });
   } catch (error) {

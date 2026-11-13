@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest, errorMessage } from "../../api/client";
@@ -212,10 +213,10 @@ interface CategoriesTabProps {
 }
 
 function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabProps) {
-  const [chips, setChips] = useState<CategoryChip[]>(chipsFrom(supplier.categories));
+  const [chips, setChips] = useState<CategoryChip[]>(chipsFrom(supplier.assignedCategories));
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
-  const dirty = JSON.stringify(chips) !== JSON.stringify(chipsFrom(supplier.categories));
+  const dirty = JSON.stringify(chips) !== JSON.stringify(chipsFrom(supplier.assignedCategories));
 
   async function save() {
     setSaving(true);
@@ -230,7 +231,7 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
         categories: toCategoryInputs(chips),
       });
       onSaved(result.supplier);
-      setChips(chipsFrom(result.supplier.categories));
+      setChips(chipsFrom(result.supplier.assignedCategories));
     } catch (err) {
       onError(errorMessage(err));
     } finally {
@@ -246,6 +247,16 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
         </CardTitle>
       </CardHeader>
       <CardContent className="px-6">
+        {supplier.inheritedCategories.length > 0 ? (
+          <div className="mb-4 flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">{t("suppliers.inheritedCategories")}</p>
+            <div className="flex flex-wrap gap-2">
+              {supplier.inheritedCategories.map((category) => (
+                <Badge key={category.id} variant="secondary">{category.name.en}</Badge>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <CategoryEditor value={chips} onChange={setChips} disabled={!isAdmin} />
       </CardContent>
       {isAdmin ? (
