@@ -8,6 +8,7 @@ export function registerSettingsRoutes(app: FastifyInstance, config: AppConfig, 
   app.get("/settings", { preHandler: guards.requireUser }, async () => ({
     defaultCurrency: config.defaultCurrency,
     maxUploadMb: config.maxUploadMb,
+    catalogExtractionEnabled: config.catalogExtractionEnabled,
     currencies: CURRENCY_CODES,
   }));
 }

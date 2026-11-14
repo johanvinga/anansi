@@ -84,7 +84,8 @@ export interface SupplierAsset {
 
 export interface Catalog {
   id: string;
-  supplierId: string;
+  supplierId: string | null;
+  categories: CategoryRef[];
   name: string;
   version: string | null;
   originalFileName: string;
@@ -145,7 +146,7 @@ export interface CatalogExtraction {
 
 /** A catalog joined with its supplier summary, as returned by the global catalogs list. */
 export interface CatalogWithSupplier extends Catalog {
-  supplierName: string;
+  supplierName: string | null;
   supplierCategoryNames: string[];
 }
 
@@ -223,6 +224,7 @@ export interface ProductDetail extends ProductSummary {
 export interface AppSettings {
   defaultCurrency: string;
   maxUploadMb: number;
+  catalogExtractionEnabled: boolean;
   currencies: string[];
 }
 

@@ -21,7 +21,7 @@ import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
-import { PdfFileField } from "../../components/pdf-file-field";
+import { AssetFileField } from "../../components/asset-file-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 
 interface AssetsPanelProps {
@@ -29,7 +29,7 @@ interface AssetsPanelProps {
   isAdmin: boolean;
 }
 
-/** Lists, uploads, edits, downloads, and deletes a supplier's PDF assets (FR-AST-01..10). */
+/** Lists, uploads, edits, downloads, and deletes a supplier's assets (FR-AST-01..10). */
 export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
   const { t } = useTranslation();
 
@@ -155,7 +155,7 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
-      setError(t("suppliers.choosePdf"));
+      setError(t("suppliers.chooseFile"));
       return;
     }
     setError(null);
@@ -189,7 +189,7 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
         <CardContent className="px-6">
           <FieldGroup>
             <ErrorAlert message={error} />
-            <PdfFileField file={file} onChange={setFile} resetKey={resetKey} />
+            <AssetFileField file={file} onChange={setFile} resetKey={resetKey} />
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label={t("suppliers.titleOptional")} name="title" value={title} onChange={setTitle} />
               <FormField label={t("suppliers.descriptionOptional")} name="description" value={description} onChange={setDescription} />

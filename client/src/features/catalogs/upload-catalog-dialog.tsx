@@ -13,21 +13,20 @@ import {
 } from "@/components/ui/dialog";
 import { FieldGroup } from "@/components/ui/field";
 import { ApiError, apiRequest, apiUpload, errorMessage } from "../../api/client";
-import type { Page, Supplier } from "../../api/types";
+import type { Supplier } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { PdfFileField } from "../../components/pdf-file-field";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SelectField } from "../../components/select-field";
 import { CategoryEditor } from "../suppliers/category-editor";
-import { type CategoryChip } from "../suppliers/category-chips";
+import { toCategoryInputs, type CategoryChip } from "../suppliers/category-chips";
+import { loadCatalogSuppliers } from "./supplier-picker";
 
 interface UploadCatalogDialogProps {
   onClose: () => void;
   onUploaded: () => void;
 }
-
-const SUPPLIER_PICKER_LIMIT = 100;
 
 /** Uploads a catalog PDF to an existing supplier or a brand-new one created here. */
 export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialogProps) {
@@ -39,16 +38,13 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
   const [addNewSupplier, setAddNewSupplier] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState("");
   const [categories, setCategories] = useState<CategoryChip[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<CategoryChip[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", "picker", SUPPLIER_PICKER_LIMIT],
-    queryFn: async () =>
-      (await apiRequest<Page<Supplier>>(
-        "GET",
-        `/suppliers?page=1&pageSize=${SUPPLIER_PICKER_LIMIT}`,
-      )).items,
+    queryKey: ["suppliers", "catalog-picker"],
+    queryFn: loadCatalogSuppliers,
   });
   const suppliers = suppliersQuery.data ?? [];
 
@@ -68,14 +64,9 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
         setError(t("suppliers.nameRequired"));
         return;
       }
-    } else if (!supplierId) {
-      setError(t("catalogs.selectSupplier"));
-      return;
     }
     setSubmitting(true);
     try {
-      // The API needs a supplier up front, so a new supplier is created first (FR-SUP-01);
-      // only name and categories are mandatory.
       let targetId = supplierId;
       if (addNewSupplier) {
         const created = await apiRequest<{ supplier: Supplier }>("POST", "/suppliers", {
@@ -88,7 +79,9 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
       form.append("file", file);
       form.append("name", name.trim());
       if (version.trim()) form.append("version", version.trim());
-      await apiUpload(`/suppliers/${targetId}/catalogs`, form);
+      if (targetId) form.append("supplierId", targetId);
+      form.append("categories", JSON.stringify(toCategoryInputs(catalogCategories)));
+      await apiUpload("/catalogs", form);
       onUploaded();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : errorMessage(err));
@@ -137,10 +130,10 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
                 <>
                   <SelectField
                     label={t("catalogs.supplier")}
-                    options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
-                    value={supplierId}
-                    onChange={setSupplierId}
-                    required
+                    options={[{ value: "", label: t("catalogs.unassigned") }, ...suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))]}
+                    value={supplierId ?? ""}
+                    onChange={(value) => setSupplierId(value || null)}
+                    disabled={!suppliersQuery.data}
                   />
                   <Button
                     type="button"
@@ -158,6 +151,8 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
                 <FormField label={t("catalogs.catalogName")} name="name" value={name} onChange={setName} required />
                 <FormField label={t("catalogs.versionOptional")} name="version" value={version} onChange={setVersion} />
               </div>
+              <p>{t("catalogs.catalogCategories")}</p>
+              <CategoryEditor value={catalogCategories} onChange={setCatalogCategories} />
             </FieldGroup>
           </ScrollArea>
           <DialogFooter>

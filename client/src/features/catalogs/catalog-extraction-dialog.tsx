@@ -259,7 +259,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
 
       {creatingProduct ? (
         <ProductForm
-          defaultSupplierId={catalog.supplierId}
+          defaultSupplierId={catalog.supplierId ?? undefined}
           defaultAttributeSetId={attributeSetId}
           initialProduct={creatingProduct}
           onClose={() => setCreatingProduct(null)}

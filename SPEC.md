@@ -16,7 +16,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 
 - Secure login for users.
 - Create and maintain suppliers with a name, an address, and directly assigned categories; supplier category summaries also include product categories.
-- Attach supporting files (PDF catalogs) to each supplier.
+- Attach supporting files of any type to each supplier.
 - Link products to suppliers with a name, supplier SKU, minimum quantity, and cost.
 - Define reusable **attribute sets** (for example, "MDF Panel" or "Paint") containing custom fields, and apply them to products.
 - Provide a data model and API that support searching suppliers by category in a future release.
@@ -35,7 +35,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 |---|---|
 | Supplier | An organization that provides products. Previously referred to as "vendor". |
 | Category | A label applied directly to suppliers or products. Supplier category summaries also include categories inherited from their products. |
-| Asset | A file attached to a supplier (currently PDF only). |
+| Asset | A file of any type attached to a supplier. |
 | Catalog | A named, versioned PDF price or product catalog attached to a supplier. A catalog is a separate entity from an asset. |
 | Product | An item provided by a supplier. |
 | Supplier SKU | The supplier's own identifier for a product. Unique per supplier. |
@@ -112,39 +112,40 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-CAT-01 | The user shall be able to create a category with an English name that is unique (case-insensitive) and a French name (see FR-I18N-02). |
 | FR-CAT-02 | The user shall be able to list all categories. |
 | FR-CAT-03 | The user shall be able to rename a category. |
-| FR-CAT-04 | The user shall be able to delete a category. Deleting it removes associations from suppliers and products but does not delete them. |
-| FR-CAT-05 | Suppliers and products may each have any number of categories; a category may be applied to any number of suppliers and products. |
-| FR-CAT-06 | Categories may be created inline while assigning them to a supplier or product. |
+| FR-CAT-04 | The user shall be able to delete a category. Deleting it removes associations from suppliers, products and catalogs but does not delete those records. |
+| FR-CAT-05 | Suppliers, products and catalogs may each have any number of categories; categories may be shared. |
+| FR-CAT-06 | Categories may be created inline while assigning them to a supplier, product or catalog. |
 
 ### 4.4 Supplier Assets (FR-AST)
 
 | ID | Requirement |
 |---|---|
-| FR-AST-01 | The user shall be able to upload one or more PDF files to a supplier. |
-| FR-AST-02 | Uploads shall be validated for MIME type **and** file signature (`%PDF-`). |
+| FR-AST-01 | The user shall be able to upload files of any type to a supplier, including text, CSV, spreadsheets, documents, PDFs and images. |
+| FR-AST-02 | Asset downloads shall use a safe attachment disposition and the stored, syntactically valid MIME type, with `nosniff`. Client-supplied types are not proof of content. |
 | FR-AST-03 | Maximum file size shall be configurable (default 25 MB). |
 | FR-AST-04 | Stored file names shall be generated (UUID-based); the original name is kept as metadata and sanitized. |
 | FR-AST-05 | The user shall be able to list a supplier's assets with name, size, and upload date. |
 | FR-AST-06 | The user shall be able to download an asset. |
 | FR-AST-07 | The user shall be able to delete an asset (file and metadata). |
 | FR-AST-08 | Files shall be stored outside the publicly served directory. |
-| FR-AST-09 | Storage shall be accessed through an interface so the backing store (local disk or S3) can be swapped. |
+| FR-AST-09 | Storage shall be accessed through an interface so the backing store (local disk or S3) can be swapped. New assets and catalogs use separate `assets/` and `catalogs/` prefixes; legacy keys remain accessible. |
 | FR-AST-10 | Optional: the user may give an asset a display title and a short description. |
 
 ### 4.4A Supplier Catalogs (FR-CLG)
 
 | ID | Requirement |
 |---|---|
-| FR-CLG-01 | The user shall be able to upload a catalog to a supplier. A catalog is a PDF file with a required **name** (1–200 chars) and an optional **version** (1–50 chars). Each catalog belongs to exactly one supplier. |
-| FR-CLG-02 | Catalog uploads shall follow FR-AST-02, FR-AST-03, and FR-AST-04. |
+| FR-CLG-01 | The user shall be able to upload a catalog with or without a supplier and assign, change or remove its supplier later. A catalog is a PDF file with a required **name** (1–200 chars) and an optional **version** (1–50 chars). |
+| FR-CLG-02 | Catalog uploads shall be PDF only, validated by MIME type and `%PDF-` signature, and follow FR-AST-03 and FR-AST-04. |
 | FR-CLG-03 | The catalog's **weight** is its file size in bytes. It is computed at upload and is read-only. |
 | FR-CLG-04 | The user shall be able to list a supplier's catalogs with name, version, weight, and last updated date. |
 | FR-CLG-05 | The user shall be able to download a catalog. |
-| FR-CLG-06 | The user shall be able to edit a catalog's name and version. **Last updated** is set automatically to the time of the most recent change. |
+| FR-CLG-06 | An admin may edit a catalog's name, version, supplier and categories. **Last updated** is set automatically to the time of the most recent change. |
 | FR-CLG-07 | The user shall be able to delete a catalog (file and metadata). |
-| FR-CLG-08 | On upload, a catalog PDF shall be queued for asynchronous analysis. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
+| FR-CLG-08 | When catalog analysis is enabled, an uploaded catalog PDF shall be queued for asynchronous analysis. When disabled (the default), uploads remain available and their status is `not_processed`. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
 | FR-CLG-09 | Analysis shall extract selectable PDF text before using OCR, and use English/French OCR for scanned pages. It shall identify product candidates and labeled attributes when recognizable, preserving source page references and excerpts. |
 | FR-CLG-10 | Extracted products and suggested attribute fields shall remain review candidates; analysis shall not create products or attribute sets automatically. An admin may review candidates, create products from selected candidates, create an attribute set from suggested fields, and retry a failed or completed analysis. |
+| FR-CLG-11 | Catalogs have independent categories. Assigning a supplier or adding catalog categories merges those categories into the supplier's direct categories without duplicates. Existing supplier categories remain, including after catalog unassignment, reassignment, category removal, or deletion. |
 
 ### 4.5 Attribute Sets (FR-ATS)
 
@@ -382,7 +383,7 @@ erDiagram
 | Column | Type | Constraints |
 |---|---|---|
 | id | UUID | PK |
-| supplier_id | UUID | FK → Supplier, on delete cascade, not null |
+| supplier_id | UUID | FK → Supplier, nullable; on delete set null |
 | name | varchar(200) | Not null |
 | version | varchar(50) | Nullable (optional since FR-CLG-01 was relaxed) |
 | original_file_name | varchar(255) | Not null |
@@ -392,6 +393,9 @@ erDiagram
 | uploaded_by | UUID | FK → User |
 | created_at | timestamptz | Not null |
 | updated_at | timestamptz | Not null (last updated, FR-CLG-06) |
+
+**CatalogCategory** links a catalog and a category with a composite primary key;
+both foreign keys cascade on deletion.
 
 **AttributeSet**
 
@@ -533,13 +537,14 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/catalogs` | Global list across all suppliers (the Catalogs page). Query: `q` (searches name, version, supplier name), repeated `category` (effective supplier category ids), `page`, `pageSize`. Ordered newest first. Each item includes `supplierName`, effective `supplierCategoryNames`, and `analysisStatus`. |
+| GET | `/catalogs` | Global list including unassigned catalogs. Query: `q` (searches name, version, supplier name), repeated `category` (catalog or effective supplier category ids), `page`, `pageSize`. Each item includes nullable `supplierName`, catalog `categories`, effective `supplierCategoryNames`, and `analysisStatus`. |
 | GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes`, `updatedAt`, and `analysisStatus`. |
-| POST | `/suppliers/{id}/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; `version` is optional). Admin only. The PDF is queued for asynchronous analysis. |
-| GET | `/catalogs/{catalogId}/extraction` | Get analysis status, progress, errors, and extracted product candidates. |
-| POST | `/catalogs/{catalogId}/extraction` | Queue a new analysis or retry after a completed/failed run. Admin only. |
+| POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; optional `version`, `supplierId`, and JSON `categories`). Admin only. Analysis is queued only when enabled. |
+| POST | `/suppliers/{id}/catalogs` | Upload for an existing supplier using the same fields; catalog categories are merged into that supplier. Admin only. |
+| GET | `/catalogs/{catalogId}/extraction` | Get analysis status, progress, errors, and extracted product candidates. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
+| POST | `/catalogs/{catalogId}/extraction` | Queue a new analysis or retry after a completed/failed run. Admin only. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
 | GET | `/catalogs/{catalogId}/download` | Download with `Content-Disposition: attachment`. |
-| PATCH | `/catalogs/{catalogId}` | Update `name` and/or `version` (at least one required). Admin only. |
+| PATCH | `/catalogs/{catalogId}` | Update `name`, `version`, nullable `supplierId`, and/or `categories` (at least one required). Admin only. |
 | DELETE | `/catalogs/{catalogId}` | Delete the catalog and its file. Admin only. |
 
 ### 6.5 Attribute Sets
@@ -604,7 +609,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | AttributeField.decimal | Numeric; max 4 decimal places. |
 | AttributeField.select | Value must be an existing option of that field. |
 | AttributeField.date | ISO 8601 date (`YYYY-MM-DD`). |
-| Asset upload | PDF MIME type, `%PDF-` signature, size ≤ configured max. |
+| Asset upload | Any file type; size ≤ configured max. An invalid or overly long MIME type is stored as `application/octet-stream`. |
+| Catalog upload | PDF MIME type, `%PDF-` signature, size ≤ configured max. |
 | Catalog name | Trimmed, 1–200 characters, required. |
 | Catalog version | Trimmed, 1–50 characters, optional. |
 | Catalog upload | Same rules as asset upload. |
@@ -629,7 +635,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Action | Behavior |
 |---|---|
-| Delete supplier | Blocked if the supplier has products. The user must delete or reassign the products first. Assets and catalogs are deleted with the supplier, and their files are removed from storage. |
+| Delete supplier | Blocked if the supplier has products. Assets and their files are deleted. Catalogs and their files are retained and become unassigned. |
 | Delete category | Removes links from all suppliers. |
 | Delete attribute set | Blocked if any product references it. |
 | Delete attribute field | Archived if any product has a value for it; otherwise deleted. |
@@ -720,7 +726,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | 404 | `NOT_FOUND` | Resource does not exist. |
 | 409 | `CONFLICT` | Duplicate name or SKU, or delete blocked by references. |
 | 413 | `PAYLOAD_TOO_LARGE` | Upload exceeds limit. |
-| 415 | `UNSUPPORTED_MEDIA_TYPE` | Non-PDF upload. |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | Non-PDF catalog upload. |
 | 429 | `RATE_LIMITED` | Too many login attempts. |
 | 500 | `INTERNAL_ERROR` | Unhandled error (generic message returned). |
 

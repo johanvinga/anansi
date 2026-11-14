@@ -1,6 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
-import type { Catalog, CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../generated/prisma/client.js";
+import type { CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
 import { hasPdfSignature, PDF_MIME_TYPE, sanitizeFileName } from "../lib/pdf.js";
@@ -12,21 +12,25 @@ import {
   type AuditRequestContext,
 } from "./audit.service.js";
 import { removeStoredFiles, type AssetDeps, type UploadedFile } from "./asset.service.js";
+import { resolveCategoryIds, type CategoryInput } from "./category.service.js";
 
 export interface CatalogMetadata {
   name: string;
   /** Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08). */
   version: string | null;
+  categories?: CategoryInput[] | undefined;
 }
 
 export interface CatalogUpdate {
   name?: string | undefined;
   version?: string | null | undefined;
+  supplierId?: string | null | undefined;
+  categories?: CategoryInput[] | undefined;
 }
 
 export interface CatalogDto {
   id: string;
-  supplierId: string;
+  supplierId: string | null;
   name: string;
   version: string | null;
   originalFileName: string;
@@ -36,10 +40,11 @@ export interface CatalogDto {
   analysisStatus: CatalogAnalysisStatus;
   createdAt: string;
   updatedAt: string;
+  categories: { id: string; name: { en: string; fr: string } }[];
 }
 
 export interface CatalogSummaryDto extends CatalogDto {
-  supplierName: string;
+  supplierName: string | null;
   supplierCategoryNames: string[];
 }
 
@@ -50,11 +55,15 @@ export interface ListCatalogsFilters {
   pageSize: number;
 }
 
-type CatalogSummaryRow = Prisma.CatalogGetPayload<{ include: { supplier: { select: { name: true } } } }>;
-
+const catalogInclude = {
+  categories: { include: { category: true } },
+} satisfies Prisma.CatalogInclude;
 const summaryInclude = {
+  ...catalogInclude,
   supplier: { select: { name: true } },
 } satisfies Prisma.CatalogInclude;
+type CatalogRow = Prisma.CatalogGetPayload<{ include: typeof catalogInclude }>;
+type CatalogSummaryRow = Prisma.CatalogGetPayload<{ include: typeof summaryInclude }>;
 
 export interface CatalogDownload {
   fileName: string;
@@ -126,8 +135,8 @@ async function enqueueExtraction(
 
 /**
  * Lists catalogs across all suppliers (the catalogs page). Search matches catalog name,
- * version, or supplier name; categoryIds keeps catalogs whose supplier belongs to any of the
- * given categories. Sorted newest first, the last-added order the page defaults to.
+ * version, or supplier name; categoryIds matches catalog or effective supplier categories.
+ * Sorted newest first, the last-added order the page defaults to.
  */
 export async function listAllCatalogs(
   db: Database,
@@ -143,15 +152,13 @@ export async function listAllCatalogs(
           { supplier: { name: { contains: filters.q, mode: "insensitive" } } },
         ]
       : undefined,
-    supplier:
-      categoryIds.length > 0
-        ? {
-            OR: [
-              { categories: { some: { categoryId: { in: categoryIds } } } },
-              { products: { some: { categories: { some: { categoryId: { in: categoryIds } } } } } },
-            ],
-          }
-        : undefined,
+    AND: categoryIds.length > 0 ? [{
+      OR: [
+        { categories: { some: { categoryId: { in: categoryIds } } } },
+        { supplier: { categories: { some: { categoryId: { in: categoryIds } } } } },
+        { supplier: { products: { some: { categories: { some: { categoryId: { in: categoryIds } } } } } } },
+      ],
+    }] : undefined,
   };
 
   const [total, rows] = await db.$transaction([
@@ -168,7 +175,7 @@ export async function listAllCatalogs(
   // Category names are fetched once per distinct supplier, not once per catalog row.
   const categoryNamesBySupplier = new Map<string, string[]>();
   await Promise.all(
-    [...new Set(rows.map((row) => row.supplierId))].map(async (supplierId) => {
+    [...new Set(rows.flatMap((row) => row.supplierId ? [row.supplierId] : []))].map(async (supplierId) => {
       const categories = await db.category.findMany({
         where: {
           OR: [
@@ -187,8 +194,8 @@ export async function listAllCatalogs(
 
   const toSummaryDto = (row: CatalogSummaryRow): CatalogSummaryDto => ({
     ...toCatalogDto(row),
-    supplierName: row.supplier.name,
-    supplierCategoryNames: categoryNamesBySupplier.get(row.supplierId) ?? [],
+    supplierName: row.supplier?.name ?? null,
+    supplierCategoryNames: row.supplierId ? categoryNamesBySupplier.get(row.supplierId) ?? [] : [],
   });
 
   await recordAudit(db, request, {
@@ -199,7 +206,7 @@ export async function listAllCatalogs(
   return { items: rows.map(toSummaryDto), total, page: filters.page, pageSize: filters.pageSize };
 }
 
-function toCatalogDto(row: Catalog): CatalogDto {
+function toCatalogDto(row: CatalogRow): CatalogDto {
   return {
     id: row.id,
     supplierId: row.supplierId,
@@ -212,14 +219,17 @@ function toCatalogDto(row: Catalog): CatalogDto {
     analysisStatus: row.analysisStatus,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    categories: row.categories.map(({ category }) => ({
+      id: category.id, name: { en: category.nameEn, fr: category.nameFr },
+    })).sort((a, b) => a.name.en.localeCompare(b.name.en)),
   };
 }
 
-function catalogSnapshot(row: Catalog): Record<string, unknown> {
-  return { name: row.name, version: row.version };
+function catalogSnapshot(row: CatalogRow): Record<string, unknown> {
+  return { name: row.name, version: row.version, supplierId: row.supplierId, categories: row.categories.map((link) => link.categoryId).sort() };
 }
 
-async function assertSupplierExists(db: Database, supplierId: string): Promise<void> {
+async function assertSupplierExists(db: Database | Prisma.TransactionClient, supplierId: string): Promise<void> {
   const supplier = await db.supplier.findUnique({ where: { id: supplierId }, select: { id: true } });
   if (!supplier) throw errors.notFound("Supplier");
 }
@@ -228,6 +238,7 @@ export async function listCatalogs(db: Database, request: AuditRequestContext, s
   await assertSupplierExists(db, supplierId);
   const rows = await db.catalog.findMany({
     where: { supplierId },
+    include: catalogInclude,
     orderBy: [{ name: "asc" }, { version: "asc" }],
   });
   await recordAudit(db, request, {
@@ -242,42 +253,47 @@ export async function listCatalogs(db: Database, request: AuditRequestContext, s
 export async function uploadCatalog(
   deps: AssetDeps,
   request: AuditRequestContext,
-  supplierId: string,
+  supplierId: string | null,
   file: UploadedFile,
   metadata: CatalogMetadata,
-  extractionQueue: CatalogExtractionQueue,
+  extractionQueue: CatalogExtractionQueue | undefined,
 ): Promise<CatalogDto> {
   if (file.mimeType !== PDF_MIME_TYPE || !hasPdfSignature(file.buffer)) {
     throw new AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only PDF files can be uploaded.");
   }
-  await assertSupplierExists(deps.db, supplierId);
+  if (supplierId) await assertSupplierExists(deps.db, supplierId);
 
   // Store the file first, then write metadata in a transaction. If the transaction fails,
   // the file is removed so no orphaned data is left behind (NFR-11).
-  const storageKey = `${randomUUID()}.pdf`;
-  await deps.storage.save(storageKey, file.buffer);
+  const storageKey = `catalogs/${randomUUID()}.pdf`;
+  await deps.storage.save(storageKey, file.buffer, PDF_MIME_TYPE);
 
   let saved: Awaited<ReturnType<typeof createCatalogWithExtractionJob>>;
   try {
-    saved = await createCatalogWithExtractionJob(deps.db, request, supplierId, file, metadata, storageKey);
+    saved = await createCatalogWithExtractionJob(deps.db, request, supplierId, file, metadata, storageKey, Boolean(extractionQueue));
   } catch (error) {
     await removeStoredFiles(deps.storage, [storageKey], deps.log);
     throw error;
   }
-  await enqueueExtraction(deps.db, extractionQueue, saved.extractionJob, deps.log);
-  const catalog = await deps.db.catalog.findUniqueOrThrow({ where: { id: saved.catalog.id } });
+  if (extractionQueue && saved.extractionJob) {
+    await enqueueExtraction(deps.db, extractionQueue, saved.extractionJob, deps.log);
+  }
+  const catalog = await deps.db.catalog.findUniqueOrThrow({ where: { id: saved.catalog.id }, include: catalogInclude });
   return toCatalogDto(catalog);
 }
 
 async function createCatalogWithExtractionJob(
   db: Database,
   request: AuditRequestContext,
-  supplierId: string,
+  supplierId: string | null,
   file: UploadedFile,
   metadata: CatalogMetadata,
   storageKey: string,
+  extractionEnabled: boolean,
 ) {
   return db.$transaction(async (tx) => {
+  if (supplierId) await assertSupplierExists(tx, supplierId);
+  const categoryIds = await resolveCategoryIds(tx, request, metadata.categories ?? []);
   const row = await tx.catalog.create({
     data: {
       supplierId,
@@ -288,12 +304,15 @@ async function createCatalogWithExtractionJob(
       mimeType: PDF_MIME_TYPE,
       sizeBytes: BigInt(file.buffer.byteLength),
       uploadedById: request.actor.userId,
-      analysisStatus: "queued",
+      analysisStatus: extractionEnabled ? "queued" : "not_processed",
+      categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
     },
+    include: catalogInclude,
   });
-  const extractionJob = await tx.catalogExtractionJob.create({
-    data: { catalogId: row.id },
-  });
+  if (supplierId) await mergeSupplierCategories(tx, request, supplierId, categoryIds);
+  const extractionJob = extractionEnabled
+    ? await tx.catalogExtractionJob.create({ data: { catalogId: row.id } })
+    : null;
   await recordAudit(tx, request, {
     action: AuditAction.CATALOG_UPLOAD,
     outcome: "success",
@@ -306,10 +325,43 @@ async function createCatalogWithExtractionJob(
         version: row.version,
         originalFileName: row.originalFileName,
         sizeBytes: Number(row.sizeBytes),
+        supplierId: row.supplierId,
+        categories: categoryIds.slice().sort(),
       },
     ),
   });
   return { catalog: row, extractionJob };
+  });
+}
+
+async function mergeSupplierCategories(
+  tx: Prisma.TransactionClient,
+  request: AuditRequestContext,
+  supplierId: string,
+  categoryIds: string[],
+): Promise<void> {
+  if (!categoryIds.length) return;
+  const before = await tx.supplierCategory.findMany({
+    where: { supplierId },
+    select: { categoryId: true },
+  });
+  const existing = new Set(before.map((link) => link.categoryId));
+  const additions = categoryIds.filter((id) => !existing.has(id));
+  if (!additions.length) return;
+  await tx.supplierCategory.createMany({
+    data: additions.map((categoryId) => ({ supplierId, categoryId })),
+    skipDuplicates: true,
+  });
+  const after = await tx.supplierCategory.findMany({ where: { supplierId }, select: { categoryId: true } });
+  await recordAudit(tx, request, {
+    action: AuditAction.SUPPLIER_UPDATE,
+    outcome: "success",
+    entityType: "Supplier",
+    entityId: supplierId,
+    changes: diffFields(
+      { categoryIds: [...existing].sort() },
+      { categoryIds: after.map((link) => link.categoryId).sort() },
+    ),
   });
 }
 
@@ -378,13 +430,23 @@ export async function updateCatalog(
   update: CatalogUpdate,
 ): Promise<CatalogDto> {
   return db.$transaction(async (tx) => {
-    const existing = await tx.catalog.findUnique({ where: { id: catalogId } });
+    const existing = await tx.catalog.findUnique({ where: { id: catalogId }, include: catalogInclude });
     if (!existing) throw errors.notFound("Catalog");
 
     // Treated as absent when undefined so PATCH can leave an existing version untouched.
-    const data: Prisma.CatalogUpdateInput = { name: update.name };
+    const supplierId = update.supplierId === undefined ? existing.supplierId : update.supplierId;
+    if (supplierId) await assertSupplierExists(tx, supplierId);
+    const categoryIds = update.categories === undefined
+      ? existing.categories.map((link) => link.categoryId)
+      : await resolveCategoryIds(tx, request, update.categories);
+    if (update.categories !== undefined) {
+      await tx.catalogCategory.deleteMany({ where: { catalogId } });
+      await tx.catalogCategory.createMany({ data: categoryIds.map((categoryId) => ({ catalogId, categoryId })) });
+    }
+    if (supplierId) await mergeSupplierCategories(tx, request, supplierId, categoryIds);
+    const data: Prisma.CatalogUncheckedUpdateInput = { name: update.name, supplierId };
     if (update.version !== undefined) data.version = update.version;
-    const row = await tx.catalog.update({ where: { id: catalogId }, data });
+    const row = await tx.catalog.update({ where: { id: catalogId }, data, include: catalogInclude });
     const changes = diffFields(catalogSnapshot(existing), catalogSnapshot(row));
     if (changes) {
       await recordAudit(tx, request, {

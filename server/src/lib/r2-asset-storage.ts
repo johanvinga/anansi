@@ -7,10 +7,7 @@
 } from "@aws-sdk/client-s3";
 import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { AssetStorage } from "./asset-storage.js";
-
-/** Generated keys only: `<uuid>.pdf`. Anything else is rejected, which blocks path traversal. */
-const STORAGE_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/;
+import { assertValidStorageKey, type AssetStorage } from "./asset-storage.js";
 
 export interface R2StorageConfig {
   endpoint: string;
@@ -26,12 +23,6 @@ export interface R2StorageConfig {
  * double can return a minimal object for them.
  */
 export type R2CommandSender = Pick<S3Client, "send">;
-
-function assertValidKey(key: string): void {
-  if (!STORAGE_KEY_PATTERN.test(key)) {
-    throw new Error("Invalid storage key");
-  }
-}
 
 /**
  * Cloudflare R2 storage backend (FR-AST-09). Speaks the S3 API through the AWS SDK.
@@ -51,8 +42,8 @@ export function createR2AssetStorage(
   const bucket = config.bucket;
 
   return {
-    async save(key, data) {
-      assertValidKey(key);
+    async save(key, data, mimeType = "application/octet-stream") {
+      assertValidStorageKey(key);
       // Fail instead of silently overwriting an existing object, mirroring the local
       // backend's wx flag. R2 supports the S3 condition and returns 412 PreconditionFailed.
       await client.send(
@@ -60,14 +51,14 @@ export function createR2AssetStorage(
           Bucket: bucket,
           Key: key,
           Body: data,
-          ContentType: "application/pdf",
+          ContentType: mimeType,
           IfNoneMatch: '"*"',
         }),
       );
     },
 
     async exists(key) {
-      assertValidKey(key);
+      assertValidStorageKey(key);
       try {
         await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
         return true;
@@ -81,7 +72,7 @@ export function createR2AssetStorage(
     },
 
     openRead(key) {
-      assertValidKey(key);
+      assertValidStorageKey(key);
       // GetObjectCommand is async, but openRead's contract is synchronous: expose a
       // PassThrough that the body pipelines into once the request resolves. The promise is
       // intentionally not awaited so the stream can be returned immediately; S3 errors then
@@ -108,7 +99,7 @@ export function createR2AssetStorage(
     },
 
     async remove(key) {
-      assertValidKey(key);
+      assertValidStorageKey(key);
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     },
   };

@@ -1,5 +1,15 @@
 # React + TypeScript + Vite
 
+## Catalog analysis
+
+PDF catalog analysis is disabled by default. Set `CATALOG_EXTRACTION_ENABLED=true`
+in the server environment and restart the server to enable it; Redis must be
+available. Disabled mode keeps catalog uploads and downloads available, does not
+start an analysis worker, and hides analysis controls. Existing queued jobs are
+preserved and can resume when analysis is enabled; catalogs uploaded while
+disabled must be started manually after enabling. Set the same value and restart
+every server instance, then reload the client, when changing the toggle.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:
