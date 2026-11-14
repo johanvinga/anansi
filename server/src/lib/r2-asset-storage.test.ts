@@ -23,12 +23,14 @@ function fakeClient(options: {
   getResponse?: { Body?: unknown };
   deleteResponse?: object;
   error?: Error;
-} = {}): { client: Parameters<typeof createR2AssetStorage>[1]; calls: string[] } {
+} = {}): { client: Parameters<typeof createR2AssetStorage>[1]; calls: string[]; puts: PutObjectCommand[] } {
   const calls: string[] = [];
+  const puts: PutObjectCommand[] = [];
   const client = {
     async send(command: unknown) {
       const Key = (command as { input: { Key: string } }).input.Key;
       if (command instanceof PutObjectCommand) {
+        puts.push(command);
         calls.push(`put:${Key}`);
         if (options.error) throw options.error;
         return options.putResponse ?? {};
@@ -51,7 +53,7 @@ function fakeClient(options: {
       throw new Error("Unexpected command type");
     },
   };
-  return { client, calls };
+  return { client, calls, puts };
 }
 
 /** SDK-style error ({ name, message }). */
@@ -70,12 +72,18 @@ const config = {
 
 describe("createR2AssetStorage (FR-AST-09)", () => {
   it("saves files under generated keys with a fail-if-exists guard", async () => {
-    const { client, calls } = fakeClient();
+    const { client, calls, puts } = fakeClient();
     const storage = createR2AssetStorage(config, client);
+    const assetKey = `assets/${VALID_KEY.slice(0, -4)}`;
+    const catalogKey = `catalogs/${VALID_KEY}`;
+    await storage.save(assetKey, PDF, "text/plain");
+    await storage.save(catalogKey, PDF, "application/pdf");
     await storage.save(VALID_KEY, PDF);
-    expect(calls).toEqual([`put:${VALID_KEY}`]);
-    // The double recorded the command name and key; assert guard behavior on save failure
-    // (IfNoneMatch) is covered by integration with the real SDK, not by this double.
+    expect(calls).toEqual([`put:${assetKey}`, `put:${catalogKey}`, `put:${VALID_KEY}`]);
+    expect(puts.map((command) => command.input.ContentType)).toEqual([
+      "text/plain", "application/pdf", "application/octet-stream",
+    ]);
+    expect(puts.every((command) => command.input.IfNoneMatch === '"*"')).toBe(true);
   });
 
   it("rejects keys that are not generated UUID file names", async () => {
@@ -85,6 +93,8 @@ describe("createR2AssetStorage (FR-AST-09)", () => {
     await expect(storage.exists("notes.txt")).rejects.toThrow(/Invalid storage key/);
     expect(() => storage.openRead("a/b.pdf")).toThrow(/Invalid storage key/);
     await expect(storage.remove("../../etc/passwd.pdf")).rejects.toThrow(/Invalid storage key/);
+    await expect(storage.save(`assets/../${VALID_KEY}`, PDF)).rejects.toThrow(/Invalid storage key/);
+    await expect(storage.exists(`catalogs\\${VALID_KEY}`)).rejects.toThrow(/Invalid storage key/);
   });
 
   it("returns true for an existing object", async () => {
@@ -153,4 +163,3 @@ describe("createR2AssetStorage (FR-AST-09)", () => {
     expect(calls).toEqual([`delete:${VALID_KEY}`]);
   });
 });
-

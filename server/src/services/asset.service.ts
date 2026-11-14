@@ -3,9 +3,9 @@ import type { Readable } from "node:stream";
 import type { FastifyBaseLogger } from "fastify";
 import type { SupplierAsset } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
-import { AppError, errors } from "../errors.js";
+import { errors } from "../errors.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
-import { hasPdfSignature, PDF_MIME_TYPE, sanitizeFileName } from "../lib/pdf.js";
+import { sanitizeFileName } from "../lib/pdf.js";
 import {
   AuditAction,
   diffFields,
@@ -39,6 +39,7 @@ export interface AssetDto {
   title: string | null;
   description: string | null;
   uploadedById: string | null;
+  uploadedByName: string | null;
   createdAt: string;
 }
 
@@ -51,7 +52,8 @@ function toAssetDto(row: SupplierAsset): AssetDto {
     sizeBytes: Number(row.sizeBytes),
     title: row.title,
     description: row.description,
-    uploadedById: row.uploadedById,
+    uploadedById: row.uploaderId ?? row.uploadedById,
+    uploadedByName: row.uploaderName,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -101,28 +103,35 @@ export async function uploadAsset(
   file: UploadedFile,
   metadata: AssetMetadata,
 ): Promise<AssetDto> {
-  if (file.mimeType !== PDF_MIME_TYPE || !hasPdfSignature(file.buffer)) {
-    throw new AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only PDF files can be uploaded.");
-  }
   await assertSupplierExists(deps.db, supplierId);
 
   // Store the file first, then write metadata in a transaction. If the transaction fails,
   // the file is removed so no orphaned data is left behind (NFR-11).
-  const storageKey = `${randomUUID()}.pdf`;
-  await deps.storage.save(storageKey, file.buffer);
+  const storageKey = `assets/${randomUUID()}`;
+  const mimeType = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(file.mimeType) && file.mimeType.length <= 100
+    ? file.mimeType.toLowerCase()
+    : "application/octet-stream";
+  await deps.storage.save(storageKey, file.buffer, mimeType);
 
   try {
     return await deps.db.$transaction(async (tx) => {
+      if (!request.actor.userId) throw new Error("Asset upload requires an authenticated user");
+      const uploader = await tx.user.findUniqueOrThrow({
+        where: { id: request.actor.userId },
+        select: { id: true, displayName: true, email: true },
+      });
       const row = await tx.supplierAsset.create({
         data: {
           supplierId,
-          originalFileName: sanitizeFileName(file.originalFileName),
+          originalFileName: sanitizeFileName(file.originalFileName, "file"),
           storageKey,
-          mimeType: PDF_MIME_TYPE,
+          mimeType,
           sizeBytes: BigInt(file.buffer.byteLength),
           title: metadata.title ?? null,
           description: metadata.description ?? null,
           uploadedById: request.actor.userId,
+          uploaderId: uploader.id,
+          uploaderName: uploader.displayName?.trim() || uploader.email,
         },
       });
       await recordAudit(tx, request, {
@@ -193,6 +202,7 @@ export async function deleteAsset(deps: AssetDeps, request: AuditRequestContext,
 export interface AssetDownload {
   fileName: string;
   sizeBytes: number;
+  mimeType: string;
   stream: Readable;
 }
 
@@ -215,6 +225,7 @@ export async function prepareDownload(
   return {
     fileName: row.originalFileName,
     sizeBytes: Number(row.sizeBytes),
+    mimeType: row.mimeType,
     stream: deps.storage.openRead(row.storageKey),
   };
 }

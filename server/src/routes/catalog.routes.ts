@@ -25,10 +25,27 @@ interface Guards {
 const nameSchema = z.string().trim().min(1, "Name is required.").max(200);
 // Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08).
 const versionSchema = z.string().trim().max(50).nullish();
+const categoryInputSchema = z.union([
+  z.object({ id: uuidSchema }),
+  z.object({ name: z.string().trim().min(1).max(100) }),
+]);
+const categoriesSchema = z.array(categoryInputSchema).max(50);
 
 const createCatalogSchema = z.object({
   name: nameSchema,
   version: versionSchema.transform((v) => v || null),
+  supplierId: uuidSchema.nullish().transform((v) => v || null),
+  categories: z.string().optional().transform((value, ctx) => {
+    if (value === undefined) return [];
+    try {
+      const result = categoriesSchema.safeParse(JSON.parse(value));
+      if (result.success) return result.data;
+    } catch {
+      // Report malformed JSON as a validation error.
+    }
+    ctx.addIssue({ code: "custom", message: "Invalid categories." });
+    return z.NEVER;
+  }),
 });
 
 const updateCatalogSchema = z
@@ -42,8 +59,10 @@ const updateCatalogSchema = z
       .max(50)
       .nullish()
       .transform((v) => (v === undefined ? undefined : v || null)),
+    supplierId: uuidSchema.nullable().optional(),
+    categories: categoriesSchema.optional(),
   })
-  .refine((value) => value.name !== undefined || value.version !== undefined, {
+  .refine((value) => value.name !== undefined || value.version !== undefined || value.supplierId !== undefined || value.categories !== undefined, {
     message: "At least one field must be provided.",
   });
 
@@ -63,7 +82,7 @@ const globalListQuerySchema = paginationSchema.extend({
 });
 
 interface CatalogRouteDeps extends AssetDeps {
-  extractionQueue: CatalogExtractionQueue;
+  extractionQueue: CatalogExtractionQueue | undefined;
 }
 
 export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDeps, guards: Guards): void {
@@ -88,8 +107,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     return listCatalogs(deps.db, context(request), id);
   });
 
-  app.post("/suppliers/:id/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => {
-    const { id } = parseInput(idParamsSchema, request.params);
+  const handleUpload = async (request: FastifyRequest, reply: FastifyReply, supplierId?: string) => {
 
     // Read all parts in one pass so text fields are available regardless of their order.
     const fields: Record<string, string> = {};
@@ -114,16 +132,26 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
       throw errors.validation([{ field: "file", message: "A PDF file is required." }]);
     }
     const metadata = parseInput(createCatalogSchema, fields);
-    const catalog = await uploadCatalog(deps, context(request), id, file, metadata, deps.extractionQueue);
+    if (supplierId && metadata.supplierId && supplierId !== metadata.supplierId) {
+      throw errors.validation([{ field: "supplierId", message: "Supplier does not match the URL." }]);
+    }
+    const catalog = await uploadCatalog(deps, context(request), supplierId ?? metadata.supplierId, file, metadata, deps.extractionQueue);
     return reply.status(201).send({ catalog });
+  };
+  app.post("/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => handleUpload(request, reply));
+  app.post("/suppliers/:id/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { id } = parseInput(idParamsSchema, request.params);
+    return handleUpload(request, reply, id);
   });
 
   app.get("/catalogs/:catalogId/extraction", { preHandler: guards.requireUser }, async (request) => {
+    if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
     const { catalogId } = parseInput(catalogParamsSchema, request.params);
     return getCatalogExtraction(deps.db, context(request), catalogId);
   });
 
   app.post("/catalogs/:catalogId/extraction", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
     const { catalogId } = parseInput(catalogParamsSchema, request.params);
     const job = await startCatalogExtraction(deps, context(request), catalogId, deps.extractionQueue);
     return reply.status(202).send({ job });

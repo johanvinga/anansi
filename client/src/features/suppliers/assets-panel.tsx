@@ -21,7 +21,7 @@ import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
-import { PdfFileField } from "../../components/pdf-file-field";
+import { AssetFileField } from "../../components/asset-file-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 
 interface AssetsPanelProps {
@@ -29,7 +29,7 @@ interface AssetsPanelProps {
   isAdmin: boolean;
 }
 
-/** Lists, uploads, edits, downloads, and deletes a supplier's PDF assets (FR-AST-01..10). */
+/** Lists, uploads, edits, downloads, and deletes a supplier's assets (FR-AST-01..10). */
 export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
   const { t } = useTranslation();
 
@@ -73,12 +73,13 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
               <TableHead className="pl-4">{t("suppliers.title")}</TableHead>
               <TableHead>{t("catalogs.file")}</TableHead>
               <TableHead>{t("suppliers.size")}</TableHead>
-              <TableHead>{t("catalogs.uploaded")}</TableHead>
+              <TableHead>{t("suppliers.uploadedBy")}</TableHead>
+              <TableHead>{t("suppliers.uploadedAt")}</TableHead>
               <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {assets.length === 0 ? <TableEmptyRow colSpan={5} message={t("suppliers.noAssets")} /> : null}
+            {assets.length === 0 ? <TableEmptyRow colSpan={6} message={t("suppliers.noAssets")} /> : null}
             {assets.map((asset) => (
               <TableRow key={asset.id}>
                 <TableCell className="pl-4 whitespace-normal">
@@ -87,7 +88,15 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
                 </TableCell>
                 <TableCell>{asset.originalFileName}</TableCell>
                 <TableCell>{formatSize(asset.sizeBytes)}</TableCell>
-                <TableCell>{new Date(asset.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  {asset.uploadedByName ?? t("suppliers.unknownUploader")}
+                  {asset.uploadedById ? <div className="text-muted-foreground">{asset.uploadedById}</div> : null}
+                </TableCell>
+                <TableCell>
+                  <time dateTime={asset.createdAt}>
+                    {new Date(asset.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                  </time>
+                </TableCell>
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
                     <IconAction
@@ -155,7 +164,7 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
-      setError(t("suppliers.choosePdf"));
+      setError(t("suppliers.chooseFile"));
       return;
     }
     setError(null);
@@ -189,7 +198,7 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
         <CardContent className="px-6">
           <FieldGroup>
             <ErrorAlert message={error} />
-            <PdfFileField file={file} onChange={setFile} resetKey={resetKey} />
+            <AssetFileField file={file} onChange={setFile} resetKey={resetKey} />
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label={t("suppliers.titleOptional")} name="title" value={title} onChange={setTitle} />
               <FormField label={t("suppliers.descriptionOptional")} name="description" value={description} onChange={setDescription} />

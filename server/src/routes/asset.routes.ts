@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
-import { attachmentDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
+import { attachmentDisposition } from "../lib/pdf.js";
 import { parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import {
@@ -76,7 +76,7 @@ export function registerAssetRoutes(app: FastifyInstance, assetDeps: AssetDeps, 
     }
 
     if (!file) {
-      throw errors.validation([{ field: "file", message: "A PDF file is required." }]);
+      throw errors.validation([{ field: "file", message: "A file is required." }]);
     }
     const metadata = parseInput(uploadMetadataSchema, fields);
     const asset = await uploadAsset(assetDeps, context(request), id, file, metadata);
@@ -87,7 +87,8 @@ export function registerAssetRoutes(app: FastifyInstance, assetDeps: AssetDeps, 
     const { assetId } = parseInput(assetParamsSchema, request.params);
     const download = await prepareDownload(assetDeps, context(request), assetId);
 
-    reply.header("Content-Type", PDF_MIME_TYPE);
+    reply.header("Content-Type", download.mimeType);
+    reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Content-Length", String(download.sizeBytes));
     reply.header("Content-Disposition", attachmentDisposition(download.fileName));
     reply.header("Cache-Control", "private, no-store");

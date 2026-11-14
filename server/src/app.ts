@@ -71,11 +71,13 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
     genReqId: () => randomUUID(),
     trustProxy: false,
   });
-  const extractionRuntime: CatalogExtractionRuntime | undefined = options.catalogExtractionQueue
+  const extractionRuntime: CatalogExtractionRuntime | undefined = !config.catalogExtractionEnabled || options.catalogExtractionQueue
     ? undefined
     : createCatalogExtractionRuntime(db, storage, config, app.log);
-  const extractionQueue = options.catalogExtractionQueue ?? extractionRuntime?.queue;
-  if (!extractionQueue) throw new Error("Catalog extraction queue was not initialized.");
+  const extractionQueue = config.catalogExtractionEnabled
+    ? options.catalogExtractionQueue ?? extractionRuntime?.queue
+    : undefined;
+  if (config.catalogExtractionEnabled && !extractionQueue) throw new Error("Catalog extraction queue was not initialized.");
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("x-request-id", request.id);
@@ -166,7 +168,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   app.addHook("onClose", async () => {
     if (extractionRuntime) {
       await extractionRuntime.close();
-    } else {
+    } else if (extractionQueue) {
       await extractionQueue.close();
     }
     await db.$disconnect();

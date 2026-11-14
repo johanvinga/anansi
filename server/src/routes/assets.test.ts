@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -68,7 +68,7 @@ describe("supplier assets", () => {
 
   async function storedFiles(): Promise<string[]> {
     try {
-      return await readdir(uploadDir);
+      return await readdir(path.join(uploadDir, "assets"));
     } catch {
       return [];
     }
@@ -92,22 +92,79 @@ describe("supplier assets", () => {
         }),
       );
       const [stored] = await storedFiles();
-      expect(stored).toMatch(/^[0-9a-f-]{36}\.pdf$/);
+      expect(stored).toMatch(/^[0-9a-f-]{36}$/);
       expect(await db.auditLog.count({ where: { action: "ASSET_UPLOAD" } })).toBe(1);
     });
 
-    it("rejects a non-PDF MIME type with 415 and stores nothing", async () => {
-      const res = await upload(adminCookie, PDF_BYTES, { filename: "a.txt", contentType: "text/plain" });
-      expect(res.status).toBe(415);
-      expect(res.body.error.code).toBe("UNSUPPORTED_MEDIA_TYPE");
-      expect(await storedFiles()).toEqual([]);
+    it.each([
+      ["notes.txt", "text/plain"],
+      ["data.csv", "text/csv"],
+      ["sheet.xls", "application/vnd.ms-excel"],
+      ["sheet.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+      ["document.doc", "application/msword"],
+      ["document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      ["image.png", "image/png"],
+      ["arbitrary.bin", "application/octet-stream"],
+    ])("uploads and downloads %s without content restrictions", async (filename, mimeType) => {
+      const bytes = Buffer.from("arbitrary test content");
+      const uploaded = await upload(adminCookie, bytes, { filename, contentType: mimeType });
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.body.asset.mimeType).toBe(mimeType);
+      const row = await db.supplierAsset.findUniqueOrThrow({ where: { id: uploaded.body.asset.id } });
+      expect(row.storageKey).toMatch(/^assets\/[0-9a-f-]{36}$/);
+      const downloaded = await request(app.server).get(`/api/v1/assets/${row.id}/download`)
+        .set("Cookie", readerCookie)
+        .buffer(true).parse((response, callback) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () => callback(null, Buffer.concat(chunks)));
+        });
+      expect(downloaded.status).toBe(200);
+      expect(downloaded.headers["content-type"]).toBe(mimeType);
+      expect(downloaded.headers["content-disposition"]).toContain("attachment;");
+      expect(downloaded.headers["x-content-type-options"]).toBe("nosniff");
+      expect(downloaded.body).toEqual(bytes);
     });
 
-    it("rejects a file whose content is not a PDF, even when the MIME type claims PDF", async () => {
-      const res = await upload(adminCookie, Buffer.from("<html>not a pdf</html>"));
-      expect(res.status).toBe(415);
-      expect(await storedFiles()).toEqual([]);
-      expect(await db.supplierAsset.count()).toBe(0);
+    it("falls back to a safe MIME type when the supplied type exceeds the database limit", async () => {
+      const uploaded = await upload(adminCookie, Buffer.from("data"), {
+        filename: "file.bin",
+        contentType: `application/${"a".repeat(100)}`,
+      });
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.body.asset.mimeType).toBe("application/octet-stream");
+      const downloaded = await request(app.server).get(`/api/v1/assets/${uploaded.body.asset.id}/download`)
+        .set("Cookie", readerCookie);
+      expect(downloaded.status).toBe(200);
+      expect(downloaded.headers["content-type"]).toBe("application/octet-stream");
+    });
+
+    it("stores assets and catalogs in separate sections", async () => {
+      const asset = await upload(adminCookie, Buffer.from("asset"), { filename: "file.txt", contentType: "text/plain" });
+      const catalog = await request(app.server).post(`/api/v1/suppliers/${supplierId}/catalogs`)
+        .set(unsafeHeaders(adminCookie))
+        .attach("file", PDF_BYTES, { filename: "catalog.pdf", contentType: "application/pdf" })
+        .field("name", "Catalog");
+      expect(asset.status).toBe(201);
+      expect(catalog.status).toBe(201);
+      const assetRow = await db.supplierAsset.findUniqueOrThrow({ where: { id: asset.body.asset.id } });
+      const catalogRow = await db.catalog.findUniqueOrThrow({ where: { id: catalog.body.catalog.id } });
+      expect(assetRow.storageKey).toMatch(/^assets\/[0-9a-f-]{36}$/);
+      expect(catalogRow.storageKey).toMatch(/^catalogs\/[0-9a-f-]{36}\.pdf$/);
+      expect(await readdir(path.join(uploadDir, "assets"))).toHaveLength(1);
+      expect(await readdir(path.join(uploadDir, "catalogs"))).toHaveLength(1);
+      const deletedAsset = await request(app.server).delete(`/api/v1/assets/${assetRow.id}`).set(unsafeHeaders(adminCookie));
+      expect(deletedAsset.status).toBe(204);
+      const catalogDownload = await request(app.server).get(`/api/v1/catalogs/${catalogRow.id}/download`).set("Cookie", readerCookie);
+      expect(catalogDownload.status).toBe(200);
+      expect(await readdir(path.join(uploadDir, "catalogs"))).toHaveLength(1);
+      const secondAsset = await upload(adminCookie, Buffer.from("still here"), { filename: "file.txt", contentType: "text/plain" });
+      expect(secondAsset.status).toBe(201);
+      const deletedCatalog = await request(app.server).delete(`/api/v1/catalogs/${catalogRow.id}`).set(unsafeHeaders(adminCookie));
+      expect(deletedCatalog.status).toBe(204);
+      const assetDownload = await request(app.server).get(`/api/v1/assets/${secondAsset.body.asset.id}/download`).set("Cookie", readerCookie);
+      expect(assetDownload.status).toBe(200);
+      expect(await readdir(path.join(uploadDir, "assets"))).toHaveLength(1);
     });
 
     it("rejects files above MAX_UPLOAD_MB with 413", async () => {
@@ -161,6 +218,74 @@ describe("supplier assets", () => {
   });
 
   describe("FR-AST-05 list assets", () => {
+    it("backfills existing uploader identities in the migration", async () => {
+      const migration = await readFile(
+        new URL("../../prisma/migrations/20261114194000_asset_uploader_snapshot/migration.sql", import.meta.url),
+        "utf8",
+      );
+      await db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe('CREATE TEMP TABLE "users" ("id" UUID PRIMARY KEY, "display_name" VARCHAR(100), "email" VARCHAR(254)) ON COMMIT DROP');
+        await tx.$executeRawUnsafe('CREATE TEMP TABLE "supplier_assets" ("id" INTEGER PRIMARY KEY, "uploaded_by_id" UUID) ON COMMIT DROP');
+        await tx.$executeRawUnsafe(`INSERT INTO "users" VALUES
+          ('11111111-1111-4111-8111-111111111111', '  User Name  ', 'named@example.test'),
+          ('22222222-2222-4222-8222-222222222222', '   ', 'unnamed@example.test')`);
+        await tx.$executeRawUnsafe(`INSERT INTO "supplier_assets" VALUES
+          (1, '11111111-1111-4111-8111-111111111111'),
+          (2, '22222222-2222-4222-8222-222222222222'),
+          (3, NULL)`);
+        for (const statement of migration.split(";").map((part) => part.trim()).filter(Boolean)) {
+          await tx.$executeRawUnsafe(statement);
+        }
+        const rows = await tx.$queryRaw<{ id: number; uploader_id: string | null; uploader_name: string | null }[]>`
+          SELECT id, uploader_id, uploader_name FROM supplier_assets ORDER BY id`;
+        expect(rows).toEqual([
+          { id: 1, uploader_id: "11111111-1111-4111-8111-111111111111", uploader_name: "User Name" },
+          { id: 2, uploader_id: "22222222-2222-4222-8222-222222222222", uploader_name: "unnamed@example.test" },
+          { id: 3, uploader_id: null, uploader_name: null },
+        ]);
+      });
+    });
+
+    it("persists uploader identity and upload time for upload, list and update responses", async () => {
+      const user = await db.user.findUniqueOrThrow({ where: { email: ADMIN.email } });
+      await db.user.update({ where: { id: user.id }, data: { displayName: "Original Name" } });
+      const before = Date.now();
+      const created = await upload(adminCookie, Buffer.from("hello"), { filename: "notes.txt", contentType: "text/plain" });
+      const after = Date.now();
+      expect(created.status).toBe(201);
+      expect(created.body.asset).toMatchObject({ uploadedById: user.id, uploadedByName: "Original Name" });
+      const uploadedAt = Date.parse(created.body.asset.createdAt);
+      expect(uploadedAt).toBeGreaterThanOrEqual(before - 1000);
+      expect(uploadedAt).toBeLessThanOrEqual(after + 1000);
+      const row = await db.supplierAsset.findUniqueOrThrow({ where: { id: created.body.asset.id } });
+      expect(row).toMatchObject({ uploaderId: user.id, uploaderName: "Original Name", createdAt: new Date(uploadedAt) });
+      await db.user.update({ where: { id: user.id }, data: { displayName: "Changed Name" } });
+      await db.supplierAsset.update({ where: { id: row.id }, data: { uploadedById: null } });
+
+      const list = await request(app.server).get(`/api/v1/suppliers/${supplierId}/assets`).set("Cookie", readerCookie);
+      expect(list.body.items[0]).toMatchObject({
+        uploadedById: user.id, uploadedByName: "Original Name", createdAt: created.body.asset.createdAt,
+      });
+      const updated = await request(app.server).patch(`/api/v1/assets/${row.id}`)
+        .set(unsafeHeaders(adminCookie)).send({ title: "Updated" });
+      expect(updated.status).toBe(200);
+      expect(updated.body.asset).toMatchObject({
+        uploadedById: user.id, uploadedByName: "Original Name", createdAt: created.body.asset.createdAt,
+      });
+    });
+
+    it("uses email when the uploader has no display name and handles unavailable legacy identities", async () => {
+      const created = await upload(adminCookie, PDF_BYTES);
+      expect(created.body.asset.uploadedByName).toBe(ADMIN.email);
+      await db.supplierAsset.update({
+        where: { id: created.body.asset.id },
+        data: { uploadedById: null, uploaderId: null, uploaderName: null },
+      });
+      const list = await request(app.server).get(`/api/v1/suppliers/${supplierId}/assets`).set("Cookie", readerCookie);
+      expect(list.status).toBe(200);
+      expect(list.body.items[0]).toMatchObject({ uploadedById: null, uploadedByName: null });
+    });
+
     it("lists a supplier's assets for any signed-in user and audits the list view", async () => {
       await upload(adminCookie, PDF_BYTES, { filename: "one.pdf" });
       const res = await request(app.server)
@@ -176,6 +301,19 @@ describe("supplier assets", () => {
   });
 
   describe("FR-AST-06 download", () => {
+    it("downloads and deletes an existing asset with a legacy flat storage key", async () => {
+      const created = await upload(adminCookie, PDF_BYTES);
+      const row = await db.supplierAsset.findUniqueOrThrow({ where: { id: created.body.asset.id } });
+      const legacyKey = `${row.storageKey.split("/")[1]}.pdf`;
+      await rename(path.join(uploadDir, row.storageKey), path.join(uploadDir, legacyKey));
+      await db.supplierAsset.update({ where: { id: row.id }, data: { storageKey: legacyKey } });
+      const downloaded = await request(app.server).get(`/api/v1/assets/${row.id}/download`).set("Cookie", readerCookie);
+      expect(downloaded.status).toBe(200);
+      const deleted = await request(app.server).delete(`/api/v1/assets/${row.id}`).set(unsafeHeaders(adminCookie));
+      expect(deleted.status).toBe(204);
+      expect(await readdir(uploadDir)).not.toContain(legacyKey);
+    });
+
     it("streams the PDF as an attachment with a sanitized file name and audits the download", async () => {
       const created = await upload(adminCookie, PDF_BYTES, { filename: "Quote: final*.pdf" });
       const assetId = created.body.asset.id;

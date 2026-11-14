@@ -184,6 +184,7 @@ model Category {
 
   suppliers SupplierCategory[]
   products  ProductCategory[]
+  catalogs  CatalogCategory[]
 
   @@map("categories")
 }
@@ -212,6 +213,17 @@ model ProductCategory {
   @@map("product_categories")
 }
 
+model CatalogCategory {
+  catalogId  String @map("catalog_id") @db.Uuid
+  categoryId String @map("category_id") @db.Uuid
+  catalog    Catalog  @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([catalogId, categoryId])
+  @@index([categoryId])
+  @@map("catalog_categories")
+}
+
 model SupplierAsset {
   id               String   @id @default(uuid()) @db.Uuid
   supplierId       String   @map("supplier_id") @db.Uuid
@@ -222,6 +234,8 @@ model SupplierAsset {
   title            String?  @db.VarChar(200)
   description      String?  @db.Text
   uploadedById     String?  @map("uploaded_by_id") @db.Uuid
+  uploaderId       String?  @map("uploader_id") @db.Uuid
+  uploaderName     String?  @map("uploader_name") @db.VarChar(254)
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
@@ -234,7 +248,7 @@ model SupplierAsset {
 /// A supplier price/product catalog stored as a PDF file (FR-CLG).
 model Catalog {
   id               String   @id @default(uuid()) @db.Uuid
-  supplierId       String   @map("supplier_id") @db.Uuid
+  supplierId       String?  @map("supplier_id") @db.Uuid
   name             String   @db.VarChar(200)
   /// Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08).
   version          String?  @db.VarChar(50)
@@ -248,9 +262,10 @@ model Catalog {
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   uploadedBy User?    @relation("CatalogUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
   extractionJobs CatalogExtractionJob[]
+  categories CatalogCategory[]
 
   @@index([supplierId])
   @@index([analysisStatus])

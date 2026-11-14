@@ -78,6 +78,7 @@ export function SupplierDetail({
     try {
       await apiRequest<void>("DELETE", `/suppliers/${supplierId}`);
       await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+      await queryClient.invalidateQueries({ queryKey: ["catalogs"] });
       onDeleted();
     } catch (err) {
       setError(errorMessage(err));

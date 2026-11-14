@@ -4,6 +4,7 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { buildApp } from "../app.js";
 import type { Database } from "../db.js";
 import { createLocalAssetStorage } from "../lib/asset-storage.js";
 import { processCatalogExtraction } from "../services/catalog-extraction.js";
@@ -16,6 +17,7 @@ import {
   resetDatabase,
   seedUser,
   unsafeHeaders,
+  testConfig,
 } from "../test/helpers.js";
 
 const NIL_UUID = "9f1c2a4e-1111-4222-8333-444455556666";
@@ -119,7 +121,7 @@ describe("supplier catalogs", () => {
 
   async function storedFiles(): Promise<string[]> {
     try {
-      return await readdir(uploadDir);
+      return await readdir(path.join(uploadDir, "catalogs"));
     } catch {
       return [];
     }
@@ -273,6 +275,63 @@ describe("supplier catalogs", () => {
   });
 
   describe("catalog analysis jobs", () => {
+    it("disables analysis without Redis while retaining catalog uploads and downloads", async () => {
+      const previouslyQueued = await uploadAsAdmin();
+      expect(previouslyQueued.analysisStatus).toBe("queued");
+      const disabledDb = createTestDatabase();
+      const disabledApp = await buildApp(testConfig({
+        uploadDir,
+        maxUploadMb: 1,
+        catalogExtractionEnabled: false,
+        redisUrl: "redis://127.0.0.1:1",
+      }), { db: disabledDb, logger: false });
+      try {
+        await disabledApp.ready();
+        const settings = await request(disabledApp.server).get("/api/v1/settings").set("Cookie", readerCookie);
+        expect(settings.status).toBe(200);
+        expect(settings.body.catalogExtractionEnabled).toBe(false);
+
+        const uploaded = await request(disabledApp.server)
+          .post(`/api/v1/suppliers/${supplierId}/catalogs`)
+          .set(unsafeHeaders(adminCookie))
+          .field("name", "Unanalyzed catalog")
+          .attach("file", PDF_BYTES, { filename: "test.pdf", contentType: "application/pdf" });
+        expect(uploaded.status).toBe(201);
+        expect(uploaded.body.catalog.analysisStatus).toBe("not_processed");
+        const id = uploaded.body.catalog.id as string;
+        expect(await db.catalogExtractionJob.count({ where: { catalogId: id } })).toBe(0);
+        expect(await db.auditLog.count({ where: { action: "CATALOG_UPLOAD", entityId: id } })).toBe(1);
+        expect((await db.catalog.findUniqueOrThrow({ where: { id: previouslyQueued.id } })).analysisStatus).toBe("queued");
+        expect(await db.catalogExtractionJob.count({ where: { catalogId: previouslyQueued.id } })).toBe(1);
+
+        const download = await request(disabledApp.server).get(`/api/v1/catalogs/${id}/download`).set("Cookie", readerCookie);
+        expect(download.status).toBe(200);
+        expect(download.body).toEqual(PDF_BYTES);
+
+        expect((await request(disabledApp.server).get(`/api/v1/catalogs/${id}/extraction`)).status).toBe(401);
+        expect((await request(disabledApp.server).post(`/api/v1/catalogs/${id}/extraction`).set(unsafeHeaders(readerCookie))).status).toBe(403);
+        for (const response of [
+          await request(disabledApp.server).get(`/api/v1/catalogs/${id}/extraction`).set("Cookie", readerCookie),
+          await request(disabledApp.server).post(`/api/v1/catalogs/${id}/extraction`).set(unsafeHeaders(adminCookie)),
+        ]) {
+          expect(response.status).toBe(503);
+          expect(response.body.error.code).toBe("FEATURE_DISABLED");
+        }
+        expect(await db.catalogExtractionJob.count({ where: { catalogId: id } })).toBe(0);
+
+        const enabledSettings = await request(app.server).get("/api/v1/settings").set("Cookie", readerCookie);
+        expect(enabledSettings.body.catalogExtractionEnabled).toBe(true);
+        const started = await request(app.server)
+          .post(`/api/v1/catalogs/${id}/extraction`)
+          .set(unsafeHeaders(adminCookie));
+        expect(started.status).toBe(202);
+        expect(started.body.job.status).toBe("queued");
+        expect(await db.catalogExtractionJob.count({ where: { catalogId: id } })).toBe(1);
+      } finally {
+        await disabledApp.close();
+      }
+    });
+
     it("queues analysis after upload and lets authenticated users check progress", async () => {
       const catalog = await uploadAsAdmin();
       expect(catalog.analysisStatus).toBe("queued");
@@ -519,7 +578,7 @@ describe("supplier catalogs", () => {
 
     it("returns 404 when the stored file is missing", async () => {
       const catalog = await uploadAsAdmin();
-      await rm(path.join(uploadDir, (await storedFiles())[0]!), { force: true });
+      await rm(path.join(uploadDir, "catalogs", (await storedFiles())[0]!), { force: true });
 
       const res = await request(app.server)
         .get(`/api/v1/catalogs/${catalog.id}/download`)
@@ -643,8 +702,8 @@ describe("supplier catalogs", () => {
       expect(res.status).toBe(404);
     });
 
-    it("removes catalog files when the supplier is deleted", async () => {
-      await uploadAsAdmin();
+    it("retains catalog files and unassigns catalogs when the supplier is deleted", async () => {
+      const first = await uploadAsAdmin();
       await uploadAsAdmin({ name: "Second", version: "1" });
       expect(await storedFiles()).toHaveLength(2);
 
@@ -653,8 +712,92 @@ describe("supplier catalogs", () => {
         .set(unsafeHeaders(adminCookie));
 
       expect(res.status).toBe(204);
-      expect(await db.catalog.count()).toBe(0);
-      expect(await storedFiles()).toEqual([]);
+      expect(await db.catalog.count({ where: { supplierId: null } })).toBe(2);
+      expect(await storedFiles()).toHaveLength(2);
+      expect(await db.auditLog.count({ where: { action: "CATALOG_UPDATE" } })).toBe(2);
+      const downloaded = await request(app.server).get(`/api/v1/catalogs/${first.id}/download`).set("Cookie", readerCookie);
+      expect(downloaded.status).toBe(200);
+      expect(downloaded.body).toEqual(PDF_BYTES);
+    });
+  });
+
+  describe("catalog categories and supplier assignment", () => {
+    it("merges categories during supplier-scoped upload without replacing existing tags", async () => {
+      const prepared = await request(app.server).put(`/api/v1/suppliers/${supplierId}`)
+        .set(unsafeHeaders(adminCookie)).send({ name: "Catalog Supplier", categories: [{ name: "Existing" }] });
+      expect(prepared.status).toBe(200);
+      const uploaded = await request(app.server).post(`/api/v1/suppliers/${supplierId}/catalogs`)
+        .set(unsafeHeaders(adminCookie)).field("name", "Assigned")
+        .field("categories", JSON.stringify([{ name: "Existing" }, { name: "New" }]))
+        .attach("file", PDF_BYTES, { filename: "assigned.pdf", contentType: "application/pdf" });
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.body.catalog.categories).toHaveLength(2);
+      const supplier = await request(app.server).get(`/api/v1/suppliers/${supplierId}`).set("Cookie", readerCookie);
+      expect(supplier.body.supplier.assignedCategories.map((c: { name: { en: string } }) => c.name.en)).toEqual(["Existing", "New"]);
+      expect(await db.auditLog.count({ where: { action: "SUPPLIER_UPDATE", entityId: supplierId } })).toBe(2);
+    });
+
+    it("merges tags without duplicates and retains supplier tags after reassignment, unassignment and deletion", async () => {
+      const withCategories = await request(app.server)
+        .put(`/api/v1/suppliers/${supplierId}`)
+        .set(unsafeHeaders(adminCookie))
+        .send({ name: "Catalog Supplier", categories: [{ name: "Existing" }, { name: "Shared" }] });
+      expect(withCategories.status).toBe(200);
+      const uploaded = await request(app.server)
+        .post("/api/v1/catalogs")
+        .set(unsafeHeaders(adminCookie))
+        .field("name", "Independent")
+        .field("categories", JSON.stringify([{ name: "Shared" }, { name: "New" }, { name: "new" }]))
+        .attach("file", PDF_BYTES, { filename: "independent.pdf", contentType: "application/pdf" });
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.body.catalog.supplierId).toBeNull();
+      expect(uploaded.body.catalog.categories.map((c: { name: { en: string } }) => c.name.en)).toEqual(["New", "Shared"]);
+      const id = uploaded.body.catalog.id as string;
+      const newCategoryId = uploaded.body.catalog.categories[0].id as string;
+      const filtered = await request(app.server).get(`/api/v1/catalogs?category=${newCategoryId}`).set("Cookie", readerCookie);
+      expect(filtered.body.items.map((c: { id: string }) => c.id)).toContain(id);
+      expect(filtered.body.items[0].supplierName).toBeNull();
+
+      const assigned = await request(app.server).patch(`/api/v1/catalogs/${id}`)
+        .set(unsafeHeaders(adminCookie)).send({ supplierId });
+      expect(assigned.status).toBe(200);
+      const supplier = await request(app.server).get(`/api/v1/suppliers/${supplierId}`).set("Cookie", readerCookie);
+      expect(supplier.body.supplier.assignedCategories.map((c: { name: { en: string } }) => c.name.en)).toEqual(["Existing", "New", "Shared"]);
+      expect(await db.supplierCategory.count({ where: { supplierId } })).toBe(3);
+      expect(await db.auditLog.count({ where: { action: "SUPPLIER_UPDATE", entityId: supplierId } })).toBeGreaterThan(0);
+
+      const edited = await request(app.server).patch(`/api/v1/catalogs/${id}`)
+        .set(unsafeHeaders(adminCookie)).send({ categories: [{ name: "Later" }] });
+      expect(edited.status).toBe(200);
+      expect(await db.supplierCategory.count({ where: { supplierId } })).toBe(4);
+      const other = await request(app.server).post("/api/v1/suppliers")
+        .set(unsafeHeaders(adminCookie)).send({ name: "Other", categories: [{ name: "Preserved" }] });
+      const otherId = other.body.supplier.id as string;
+      expect((await request(app.server).patch(`/api/v1/catalogs/${id}`)
+        .set(unsafeHeaders(adminCookie)).send({ supplierId: otherId })).status).toBe(200);
+      expect(await db.supplierCategory.count({ where: { supplierId: otherId } })).toBe(2);
+      expect((await request(app.server).patch(`/api/v1/catalogs/${id}`)
+        .set(unsafeHeaders(adminCookie)).send({ supplierId: null })).status).toBe(200);
+      expect((await request(app.server).delete(`/api/v1/catalogs/${id}`).set(unsafeHeaders(adminCookie))).status).toBe(204);
+      expect(await db.supplierCategory.count({ where: { supplierId } })).toBe(4);
+      expect(await db.supplierCategory.count({ where: { supplierId: otherId } })).toBe(2);
+      expect(await db.auditLog.count({ where: { action: "CATALOG_UPDATE", entityId: id } })).toBe(4);
+    });
+
+    it("validates and authorizes category and supplier changes atomically", async () => {
+      const catalog = await uploadAsAdmin();
+      const invalid = await request(app.server).patch(`/api/v1/catalogs/${catalog.id}`)
+        .set(unsafeHeaders(adminCookie)).send({ supplierId: NIL_UUID, categories: [{ name: "Rollback" }] });
+      expect(invalid.status).toBe(404);
+      expect(await db.category.count({ where: { nameKey: "rollback" } })).toBe(0);
+      expect((await request(app.server).patch(`/api/v1/catalogs/${catalog.id}`)
+        .set(unsafeHeaders(readerCookie)).send({ supplierId: null })).status).toBe(403);
+      expect((await request(app.server).post("/api/v1/catalogs")
+        .set(unsafeHeaders(readerCookie)).field("name", "Denied")
+        .attach("file", PDF_BYTES, { filename: "test.pdf", contentType: "application/pdf" })).status).toBe(403);
+      expect((await request(app.server).post("/api/v1/catalogs")
+        .set(unsafeHeaders(adminCookie)).field("name", "Invalid").field("categories", "bad json")
+        .attach("file", PDF_BYTES, { filename: "test.pdf", contentType: "application/pdf" })).status).toBe(400);
     });
   });
 });

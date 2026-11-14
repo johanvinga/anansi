@@ -4,6 +4,7 @@ import { isCurrencyCode } from "./lib/currency.js";
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.url().default("redis://127.0.0.1:6379"),
+  CATALOG_EXTRACTION_ENABLED: z.enum(["true", "false"]).default("false"),
   CATALOG_OCR_LANGUAGES: z.string().min(1).default("eng+fra"),
   CATALOG_EXTRACTION_MAX_PAGES: z.coerce
     .number()
@@ -46,6 +47,7 @@ const envSchema = z.object({
 export interface AppConfig {
   databaseUrl: string;
   redisUrl: string;
+  catalogExtractionEnabled: boolean;
   catalogOcrLanguages: string;
   catalogExtractionMaxPages: number;
   catalogExtractionConcurrency: number;
@@ -93,6 +95,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     databaseUrl: e.DATABASE_URL,
     redisUrl: e.REDIS_URL,
+    catalogExtractionEnabled: e.CATALOG_EXTRACTION_ENABLED === "true",
     catalogOcrLanguages: e.CATALOG_OCR_LANGUAGES,
     catalogExtractionMaxPages: e.CATALOG_EXTRACTION_MAX_PAGES,
     catalogExtractionConcurrency: e.CATALOG_EXTRACTION_CONCURRENCY,

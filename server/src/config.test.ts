@@ -15,6 +15,13 @@ describe("loadConfig (SPEC §11)", () => {
     expect(config.loginRateLimit).toBe(10);
     expect(config.appOrigin).toBe("http://localhost:5173");
     expect(config.uploadDir).toBe("./storage/assets");
+    expect(config.catalogExtractionEnabled).toBe(false);
+  });
+
+  it("accepts only explicit true or false for catalog analysis", () => {
+    expect(loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "true" }).catalogExtractionEnabled).toBe(true);
+    expect(loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "false" }).catalogExtractionEnabled).toBe(false);
+    expect(() => loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "yes" })).toThrow(/CATALOG_EXTRACTION_ENABLED/);
   });
 
   it("requires SESSION_SECRET", () => {

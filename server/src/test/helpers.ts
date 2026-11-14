@@ -27,6 +27,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     NODE_ENV: "test",
     LOG_LEVEL: "silent",
     LOGIN_RATE_LIMIT: "1000",
+    CATALOG_EXTRACTION_ENABLED: "true",
   });
   return { ...base, ...overrides };
 }

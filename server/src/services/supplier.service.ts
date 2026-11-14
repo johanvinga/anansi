@@ -266,7 +266,7 @@ export async function updateSupplier(
 }
 
 /**
- * Deletes the supplier, its asset and catalog rows (cascade), and then the stored files.
+ * Deletes the supplier and its assets; catalogs are retained and unassigned.
  * Blocked while the supplier has products (FR-SUP-05, SPEC §8.3).
  */
 export async function deleteSupplier(
@@ -281,7 +281,7 @@ export async function deleteSupplier(
       where: { id },
       include: {
         assets: { select: { storageKey: true } },
-        catalogs: { select: { storageKey: true } },
+        catalogs: { select: { id: true } },
       },
     });
     if (!existing) throw errors.notFound("Supplier");
@@ -293,6 +293,15 @@ export async function deleteSupplier(
       );
     }
 
+    for (const catalog of existing.catalogs) {
+      await recordAudit(tx, request, {
+        action: AuditAction.CATALOG_UPDATE,
+        outcome: "success",
+        entityType: "Catalog",
+        entityId: catalog.id,
+        changes: diffFields({ supplierId: id }, { supplierId: null }),
+      });
+    }
     await tx.supplier.delete({ where: { id } });
     await recordAudit(tx, request, {
       action: AuditAction.SUPPLIER_DELETE,
@@ -301,7 +310,7 @@ export async function deleteSupplier(
       entityId: id,
       changes: diffFields({ name: existing.name }, { name: null }),
     });
-    return [...existing.assets, ...existing.catalogs].map((file) => file.storageKey);
+    return existing.assets.map((file) => file.storageKey);
   });
 
   await removeStoredFiles(storage, storageKeys, log);
