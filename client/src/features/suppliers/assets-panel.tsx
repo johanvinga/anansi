@@ -73,12 +73,13 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
               <TableHead className="pl-4">{t("suppliers.title")}</TableHead>
               <TableHead>{t("catalogs.file")}</TableHead>
               <TableHead>{t("suppliers.size")}</TableHead>
-              <TableHead>{t("catalogs.uploaded")}</TableHead>
+              <TableHead>{t("suppliers.uploadedBy")}</TableHead>
+              <TableHead>{t("suppliers.uploadedAt")}</TableHead>
               <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {assets.length === 0 ? <TableEmptyRow colSpan={5} message={t("suppliers.noAssets")} /> : null}
+            {assets.length === 0 ? <TableEmptyRow colSpan={6} message={t("suppliers.noAssets")} /> : null}
             {assets.map((asset) => (
               <TableRow key={asset.id}>
                 <TableCell className="pl-4 whitespace-normal">
@@ -87,7 +88,15 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
                 </TableCell>
                 <TableCell>{asset.originalFileName}</TableCell>
                 <TableCell>{formatSize(asset.sizeBytes)}</TableCell>
-                <TableCell>{new Date(asset.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  {asset.uploadedByName ?? t("suppliers.unknownUploader")}
+                  {asset.uploadedById ? <div className="text-muted-foreground">{asset.uploadedById}</div> : null}
+                </TableCell>
+                <TableCell>
+                  <time dateTime={asset.createdAt}>
+                    {new Date(asset.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                  </time>
+                </TableCell>
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
                     <IconAction

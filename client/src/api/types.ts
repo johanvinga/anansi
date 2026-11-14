@@ -79,6 +79,7 @@ export interface SupplierAsset {
   title: string | null;
   description: string | null;
   uploadedById: string | null;
+  uploadedByName: string | null;
   createdAt: string;
 }
 

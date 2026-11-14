@@ -39,6 +39,7 @@ export interface AssetDto {
   title: string | null;
   description: string | null;
   uploadedById: string | null;
+  uploadedByName: string | null;
   createdAt: string;
 }
 
@@ -51,7 +52,8 @@ function toAssetDto(row: SupplierAsset): AssetDto {
     sizeBytes: Number(row.sizeBytes),
     title: row.title,
     description: row.description,
-    uploadedById: row.uploadedById,
+    uploadedById: row.uploaderId ?? row.uploadedById,
+    uploadedByName: row.uploaderName,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -113,6 +115,11 @@ export async function uploadAsset(
 
   try {
     return await deps.db.$transaction(async (tx) => {
+      if (!request.actor.userId) throw new Error("Asset upload requires an authenticated user");
+      const uploader = await tx.user.findUniqueOrThrow({
+        where: { id: request.actor.userId },
+        select: { id: true, displayName: true, email: true },
+      });
       const row = await tx.supplierAsset.create({
         data: {
           supplierId,
@@ -123,6 +130,8 @@ export async function uploadAsset(
           title: metadata.title ?? null,
           description: metadata.description ?? null,
           uploadedById: request.actor.userId,
+          uploaderId: uploader.id,
+          uploaderName: uploader.displayName?.trim() || uploader.email,
         },
       });
       await recordAudit(tx, request, {

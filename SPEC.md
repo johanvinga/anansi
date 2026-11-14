@@ -124,7 +124,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-AST-02 | Asset downloads shall use a safe attachment disposition and the stored, syntactically valid MIME type, with `nosniff`. Client-supplied types are not proof of content. |
 | FR-AST-03 | Maximum file size shall be configurable (default 25 MB). |
 | FR-AST-04 | Stored file names shall be generated (UUID-based); the original name is kept as metadata and sanitized. |
-| FR-AST-05 | The user shall be able to list a supplier's assets with name, size, and upload date. |
+| FR-AST-05 | The user shall be able to list a supplier's assets with name, size, uploader name and ID, and upload date and time. The uploader identity is saved at upload; when no name is available, the user's email is used. Older assets with no recoverable identity show an unknown uploader. |
 | FR-AST-06 | The user shall be able to download an asset. |
 | FR-AST-07 | The user shall be able to delete an asset (file and metadata). |
 | FR-AST-08 | Files shall be stored outside the publicly served directory. |
@@ -375,7 +375,9 @@ erDiagram
 | size_bytes | bigint | Not null |
 | title | varchar(200) | Nullable |
 | description | text | Nullable |
-| uploaded_by | UUID | FK → User |
+| uploaded_by_id | UUID | Nullable FK → User, on delete set null |
+| uploader_id | UUID | Nullable uploader ID snapshot |
+| uploader_name | varchar(254) | Nullable uploader display-name or email snapshot |
 | created_at | timestamptz | Not null |
 
 **Catalog**

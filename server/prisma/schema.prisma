@@ -234,6 +234,8 @@ model SupplierAsset {
   title            String?  @db.VarChar(200)
   description      String?  @db.Text
   uploadedById     String?  @map("uploaded_by_id") @db.Uuid
+  uploaderId       String?  @map("uploader_id") @db.Uuid
+  uploaderName     String?  @map("uploader_name") @db.VarChar(254)
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
