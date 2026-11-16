@@ -1,0 +1,4 @@
+ALTER TABLE "products"
+  ALTER COLUMN "min_quantity" DROP NOT NULL,
+  ALTER COLUMN "cost" DROP NOT NULL,
+  ALTER COLUMN "currency" DROP NOT NULL;

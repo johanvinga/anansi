@@ -17,7 +17,10 @@ import { localize } from "../../api/translations";
 import { formatDate, formatMoney } from "../../api/format";
 import type { Page, ProductDetail, ProductSummary, Supplier } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
+import { useBulkDelete } from "../../hooks/use-bulk-delete";
 import { ErrorAlert, SuccessAlert } from "../../components/error-alert";
+import { CategoryTreeFilter } from "../../components/category-tree-filter";
 import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
@@ -27,6 +30,10 @@ import { TableEmptyRow } from "../../components/table-empty-row";
 import { ProductForm } from "./product-form";
 
 const PAGE_SIZE = 25;
+
+function productSelectionItem(product: ProductSummary) {
+  return { id: product.id, label: `${localize(product.name)} (${product.supplierSku})` };
+}
 
 interface ProductsPanelProps {
   /** When set, the panel lists only this supplier's products and creates new ones for it. */
@@ -40,6 +47,8 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [uncategorized, setUncategorized] = useState(false);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProductDetail | "new" | null>(null);
@@ -49,14 +58,17 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const queryClient = useQueryClient();
 
   const effectiveSupplier = supplierId ?? supplierFilter ?? undefined;
+  async function loadProducts(targetPage: number, pageSize: number) {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+    if (search) params.set("q", search);
+    if (effectiveSupplier) params.set("supplierId", effectiveSupplier);
+    for (const id of categoryIds) params.append("category", id);
+    if (uncategorized) params.set("uncategorized", "true");
+    return apiRequest<Page<ProductSummary>>("GET", `/products?${params.toString()}`);
+  }
   const productsQuery = useQuery({
-    queryKey: ["products", { page, pageSize: PAGE_SIZE, search, supplierId: effectiveSupplier }],
-    queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-      if (search) params.set("q", search);
-      if (effectiveSupplier) params.set("supplierId", effectiveSupplier);
-      return apiRequest<Page<ProductSummary>>("GET", `/products?${params.toString()}`);
-    },
+    queryKey: ["products", { page, pageSize: PAGE_SIZE, search, supplierId: effectiveSupplier, categoryIds, uncategorized }],
+    queryFn: () => loadProducts(page, PAGE_SIZE),
   });
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "picker", 100],
@@ -73,6 +85,19 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const result = productsQuery.data;
   const suppliers = suppliersQuery.data ?? [];
   const viewing = detailQuery.data;
+  const bulk = useBulkDelete({
+    scope: JSON.stringify({ search, effectiveSupplier, categoryIds, uncategorized }),
+    endpoint: "products",
+    loadPage: async (targetPage, pageSize) => {
+      const response = await loadProducts(targetPage, pageSize);
+      return { total: response.total, items: response.items.map(productSelectionItem) };
+    },
+    onDeleted: async () => {
+      setPage(1);
+      await Promise.all(["products", "suppliers", "supplier", "catalogs"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
+    },
+  });
+  const visibleItems = (result?.items ?? []).map(productSelectionItem);
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -80,6 +105,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
     setDeleting(null);
     try {
       await apiRequest<void>("DELETE", `/products/${target.id}`);
+      bulk.remove(target.id);
       setStatus(`${localize(target.name)} was deleted.`);
       await queryClient.invalidateQueries({ queryKey: ["products"] });
       await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
@@ -106,7 +132,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const localizedDescription = viewing
     ? localize({ en: viewing.description.en ?? "", fr: viewing.description.fr ?? "" })
     : "";
-  const columnCount = (supplierId ? 6 : 7) + (isAdmin ? 1 : 0);
+  const columnCount = (supplierId ? 6 : 7) + (isAdmin ? 2 : 0);
   const pageTitle = supplierId ? undefined : t("products.title");
 
   return (
@@ -128,21 +154,6 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                   setSearch(query.trim());
                 }}
               />
-              {supplierId ? null : (
-                <div className="w-56">
-                  <SelectField
-                    label="Supplier"
-                    hideLabel
-                    placeholder={t("products.allSuppliers")}
-                    options={[{ value: "", label: t("products.allSuppliers") }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
-                    value={supplierFilter ?? ""}
-                    onChange={(value) => {
-                      setPage(1);
-                      setSupplierFilter(value || null);
-                    }}
-                  />
-                </div>
-              )}
             </div>
             {isAdmin ? (
               <Button size="lg" onClick={() => setEditing("new")}>
@@ -150,6 +161,27 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                 {t("products.createProduct")}
               </Button>
             ) : null}
+          </>
+        }
+        filters={
+          <>
+            <CategoryTreeFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }}
+              uncategorized={uncategorized} onUncategorizedChange={(value) => { setPage(1); setUncategorized(value); }} />
+            {supplierId ? null : (
+              <div className="w-56">
+                <SelectField
+                  label="Supplier"
+                  hideLabel
+                  placeholder={t("products.allSuppliers")}
+                  options={[{ value: "", label: t("products.allSuppliers") }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+                  value={supplierFilter ?? ""}
+                  onChange={(value) => {
+                    setPage(1);
+                    setSupplierFilter(value || null);
+                  }}
+                />
+              </div>
+            )}
           </>
         }
       >
@@ -160,9 +192,11 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
           </div>
         ) : null}
 
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={PAGE_SIZE} warning={t("bulkDelete.productsWarning")} /> : null}
         <Table aria-label={supplierId ? "Products" : "All products"}>
           <TableHeader className="bg-muted/50">
             <TableRow>
+              {isAdmin ? <TableHead className="w-10 pl-4"><BulkSelectPage items={visibleItems} selection={bulk} /></TableHead> : null}
               <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
               <TableHead>{t("products.skuLabel")}</TableHead>
               {supplierId ? null : <TableHead>{t("products.supplier")}</TableHead>}
@@ -177,6 +211,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
             {result && result.items.length === 0 ? <TableEmptyRow colSpan={columnCount} message="No products found." /> : null}
             {result?.items.map((product) => (
               <TableRow key={product.id}>
+                {isAdmin ? <TableCell className="pl-4"><BulkSelectItem item={productSelectionItem(product)} selection={bulk} /></TableCell> : null}
                 <TableCell className="pl-4">
                   <Button
                     type="button"
@@ -190,7 +225,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                 </TableCell>
                 <TableCell className="font-mono text-xs">{product.supplierSku}</TableCell>
                 {supplierId ? null : <TableCell>{product.supplierName}</TableCell>}
-                <TableCell className="text-right tabular-nums">{product.minQuantity}</TableCell>
+                <TableCell className="text-right tabular-nums">{product.minQuantity ?? "—"}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatMoney(product.cost, product.currency)}</TableCell>
                 <TableCell>
                   {product.attributeSet ? <Badge variant="info">{localize(product.attributeSet.name)}</Badge> : "—"}
@@ -265,7 +300,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                   </div>
                   <div>
                     <dt className="text-muted-foreground">{t("products.minimumQuantity")}</dt>
-                    <dd>{viewing.minQuantity}</dd>
+                    <dd>{viewing.minQuantity ?? "—"}</dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">{t("products.costLabel")}</dt>
@@ -282,6 +317,24 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                     {localizedDescription || t("products.noDescription")}
                   </p>
                 </section>
+                {viewing.attributeValues.length > 0 ? (
+                  <section className="space-y-2 border-t pt-4">
+                    <h3 className="font-medium">{t("attributes.title")}</h3>
+                    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      {viewing.attributeValues.map((attribute) => (
+                        <div key={attribute.fieldId}>
+                          <dt className="text-muted-foreground">{localize(attribute.name)}</dt>
+                          <dd>
+                            {attribute.optionLabel ? localize(attribute.optionLabel)
+                              : typeof attribute.value === "boolean" ? t(attribute.value ? "catalogs.importYes" : "catalogs.importNo")
+                              : attribute.value ?? "—"}
+                            {attribute.unit ? ` ${attribute.unit}` : ""}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ) : null}
               </>
             ) : null}
           </DialogContent>

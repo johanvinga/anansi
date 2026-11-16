@@ -11,7 +11,7 @@ import {
   type AuditRequestContext,
 } from "./audit.service.js";
 import { removeStoredFiles } from "./asset.service.js";
-import { resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
 
 export interface SupplierInput {
   name: string;
@@ -123,13 +123,14 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export async function listSuppliers(db: Database, request: AuditRequestContext, filters: ListSuppliersFilters) {
+  const categoryIds = await expandCategoryIds(db, filters.categoryIds);
   const where: Prisma.SupplierWhereInput = {
     name: filters.q ? { contains: filters.q, mode: "insensitive" } : undefined,
     OR:
       filters.categoryIds.length > 0
         ? [
-            { categories: { some: { categoryId: { in: filters.categoryIds } } } },
-            { products: { some: { categories: { some: { categoryId: { in: filters.categoryIds } } } } } },
+            { categories: { some: { categoryId: { in: categoryIds } } } },
+            { products: { some: { categories: { some: { categoryId: { in: categoryIds } } } } } },
           ]
         : undefined,
   };

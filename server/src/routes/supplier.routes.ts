@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
+import { categoryInputSchema } from "../lib/category-input.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import {
@@ -19,11 +20,6 @@ interface Guards {
 }
 
 const optionalText = (max: number) => z.string().trim().max(max).nullish();
-
-const categoryInputSchema = z.union([
-  z.object({ id: uuidSchema }),
-  z.object({ name: z.string().trim().min(1, "Category name is required.").max(100) }),
-]);
 
 const supplierBodySchema = z.object({
   name: z.string().trim().min(1, "Name is required.").max(200),

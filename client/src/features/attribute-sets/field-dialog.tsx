@@ -86,7 +86,7 @@ export function FieldDialog({ attributeSetId, field, onClose, onSaved }: FieldDi
               ? filledOptions.map((o) => ({ id: o.id, label: { en: o.label, fr: o.fr ?? o.label } }))
               : undefined,
         })
-        : await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", `/attribute-sets/${attributeSetId}/fields`, {
+        : await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", `/attribute-sets/${attributeSetId}/shared-fields/create`, {
           name: { en: name },
           dataType,
           unit: unit.trim() || null,

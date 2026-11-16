@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderInput, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,12 +18,12 @@ import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
 import type { Category } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
-import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { SearchForm } from "../../components/search-form";
+import { SelectField } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 
 export function CategoriesPage() {
@@ -32,9 +32,9 @@ export function CategoriesPage() {
   const isAdmin = user?.role === "admin";
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [renaming, setRenaming] = useState<Category | null>(null);
+  const [moving, setMoving] = useState<Category | null>(null);
   const [deleting, setDeleting] = useState<Category | null>(null);
 
   const queryClient = useQueryClient();
@@ -56,21 +56,14 @@ export function CategoriesPage() {
     await queryClient.invalidateQueries({ queryKey: ["catalogs"] });
   }
 
-  async function confirmDelete() {
-    if (!deleting) return;
-    const target = deleting;
-    setDeleting(null);
-    try {
-      await apiRequest<void>("DELETE", `/categories/${target.id}`);
-      await refresh();
-      await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
-      await queryClient.invalidateQueries({ queryKey: ["catalogs"] });
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  const columns = isAdmin ? 3 : 2;
+  const refreshRelated = () => {
+    void refresh();
+    void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+    void queryClient.invalidateQueries({ queryKey: ["supplier"] });
+    void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+    void queryClient.invalidateQueries({ queryKey: ["products"] });
+  };
+  const columns = isAdmin ? 4 : 3;
 
   return (
     <>
@@ -95,9 +88,9 @@ export function CategoriesPage() {
           </>
         }
       >
-        {error || categoriesQuery.error ? (
+        {categoriesQuery.error ? (
           <div className="px-4 pb-4">
-            <ErrorAlert message={error ?? (categoriesQuery.error ? errorMessage(categoriesQuery.error) : null)} />
+            <ErrorAlert message={errorMessage(categoriesQuery.error)} />
           </div>
         ) : null}
 
@@ -105,6 +98,7 @@ export function CategoriesPage() {
           <TableHeader className="bg-muted/50">
             <TableRow>
               <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+              <TableHead>{t("categories.parent")}</TableHead>
               <TableHead>{t("categories.created")}</TableHead>
               {isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}
             </TableRow>
@@ -113,12 +107,14 @@ export function CategoriesPage() {
             {loaded && categories.length === 0 ? <TableEmptyRow colSpan={columns} message={t("categories.noCategories")} /> : null}
             {categories.map((category) => (
               <TableRow key={category.id}>
-                <TableCell className="pl-4 font-medium">{localize(category.name)}</TableCell>
+                <TableCell className="pl-4 font-medium">{category.path.map((part) => localize(part.name)).join(" / ")}</TableCell>
+                <TableCell>{category.path.length > 1 ? category.path.slice(0, -1).map((part) => localize(part.name)).join(" / ") : t("categories.root")}</TableCell>
                 <TableCell>{new Date(category.createdAt).toLocaleDateString()}</TableCell>
                 {isAdmin ? (
                   <TableCell className="pr-4">
                     <div className="flex justify-end gap-1">
                       <IconAction label={t("categories.renameAria", { name: localize(category.name) })} icon={Pencil} onClick={() => setRenaming(category)} />
+                      <IconAction label={t("categories.moveAria", { name: localize(category.name) })} icon={FolderInput} onClick={() => setMoving(category)} />
                       <IconAction
                         label={t("suppliers.deleteAria", { name: localize(category.name) })}
                         icon={Trash2}
@@ -147,21 +143,13 @@ export function CategoriesPage() {
           onClose={() => setRenaming(null)}
           onRenamed={() => {
             setRenaming(null);
-            void refresh();
-            void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
-            void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+            refreshRelated();
           }}
         />
       ) : null}
 
-      <ConfirmDialog
-        open={deleting !== null}
-        title={t("categories.confirmDeleteTitle", { name: deleting ? localize(deleting.name) : t("categories.title") })}
-        description={t("categories.confirmDeleteDescription")}
-        confirmLabel={t("categories.deleteCategory")}
-        onConfirm={() => void confirmDelete()}
-        onCancel={() => setDeleting(null)}
-      />
+      {moving ? <MoveCategoryDialog category={moving} onClose={() => setMoving(null)} onSaved={() => { setMoving(null); refreshRelated(); }} /> : null}
+      {deleting ? <DeleteCategoryDialog category={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); refreshRelated(); }} /> : null}
     </>
   );
 }
@@ -178,6 +166,8 @@ function CreateCategoryDialog({ onClose, onCreated }: CreateCategoryDialogProps)
   const [nameFrEdited, setNameFrEdited] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [parent, setParent] = useState<string | null>(null);
+  const categories = useAllCategories();
 
   function changeEnglishName(value: string) {
     setNameEn(value);
@@ -189,7 +179,7 @@ function CreateCategoryDialog({ onClose, onCreated }: CreateCategoryDialogProps)
     setError(null);
     setSubmitting(true);
     try {
-      await apiRequest("POST", "/categories", { name: { en: nameEn, fr: nameFr } });
+      await apiRequest("POST", "/categories", { name: { en: nameEn, fr: nameFr }, parentId: parent === "__root__" ? null : parent });
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));
@@ -217,6 +207,9 @@ function CreateCategoryDialog({ onClose, onCreated }: CreateCategoryDialogProps)
               error={error?.fieldError("name.en")}
               maxLength={100}
             />
+            {categories.isError ? <><ErrorAlert message={errorMessage(categories.error)} /><Button type="button" variant="outline" onClick={() => void categories.refetch()}>{t("categories.filterRetry")}</Button></> : null}
+            <SelectField label={t("categories.parent")} value={parent} onChange={setParent} required error={error?.fieldError("parentId")}
+              options={[{ value: "__root__", label: t("categories.root") }, ...(categories.data ?? []).map((category) => ({ value: category.id, label: category.path.map((part) => localize(part.name)).join(" / ") }))]} />
             <FormField
               label={t("common.nameFrench")}
               name="name.fr"
@@ -234,7 +227,7 @@ function CreateCategoryDialog({ onClose, onCreated }: CreateCategoryDialogProps)
             <DialogClose asChild>
               <Button type="button" variant="outline">{t("common.cancel")}</Button>
             </DialogClose>
-            <Button type="submit" disabled={submitting || !nameEn.trim() || !nameFr.trim()}>
+            <Button type="submit" disabled={submitting || !nameEn.trim() || !nameFr.trim() || parent === null || !categories.isSuccess}>
               {submitting ? t("common.saving") : t("categories.addCategory")}
             </Button>
           </DialogFooter>
@@ -252,7 +245,8 @@ interface RenameCategoryDialogProps {
 
 function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDialogProps) {
   const { t } = useTranslation();
-  const [name, setName] = useState(localize(category.name));
+  const [nameEn, setNameEn] = useState(category.name.en);
+  const [nameFr, setNameFr] = useState(category.name.fr);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -261,8 +255,7 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
     setSubmitting(true);
     setError(null);
     try {
-      // Keeps the stored French name until the bilingual rename dialog lands (SPEC FR-I18N-04).
-      await apiRequest("PUT", `/categories/${category.id}`, { name: { en: name, fr: category.name.fr } });
+      await apiRequest("PUT", `/categories/${category.id}`, { name: { en: nameEn, fr: nameFr } });
       onRenamed();
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));
@@ -280,7 +273,8 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
           </DialogHeader>
           <FieldGroup>
             {error && error.details.length === 0 ? <ErrorAlert message={error.message} /> : null}
-            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required error={error?.fieldError("name")} />
+            <FormField label={t("common.nameEnglish")} name="name.en" value={nameEn} onChange={setNameEn} required error={error?.fieldError("name.en")} />
+            <FormField label={t("common.nameFrench")} name="name.fr" value={nameFr} onChange={setNameFr} required error={error?.fieldError("name.fr")} />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild>
@@ -288,7 +282,7 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
                 {t("common.cancel")}
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={submitting || !nameEn.trim() || !nameFr.trim()}>
               {submitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
@@ -296,4 +290,105 @@ function RenameCategoryDialog({ category, onClose, onRenamed }: RenameCategoryDi
       </DialogContent>
     </Dialog>
   );
+}
+
+function useAllCategories() {
+  return useQuery({
+    queryKey: ["categories"],
+    queryFn: async () => (await apiRequest<{ items: Category[] }>("GET", "/categories")).items,
+  });
+}
+
+interface CategoryActionProps {
+  category: Category;
+  onClose: () => void;
+}
+
+function MoveCategoryDialog({ category, onClose, onSaved }: CategoryActionProps & { onSaved: () => void }) {
+  const { t } = useTranslation();
+  const categories = useAllCategories();
+  const [parent, setParent] = useState(category.parentId ?? "__root__");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await apiRequest("PUT", `/categories/${category.id}`, { parentId: parent === "__root__" ? null : parent });
+      onSaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+    <DialogContent className="sm:max-w-md">
+      <form onSubmit={submit} className="flex flex-col gap-6">
+        <DialogHeader><DialogTitle>{t("categories.moveTitle", { name: localize(category.name) })}</DialogTitle>
+          <DialogDescription>{t("categories.moveDescription")}</DialogDescription></DialogHeader>
+        <ErrorAlert message={error ?? (categories.error ? errorMessage(categories.error) : null)} />
+        <SelectField label={t("categories.parent")} value={parent} onChange={(value) => setParent(value ?? "__root__")} required
+          options={[{ value: "__root__", label: t("categories.root") }, ...(categories.data ?? [])
+            .filter((item) => !item.path.some((part) => part.id === category.id))
+            .map((item) => ({ value: item.id, label: item.path.map((part) => localize(part.name)).join(" / ") }))]} />
+        <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+          <Button type="submit" disabled={busy || !categories.isSuccess}>{busy ? t("common.saving") : t("common.save")}</Button></DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>;
+}
+
+interface DeletionImpact {
+  products: number;
+  suppliers: number;
+  catalogs: number;
+  uncategorizedProducts: number;
+  children: number;
+}
+
+function DeleteCategoryDialog({ category, onClose, onDeleted }: CategoryActionProps & { onDeleted: () => void }) {
+  const { t } = useTranslation();
+  const categories = useAllCategories();
+  const impact = useQuery({
+    queryKey: ["categories", category.id, "deletion-impact"],
+    queryFn: () => apiRequest<DeletionImpact>("GET", `/categories/${category.id}/deletion-impact`),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiRequest("DELETE", `/categories/${category.id}`);
+      onDeleted();
+    } catch (err) {
+      setError(errorMessage(err));
+      void impact.refetch();
+    } finally {
+      setBusy(false);
+    }
+  }
+  const children = (categories.data ?? []).filter((item) => item.parentId === category.id);
+  const destination = category.path.length > 1 ? category.path.slice(0, -1).map((part) => localize(part.name)).join(" / ") : t("categories.root");
+  return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+    <DialogContent className="sm:max-w-md">
+      <DialogHeader><DialogTitle>{t("categories.confirmDeleteTitle", { name: localize(category.name) })}</DialogTitle>
+        <DialogDescription>{t("categories.confirmDeleteDescription")}</DialogDescription></DialogHeader>
+      <ErrorAlert message={error ?? (impact.error ? errorMessage(impact.error) : categories.error ? errorMessage(categories.error) : null)} />
+      {impact.isLoading || categories.isLoading ? <p role="status">{t("common.loading")}</p> : null}
+      {impact.isError || categories.isError ? <Button type="button" variant="outline" onClick={() => { void impact.refetch(); void categories.refetch(); }}>{t("categories.filterRetry")}</Button> : null}
+      {impact.data && categories.isSuccess ? <div className="space-y-2 text-sm">
+        <p>{t("categories.deleteCounts", { products: impact.data.products, suppliers: impact.data.suppliers, catalogs: impact.data.catalogs })}</p>
+        <p>{t("categories.deleteUncategorized", { count: impact.data.uncategorizedProducts })}</p>
+        <p>{t("categories.deleteChildren", { count: impact.data.children, destination })}</p>
+        {children.length ? <ul className="list-disc pl-5">{children.map((child) => <li key={child.id}>{localize(child.name)}</li>)}</ul> : null}
+      </div> : null}
+      <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+        <Button type="button" variant="destructive" disabled={busy || !impact.isSuccess || !categories.isSuccess || impact.isFetching} onClick={() => void remove()}>{t("categories.deleteCategory")}</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }

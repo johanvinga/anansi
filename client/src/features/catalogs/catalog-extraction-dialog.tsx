@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,9 @@ import type {
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { ProductForm } from "../products/product-form";
+import { SupplierForm } from "../suppliers/supplier-form";
+import { CatalogEditDialog } from "./catalog-edit-dialog";
+import { CatalogImportPreviewDialog } from "./catalog-import-preview-dialog";
 
 interface CatalogExtractionDialogProps {
   catalog: Catalog;
@@ -43,6 +47,11 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
   const [creatingAttributeSet, setCreatingAttributeSet] = useState(false);
   const [attributeSetId, setAttributeSetId] = useState<string | undefined>();
   const [createdProductName, setCreatedProductName] = useState<string | null>(null);
+  const [editingCatalog, setEditingCatalog] = useState(false);
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [newSupplierId, setNewSupplierId] = useState<string | undefined>();
+  const [assignedSupplierId, setAssignedSupplierId] = useState(catalog.supplierId);
+  const [previewIndexes, setPreviewIndexes] = useState<number[] | null>(null);
   const extractionQuery = useQuery({
     queryKey: ["catalog-extraction", catalog.id],
     queryFn: () => apiRequest<CatalogExtraction>("GET", `/catalogs/${catalog.id}/extraction`),
@@ -62,7 +71,8 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
     extraction !== undefined &&
     (extraction.analysisStatus === "not_processed" ||
       extraction.analysisStatus === "failed" ||
-      extraction.analysisStatus === "processed");
+      extraction.analysisStatus === "processed" ||
+      extraction.analysisStatus === "queued");
 
   async function retryAnalysis() {
     setError(null);
@@ -82,7 +92,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
     setCreatedProductName(product.name.en);
     void queryClient.invalidateQueries({ queryKey: ["products"] });
     void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
-    void queryClient.invalidateQueries({ queryKey: ["supplier", catalog.supplierId] });
+    void queryClient.invalidateQueries({ queryKey: ["supplier", assignedSupplierId] });
     void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
   }
 
@@ -132,12 +142,49 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
 
             {results ? (
               <>
+                {!assignedSupplierId ? (
+                  <section className="flex flex-col gap-2 rounded-lg border p-4 text-sm">
+                    {results.supplier ? (
+                      <>
+                        <h3 className="font-semibold">{t("catalogs.suggestedSupplier")}</h3>
+                        <p>{results.supplier.name} · {t("catalogs.sourcePages")}: {results.supplier.sourcePage}</p>
+                        <p className="text-muted-foreground">{results.supplier.excerpt}</p>
+                        {extraction?.matchingSupplier ? (
+                          <p>
+                            {t("catalogs.matchingSupplier")}:{" "}
+                            <Link className="underline" to={`/suppliers/${extraction.matchingSupplier.id}`}>
+                              {extraction.matchingSupplier.name}
+                            </Link>
+                          </p>
+                        ) : (
+                          <p>{t("catalogs.noExactSupplierMatch")}</p>
+                        )}
+                      </>
+                    ) : <p>{t("catalogs.noSupplierSuggestion")}</p>}
+                    <p className="text-muted-foreground">{t("catalogs.suggestedSupplierReview")}</p>
+                    {isAdmin ? (
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" onClick={() => { setNewSupplierId(undefined); setEditingCatalog(true); }}>
+                          {t("catalogs.selectSupplier")}
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => setCreatingSupplier(true)}>
+                          {t("suppliers.createSupplier")}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
                 <section className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="font-semibold">{t("catalogs.productCandidates", { count: results.products.length })}</h3>
                     <span className="text-sm text-muted-foreground">
                       {t("catalogs.reviewBeforeImport")}
                     </span>
+                    {isAdmin && results.products.length > 0 ? (
+                      <Button type="button" variant="outline" onClick={() => setPreviewIndexes(results.products.map((_, index) => index))}>
+                        {t("catalogs.previewAll")}
+                      </Button>
+                    ) : null}
                   </div>
                   {results.products.length === 0 ? (
                     <p className="rounded-lg border p-4 text-sm text-muted-foreground">
@@ -162,9 +209,16 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
                               ) : null}
                             </div>
                             {isAdmin ? (
-                              <Button type="button" size="sm" onClick={() => setCreatingProduct(candidate)}>
-                                {t("catalogs.createProductFromCandidate")}
-                              </Button>
+                              <div className="flex flex-wrap gap-2">
+                                <Button type="button" size="sm" onClick={() => setPreviewIndexes([index])}>
+                                  {t("catalogs.previewOne")}
+                                </Button>
+                                {candidate.attributes.length === 0 ? (
+                                  <Button type="button" size="sm" variant="outline" onClick={() => setCreatingProduct(candidate)}>
+                                    {t("catalogs.createProductFromCandidate")}
+                                  </Button>
+                                ) : null}
+                              </div>
                             ) : null}
                           </div>
                           {candidate.description ? (
@@ -259,11 +313,54 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
 
       {creatingProduct ? (
         <ProductForm
-          defaultSupplierId={catalog.supplierId ?? undefined}
+          defaultSupplierId={assignedSupplierId ?? undefined}
           defaultAttributeSetId={attributeSetId}
           initialProduct={creatingProduct}
           onClose={() => setCreatingProduct(null)}
           onSaved={onProductCreated}
+        />
+      ) : null}
+
+      {editingCatalog ? (
+        <CatalogEditDialog
+          catalog={{ ...catalog, supplierId: assignedSupplierId }}
+          initialSupplierId={newSupplierId}
+          onClose={() => setEditingCatalog(false)}
+          onSaved={() => {
+            setEditingCatalog(false);
+            void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+            void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+            void queryClient.invalidateQueries({ queryKey: ["supplier"] });
+            onClose();
+          }}
+        />
+      ) : null}
+      {creatingSupplier ? (
+        <Dialog open onOpenChange={(open) => !open && setCreatingSupplier(false)}>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{t("suppliers.createSupplier")}</DialogTitle>
+              <DialogDescription>{t("catalogs.createSupplierForImportDescription")}</DialogDescription>
+            </DialogHeader>
+            <SupplierForm
+              initialName={results?.supplier?.name}
+              onCancel={() => setCreatingSupplier(false)}
+              onSaved={(supplier) => {
+                setCreatingSupplier(false);
+                setNewSupplierId(supplier.id);
+                setEditingCatalog(true);
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {previewIndexes && job ? (
+        <CatalogImportPreviewDialog
+          catalogId={catalog.id}
+          jobId={job.jobId}
+          indexes={previewIndexes}
+          onClose={() => setPreviewIndexes(null)}
+          onSupplierAssigned={setAssignedSupplierId}
         />
       ) : null}
     </>

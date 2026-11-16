@@ -5,6 +5,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.url().default("redis://127.0.0.1:6379"),
   CATALOG_EXTRACTION_ENABLED: z.enum(["true", "false"]).default("false"),
+  GEMINI_API_KEY: z.string().default(""),
+  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.5-flash-lite"),
   CATALOG_OCR_LANGUAGES: z.string().min(1).default("eng+fra"),
   CATALOG_EXTRACTION_MAX_PAGES: z.coerce
     .number()
@@ -48,6 +50,8 @@ export interface AppConfig {
   databaseUrl: string;
   redisUrl: string;
   catalogExtractionEnabled: boolean;
+  geminiApiKey: string;
+  geminiModel: string;
   catalogOcrLanguages: string;
   catalogExtractionMaxPages: number;
   catalogExtractionConcurrency: number;
@@ -77,6 +81,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid configuration: ${problems}`);
   }
   const e = parsed.data;
+  if (e.CATALOG_EXTRACTION_ENABLED === "true" && !e.GEMINI_API_KEY.trim()) {
+    throw new Error("Invalid configuration: CATALOG_EXTRACTION_ENABLED=true requires GEMINI_API_KEY");
+  }
   if (e.STORAGE_BACKEND === "r2") {
     const missing = [
       ["R2_ENDPOINT", e.R2_ENDPOINT],
@@ -96,6 +103,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     databaseUrl: e.DATABASE_URL,
     redisUrl: e.REDIS_URL,
     catalogExtractionEnabled: e.CATALOG_EXTRACTION_ENABLED === "true",
+    geminiApiKey: e.GEMINI_API_KEY,
+    geminiModel: e.GEMINI_MODEL,
     catalogOcrLanguages: e.CATALOG_OCR_LANGUAGES,
     catalogExtractionMaxPages: e.CATALOG_EXTRACTION_MAX_PAGES,
     catalogExtractionConcurrency: e.CATALOG_EXTRACTION_CONCURRENCY,

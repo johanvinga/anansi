@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ interface UploadCatalogDialogProps {
 /** Uploads a catalog PDF to an existing supplier or a brand-new one created here. */
 export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialogProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
@@ -71,9 +72,10 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
       if (addNewSupplier) {
         const created = await apiRequest<{ supplier: Supplier }>("POST", "/suppliers", {
           name: newSupplierName.trim(),
-          categories: categories.map((chip) => (chip.id ? { id: chip.id } : { name: chip.name })),
+          categories: toCategoryInputs(categories),
         });
         targetId = created.supplier.id;
+        await queryClient.invalidateQueries({ queryKey: ["categories"] });
       }
       const form = new FormData();
       form.append("file", file);

@@ -14,6 +14,8 @@ interface ProductFormData {
   suppliers: Supplier[];
   sets: AttributeSetSummary[];
   fields: AttributeField[];
+  allFields: AttributeField[];
+  fieldsReady: boolean;
   error: ApiError | null;
 }
 
@@ -40,7 +42,7 @@ export function useProductFormData(attributeSetId: string | null): ProductFormDa
         "GET",
         `/attribute-sets/${attributeSetId}`,
       );
-      return result.attributeSet.fields.filter((field) => !field.isArchived);
+      return result.attributeSet.fields;
     },
   });
   const queryError =
@@ -51,7 +53,9 @@ export function useProductFormData(attributeSetId: string | null): ProductFormDa
     defaultCurrency: settingsQuery.data?.defaultCurrency ?? null,
     suppliers: suppliersQuery.data ?? [],
     sets: setsQuery.data ?? [],
-    fields: fieldsQuery.data ?? [],
+    fields: (fieldsQuery.data ?? []).filter((field) => !field.isArchived),
+    allFields: fieldsQuery.data ?? [],
+    fieldsReady: attributeSetId === null || fieldsQuery.isSuccess,
     error: queryError ? toApiError(queryError) : null,
   };
 }

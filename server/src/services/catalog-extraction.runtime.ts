@@ -1,12 +1,11 @@
 import { Worker, type Job } from "bullmq";
+import { Redis } from "ioredis";
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
-import {
-  createOcrWorker,
-  processCatalogExtraction,
-} from "./catalog-extraction.js";
+import { createGeminiCatalogAnalyzer, processGeminiCatalogExtraction } from "./catalog-gemini-extraction.js";
+import { createGeminiRequestLimiter, createLimitedGeminiFetch } from "./gemini-request-limiter.js";
 import {
   CATALOG_EXTRACTION_QUEUE,
   createCatalogExtractionQueue,
@@ -60,19 +59,24 @@ export function createCatalogExtractionRuntime(
   log: FastifyBaseLogger,
 ): CatalogExtractionRuntime {
   const queue = createCatalogExtractionQueue(config.redisUrl);
-  const ocrFactory = createOcrWorker(config.catalogOcrLanguages);
+  const limiterRedis = new Redis(config.redisUrl, { maxRetriesPerRequest: 1 });
+  limiterRedis.on("error", (error) => {
+    log.error({ errorType: error.name }, "Gemini request limiter Redis error");
+  });
+  const limiter = createGeminiRequestLimiter(limiterRedis, config.geminiApiKey);
+  const analyzeCatalog = createGeminiCatalogAnalyzer(config.geminiApiKey, config.geminiModel, createLimitedGeminiFetch(limiter));
   const worker = new Worker<ExtractionPayload>(
     CATALOG_EXTRACTION_QUEUE,
     async (job) => {
       try {
-        await processCatalogExtraction(
+        await processGeminiCatalogExtraction(
           job.data.extractionJobId,
           {
             db,
             storage,
             maxPages: config.catalogExtractionMaxPages,
           },
-          () => ocrFactory.get(),
+          analyzeCatalog,
         );
       } catch (error) {
         const failure = error instanceof Error ? error : new Error("Catalog extraction failed.");
@@ -94,7 +98,7 @@ export function createCatalogExtractionRuntime(
     async close() {
       await worker.close();
       await queue.close();
-      await ocrFactory.close();
+      limiterRedis.disconnect();
     },
   };
 }

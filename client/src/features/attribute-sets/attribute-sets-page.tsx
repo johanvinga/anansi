@@ -2,9 +2,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { Eye, Plus, Settings2 } from "lucide-react";
+import { Eye, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -16,14 +17,18 @@ import {
 } from "@/components/ui/dialog";
 import { FieldGroup } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
-import type { AttributeSetDetail, AttributeSetSummary } from "../../api/types";
+import type { AttributeDataType, AttributeField, AttributeSetDetail, AttributeSetSummary } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { FormField } from "../../components/form-field";
 import { ErrorAlert } from "../../components/error-alert";
+import { ConfirmDialog } from "../../components/confirm-dialog";
 import { IconAction } from "../../components/icon-action";
-import { PageLayout } from "../../components/page-layout";
+import { PageBreadcrumbs } from "../../components/page-breadcrumbs";
+import { SearchForm } from "../../components/search-form";
+import { SelectField } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { AttributeSetBuilder } from "./attribute-set-builder";
 
@@ -33,6 +38,7 @@ export function AttributeSetsPage() {
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const [createOpen, setCreateOpen] = useState(false);
+  const [tab, setTab] = useState("attributes");
   const queryClient = useQueryClient();
 
   const setsQuery = useQuery({
@@ -44,19 +50,24 @@ export function AttributeSetsPage() {
 
   return (
     <>
-      <PageLayout
-        title={t("attributeSets.title")}
-        breadcrumbs={[{ label: t("attributeSets.title") }]}
-        toolbar={
-          isAdmin ? (
-            <Button className="ml-auto" size="lg" onClick={() => setCreateOpen(true)}>
-              <Plus />
-              {t("attributeSets.createSetButton")}
-            </Button>
-          ) : null
-        }
-      >
-
+      <div className="flex flex-col gap-4">
+        <PageBreadcrumbs items={[{ label: t("attributes.title") }]} />
+        <Tabs value={tab} onValueChange={setTab} className="gap-4">
+          <TabsList>
+            <TabsTrigger value="attributes">{t("attributes.title")}</TabsTrigger>
+            <TabsTrigger value="sets">{t("attributeSets.title")}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="attributes"><IndependentAttributes isAdmin={isAdmin} /></TabsContent>
+            <TabsContent value="sets">
+              {isAdmin ? (
+                <div className="mb-4 flex justify-end">
+                  <Button size="lg" onClick={() => setCreateOpen(true)}>
+                    <Plus />
+                    {t("attributeSets.createSetButton")}
+                  </Button>
+                </div>
+              ) : null}
+              <Card className="gap-0 py-0">
         {setsQuery.error ? (
           <div className="px-4 pb-4">
             <ErrorAlert message={errorMessage(setsQuery.error)} />
@@ -98,7 +109,10 @@ export function AttributeSetsPage() {
             ))}
           </TableBody>
         </Table>
-      </PageLayout>
+              </Card>
+            </TabsContent>
+        </Tabs>
+      </div>
 
       {createOpen ? (
         <CreateAttributeSetDialog
@@ -111,6 +125,177 @@ export function AttributeSetsPage() {
         />
       ) : null}
     </>
+  );
+}
+
+interface IndependentAttributesProps {
+  isAdmin: boolean;
+}
+
+function IndependentAttributes({ isAdmin }: IndependentAttributesProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [queryText, setQueryText] = useState("");
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
+  const [migrateConfirm, setMigrateConfirm] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<{ migrated: { fieldId: string }[]; conflicts: { fieldId: string; setId: string; setName: string; name: string; reason: string }[] } | null>(null);
+  const [nameEn, setNameEn] = useState("");
+  const [nameFr, setNameFr] = useState("");
+  const [dataType, setDataType] = useState<AttributeDataType>("text");
+  const [unit, setUnit] = useState("");
+  const [options, setOptions] = useState<string[]>([""]);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const query = useQuery({
+    queryKey: ["independent-attributes"],
+    queryFn: async () => (await apiRequest<{ items: AttributeField[] }>("GET", "/attributes")).items,
+  });
+  const attributes = (query.data ?? []).filter((attribute) =>
+    [attribute.name.en, attribute.name.fr].some((name) => name.toLowerCase().includes(search.toLowerCase())),
+  );
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await apiRequest(editing ? "PUT" : "POST", editing ? `/attributes/${editing}` : "/attributes", {
+        name: { en: nameEn, fr: nameFr || nameEn },
+        ...(!editing ? { dataType, unit: unit.trim() || null, options: dataType === "select" ? options.filter((option) => option.trim()).map((option) => ({ en: option })) : [] } : {}),
+      });
+      await queryClient.invalidateQueries({ queryKey: ["independent-attributes"] });
+      setOpen(false);
+      setNameEn("");
+      setNameFr("");
+      setEditing(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function remove() {
+    if (!removing) return;
+    setError(null);
+    try {
+      await apiRequest("DELETE", `/attributes/${removing.id}`);
+      await queryClient.invalidateQueries({ queryKey: ["independent-attributes"] });
+      setRemoving(null);
+    } catch (err) {
+      setError(errorMessage(err));
+      setRemoving(null);
+    }
+  }
+  async function migrateLegacy() {
+    setMigrating(true);
+    setError(null);
+    try {
+      const result = await apiRequest<{ migrated: { fieldId: string }[]; conflicts: { fieldId: string; setId: string; setName: string; name: string; reason: string }[] }>("POST", "/attributes/migrate-legacy");
+      setMigrationResult(result);
+      setMigrateConfirm(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["independent-attributes"] }),
+        queryClient.invalidateQueries({ queryKey: ["attribute-sets"] }),
+        queryClient.invalidateQueries({ queryKey: ["attribute-set"] }),
+        queryClient.invalidateQueries({ queryKey: ["attribute-set-fields"] }),
+        queryClient.invalidateQueries({ queryKey: ["products"] }),
+      ]);
+    } catch (err) {
+      setError(errorMessage(err));
+      setMigrateConfirm(false);
+    } finally {
+      setMigrating(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchForm
+          label={t("attributes.searchLabel")}
+          placeholder={t("attributes.searchPlaceholder")}
+          value={queryText}
+          onChange={setQueryText}
+          onSearch={() => setSearch(queryText.trim())}
+        />
+        {isAdmin ? <div className="flex flex-wrap gap-2">
+          <Button size="lg" onClick={() => { setEditing(null); setNameEn(""); setNameFr(""); setDataType("text"); setUnit(""); setOptions([""]); setError(null); setOpen(true); }}><Plus />{t("attributes.create")}</Button>
+          <Button size="lg" variant="outline" onClick={() => setMigrateConfirm(true)}>{t("attributes.migrateLegacy")}</Button>
+        </div> : null}
+      </div>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm text-muted-foreground">{t("attributes.description")}</p>
+        <ErrorAlert message={!open ? error ?? (query.error ? errorMessage(query.error) : null) : null} />
+      </div>
+      <Card className="gap-0 py-0">
+        <Table>
+          <TableHeader className="bg-muted/50"><TableRow><TableHead className="pl-4">{t("suppliers.name")}</TableHead><TableHead>{t("attributeSets.dataType")}</TableHead>{isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}</TableRow></TableHeader>
+          <TableBody>
+            {query.isSuccess && attributes.length === 0 ? <TableEmptyRow colSpan={isAdmin ? 3 : 2} message={t(search ? "attributes.noResults" : "attributes.empty")} /> : null}
+            {attributes.map((attribute) => <TableRow key={attribute.id}>
+              <TableCell className="pl-4">{localize(attribute.name)}</TableCell><TableCell>{t(`attributeSets.${{ text: "typeText", number: "typeNumberWhole", decimal: "typeDecimal", boolean: "typeBoolean", date: "typeDate", select: "typeSelect" }[attribute.dataType]}`)}</TableCell>
+              {isAdmin ? <TableCell className="pr-4 text-right">
+                <IconAction label={t("attributes.edit")} icon={Pencil} onClick={() => { setEditing(attribute.id); setNameEn(attribute.name.en); setNameFr(attribute.name.fr); setError(null); setOpen(true); }} />
+                <IconAction label={t("attributes.remove")} icon={Trash2} onClick={() => setRemoving({ id: attribute.id, name: localize(attribute.name) })} />
+              </TableCell> : null}
+            </TableRow>)}
+          </TableBody>
+        </Table>
+      </Card>
+      {open ? (
+        <Dialog open onOpenChange={(value) => !value && setOpen(false)}>
+          <DialogContent>
+            <form onSubmit={submit} className="flex flex-col gap-4">
+              <DialogHeader><DialogTitle>{t(editing ? "attributes.edit" : "attributes.create")}</DialogTitle><DialogDescription>{t("attributes.createDescription")}</DialogDescription></DialogHeader>
+              <ErrorAlert message={error} />
+              <FormField label={t("common.nameEnglish")} name="name.en" value={nameEn} onChange={setNameEn} required maxLength={100} />
+              <FormField label={t("common.nameFrench")} name="name.fr" value={nameFr} onChange={setNameFr} maxLength={100} />
+              {!editing ? <>
+                <SelectField label={t("attributeSets.dataType")} value={dataType} onChange={(value) => {
+                  if (value === "text" || value === "number" || value === "decimal" || value === "boolean" || value === "date" || value === "select") setDataType(value);
+                }} options={[
+                  { value: "text", label: t("attributeSets.typeText") },
+                  { value: "number", label: t("attributeSets.typeNumberWhole") },
+                  { value: "decimal", label: t("attributeSets.typeDecimal") },
+                  { value: "boolean", label: t("attributeSets.typeBoolean") },
+                  { value: "date", label: t("attributeSets.typeDate") },
+                  { value: "select", label: t("attributeSets.typeSelect") },
+                ]} required />
+                <FormField label={t("attributeSets.unitOptional")} value={unit} onChange={setUnit} maxLength={20} />
+                {dataType === "select" ? <div className="flex flex-col gap-2">
+                  {options.map((option, index) => <div key={index} className="flex items-end gap-2">
+                    <div className="flex-1"><FormField label={t("attributeSets.optionLabel", { index: index + 1 })} value={option} maxLength={100} onChange={(value) => setOptions((current) => current.map((item, i) => i === index ? value : item))} /></div>
+                    <Button type="button" variant="outline" aria-label={t("attributeSets.removeOption", { index: index + 1 })} disabled={options.length === 1} onClick={() => setOptions((current) => current.filter((_, i) => i !== index))}><Trash2 /></Button>
+                  </div>)}
+                  <Button type="button" variant="outline" className="self-start" disabled={options.length >= 100} onClick={() => setOptions((current) => [...current, ""])}>{t("attributeSets.addOption")}</Button>
+                </div> : null}
+              </> : null}
+              <DialogFooter><Button type="button" variant="outline" onClick={() => setOpen(false)}>{t("common.cancel")}</Button><Button type="submit" disabled={submitting || !nameEn.trim()}>{t("common.save")}</Button></DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      <ConfirmDialog
+        open={removing !== null}
+        title={t("attributes.removeTitle", { name: removing?.name ?? "" })}
+        description={t("attributes.removeDescription")}
+        confirmLabel={t("attributes.remove")}
+        onConfirm={() => void remove()}
+        onCancel={() => setRemoving(null)}
+      />
+      <ConfirmDialog open={migrateConfirm} title={t("attributes.migrateLegacy")} description={t("attributes.migrateDescription")}
+        confirmLabel={t("attributes.migrateConfirm")} busy={migrating} onConfirm={() => void migrateLegacy()} onCancel={() => { if (!migrating) setMigrateConfirm(false); }} />
+      {migrationResult ? <Dialog open onOpenChange={(value) => !value && setMigrationResult(null)}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{t("attributes.migrateResultTitle")}</DialogTitle><DialogDescription>{t("attributes.migrateResult", { migrated: migrationResult.migrated.length, conflicts: migrationResult.conflicts.length })}</DialogDescription></DialogHeader>
+          {migrationResult.conflicts.length ? <ul className="space-y-2 text-sm">{migrationResult.conflicts.map((item) =>
+            <li key={item.fieldId}><Link className="underline" to={`/attribute-sets/${item.setId}`}>{item.setName}</Link> · {item.name}: {item.reason}</li>)}</ul> : null}
+          <DialogFooter><Button type="button" onClick={() => setMigrationResult(null)}>{t("common.close")}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog> : null}
+    </div>
   );
 }
 

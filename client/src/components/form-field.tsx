@@ -14,6 +14,7 @@ interface FormFieldProps {
   helperText?: string;
   error?: string | undefined;
   maxLength?: number;
+  placeholder?: string;
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
@@ -30,6 +31,7 @@ export function FormField({
   helperText,
   error,
   maxLength,
+  placeholder,
   onKeyDown,
 }: FormFieldProps) {
   const id = useId();
@@ -51,6 +53,7 @@ export function FormField({
         required={required}
         disabled={disabled}
         maxLength={maxLength}
+        placeholder={placeholder}
         aria-invalid={error ? true : undefined}
         aria-describedby={hasHint ? hintId : undefined}
         onChange={(event) => onChange(event.target.value)}

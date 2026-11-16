@@ -6,7 +6,9 @@ function currentLocale(): string | undefined {
 }
 
 /** Formats a decimal string in the product's own currency using the UI language (FR-PRD-10, NFR-15). */
-export function formatMoney(amount: string, currency: string): string {
+export function formatMoney(amount: string | null, currency: string | null): string {
+  if (amount === null) return currency ?? "—";
+  if (currency === null) return amount;
   try {
     return new Intl.NumberFormat(currentLocale(), { style: "currency", currency }).format(Number(amount));
   } catch {

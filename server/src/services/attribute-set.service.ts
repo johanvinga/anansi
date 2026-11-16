@@ -1,9 +1,13 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
-import { errors } from "../errors.js";
+import { AppError, errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated } from "../lib/translations.js";
 import { generateFieldCode, type AttributeDataType, type FieldDefinition } from "./attribute-values.js";
+import { assertUniqueIndependentName } from "./independent-attribute-names.js";
+import { normalizeAttributeName } from "./catalog-attribute-matching.js";
+import { normalizeOptionLabels } from "./attribute-option-labels.js";
+import { createIndependentAttributeInTransaction } from "./independent-attribute.service.js";
 import {
   AuditAction,
   diffFields,
@@ -39,6 +43,9 @@ const detailInclude = {
       _count: { select: { values: true } },
     },
   },
+  sharedFields: {
+    include: { field: { include: { options: { orderBy: { sortOrder: "asc" } }, _count: { select: { values: true } } } } },
+  },
 } satisfies Prisma.AttributeSetInclude;
 
 type SetRow = Prisma.AttributeSetGetPayload<{ include: typeof detailInclude }>;
@@ -73,7 +80,12 @@ function toSetDetail(row: SetRow) {
     name: { en: row.nameEn, fr: row.nameFr },
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    fields: row.fields.map(toFieldDto),
+    fields: [
+      ...row.fields.map((field) => ({ ...toFieldDto(field), shared: false })),
+      ...row.sharedFields.map(({ field, isRequired, isArchived, sortOrder }) => ({
+        ...toFieldDto(field), isRequired, isArchived: isArchived || field.isArchived, sortOrder, shared: true,
+      })),
+    ].sort((a, b) => a.sortOrder - b.sortOrder || a.name.en.localeCompare(b.name.en)),
   };
 }
 
@@ -99,27 +111,6 @@ function isUniqueViolation(error: unknown): boolean {
 
 const duplicateSetName = () => errors.conflict("An attribute set with this name already exists.");
 
-function normalizeOptionLabels(labels: Translated[], dataType: AttributeDataType): Translated[] {
-  const trimmed = labels
-    .map((label) => ({ en: label.en.trim(), fr: label.fr.trim() }))
-    .filter((label) => label.en.length > 0);
-  if (dataType !== "select") {
-    if (trimmed.length > 0) {
-      throw errors.validation([{ field: "options", message: "Options are only allowed for select fields." }]);
-    }
-    return [];
-  }
-  if (trimmed.length === 0) {
-    throw errors.validation([{ field: "options", message: "Select fields need at least one option." }]);
-  }
-  // Option uniqueness is checked on the English label (FR-I18N-07).
-  const keys = new Set(trimmed.map((label) => label.en.toLowerCase()));
-  if (keys.size !== trimmed.length) {
-    throw errors.validation([{ field: "options", message: "Option labels must be unique." }]);
-  }
-  return trimmed;
-}
-
 async function loadSet(db: Database | Tx, id: string): Promise<SetRow> {
   const row = await db.attributeSet.findUnique({ where: { id }, include: detailInclude });
   if (!row) throw errors.notFound("Attribute set");
@@ -142,7 +133,11 @@ export async function loadFieldDefinitions(db: Database | Tx, setId: string): Pr
     orderBy: { sortOrder: "asc" },
     include: { options: { orderBy: { sortOrder: "asc" } } },
   });
-  return fields.map((f) => ({
+  const shared = await db.attributeSetField.findMany({
+    where: { attributeSetId: setId },
+    include: { field: { include: { options: { orderBy: { sortOrder: "asc" } } } } },
+  });
+  return [...fields.map((f) => ({
     id: f.id,
     name: f.nameEn,
     code: f.code,
@@ -152,14 +147,18 @@ export async function loadFieldDefinitions(db: Database | Tx, setId: string): Pr
     isRequired: f.isRequired,
     isArchived: f.isArchived,
     options: f.options.map((o) => ({ id: o.id, label: o.labelEn })),
-  }));
+  })), ...shared.map(({ field: f, isRequired, isArchived, sortOrder }) => ({
+    id: f.id, name: f.nameEn, code: f.code, unit: f.unit, sortOrder, dataType: f.dataType,
+    isRequired, isArchived: isArchived || f.isArchived,
+    options: f.options.map((o) => ({ id: o.id, label: o.labelEn })),
+  }))].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 export async function listAttributeSets(db: Database, request: AuditRequestContext) {
   const rows = await db.attributeSet.findMany({
     orderBy: { nameEn: "asc" },
     include: {
-      _count: { select: { fields: { where: { isArchived: false } }, products: true } },
+      _count: { select: { fields: { where: { isArchived: false } }, sharedFields: { where: { isArchived: false, field: { isArchived: false } } }, products: true } },
     },
   });
   await recordAudit(db, request, { action: AuditAction.ATTRIBUTE_SET_LIST, outcome: "success" });
@@ -167,7 +166,7 @@ export async function listAttributeSets(db: Database, request: AuditRequestConte
     items: rows.map((row) => ({
       id: row.id,
       name: { en: row.nameEn, fr: row.nameFr },
-      fieldCount: row._count.fields,
+      fieldCount: row._count.fields + row._count.sharedFields,
       productCount: row._count.products,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -194,8 +193,8 @@ async function addFieldInTransaction(
 ): Promise<void> {
   const labels = normalizeOptionLabels(input.options ?? [], input.dataType);
   const set = await loadSet(tx, setId);
-  const code = generateFieldCode(input.name.en, set.fields.map((field) => field.code));
-  const sortOrder = set.fields.reduce((max, field) => Math.max(max, field.sortOrder), 0) + 1;
+  const code = generateFieldCode(input.name.en, [...set.fields.map((field) => field.code), ...set.sharedFields.map(({ field }) => field.code)]);
+  const sortOrder = Math.max(0, ...set.fields.map((field) => field.sortOrder), ...set.sharedFields.map((field) => field.sortOrder)) + 1;
   const field = await tx.attributeField.create({
     data: {
       attributeSetId: setId,
@@ -326,6 +325,136 @@ export async function addField(db: Database, request: AuditRequestContext, setId
   }
 }
 
+export async function addSharedField(db: Database, request: AuditRequestContext, setId: string, fieldId: string, isRequired: boolean) {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM attribute_sets WHERE id = ${setId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM attribute_fields WHERE id = ${fieldId}::uuid FOR UPDATE`;
+    const set = await loadSet(tx, setId);
+    const field = await tx.attributeField.findFirst({ where: { id: fieldId, attributeSetId: null, isArchived: false } });
+    if (!field) throw errors.notFound("Active independent attribute");
+    if (set.sharedFields.some((item) => item.attributeFieldId === fieldId)) throw errors.conflict("This attribute is already in the set.");
+    const sortOrder = Math.max(0, ...set.fields.map((item) => item.sortOrder), ...set.sharedFields.map((item) => item.sortOrder)) + 1;
+    await tx.attributeSetField.create({ data: { attributeSetId: setId, attributeFieldId: fieldId, isRequired, sortOrder } });
+    await recordAudit(tx, request, {
+      action: AuditAction.ATTRIBUTE_FIELD_CREATE, outcome: "success", entityType: "AttributeSet", entityId: setId,
+      changes: diffFields({}, { attributeId: fieldId, name: field.nameEn, isRequired, sortOrder }),
+    });
+    return toSetDetail(await loadSet(tx, setId));
+  });
+}
+
+export async function createSharedField(db: Database, request: AuditRequestContext, setId: string, input: CreateFieldInput) {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM attribute_sets WHERE id = ${setId}::uuid FOR UPDATE`;
+    const set = await loadSet(tx, setId);
+    const field = await createIndependentAttributeInTransaction(tx, request, input.name, input);
+    const sortOrder = Math.max(0, ...set.fields.map((item) => item.sortOrder), ...set.sharedFields.map((item) => item.sortOrder)) + 1;
+    await tx.attributeSetField.create({ data: { attributeSetId: setId, attributeFieldId: field.id, isRequired: input.isRequired ?? false, sortOrder } });
+    await recordAudit(tx, request, {
+      action: AuditAction.ATTRIBUTE_FIELD_CREATE, outcome: "success", entityType: "AttributeSet", entityId: setId,
+      changes: diffFields({}, { attributeId: field.id, name: field.name.en, isRequired: input.isRequired ?? false, sortOrder }),
+    });
+    return toSetDetail(await loadSet(tx, setId));
+  });
+}
+
+export async function makeFieldShared(db: Database, request: AuditRequestContext, setId: string, fieldId: string, targetId: string | null) {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM attribute_sets WHERE id = ${setId}::uuid FOR UPDATE`;
+    for (const id of [...new Set([fieldId, ...(targetId ? [targetId] : [])])].sort()) {
+      await tx.$queryRaw`SELECT id FROM attribute_fields WHERE id = ${id}::uuid FOR UPDATE`;
+    }
+    const source = await loadField(tx, setId, fieldId);
+    if (source.isArchived) throw errors.conflict("Archived fields cannot be converted to shared attributes.");
+    if (!targetId) {
+      await assertUniqueIndependentName(tx, source.nameEn);
+      await tx.attributeField.update({ where: { id: fieldId }, data: { attributeSetId: null } });
+      await tx.attributeSetField.create({ data: {
+        attributeSetId: setId, attributeFieldId: fieldId,
+        isRequired: source.isRequired, isArchived: false, sortOrder: source.sortOrder,
+      } });
+    } else {
+      const target = await tx.attributeField.findFirst({
+        where: { id: targetId, attributeSetId: null, isArchived: false },
+        include: { options: { orderBy: { sortOrder: "asc" } } },
+      });
+      if (!target) throw errors.notFound("Active independent attribute");
+      const optionsMatch = source.options.length === target.options.length &&
+        source.options.every((option, index) => {
+          const other = target.options[index];
+          return other && option.labelEn === other.labelEn && option.labelFr === other.labelFr;
+        });
+      if (normalizeAttributeName(source.nameEn) !== normalizeAttributeName(target.nameEn) ||
+        source.nameFr !== target.nameFr || source.dataType !== target.dataType || source.unit !== target.unit || !optionsMatch) {
+        throw errors.conflict("The definitions differ in name, translation, type, unit or options. Review them separately.");
+      }
+      if (await tx.attributeSetField.findUnique({ where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: targetId } } })) {
+        throw errors.conflict("The target attribute is already in this set.");
+      }
+      const sourceValues = await tx.productAttributeValue.findMany({ where: { attributeFieldId: fieldId }, select: { productId: true, optionId: true } });
+      if (await tx.productAttributeValue.count({ where: { attributeFieldId: targetId, productId: { in: sourceValues.map((value) => value.productId) } } })) {
+        throw errors.conflict("A product already has both attributes. Resolve the conflicting values before merging.");
+      }
+      const optionMap = new Map(source.options.map((option, index) => [option.id, target.options[index]!.id]));
+      if (sourceValues.some((value) => value.optionId !== null && !optionMap.has(value.optionId))) {
+        throw errors.conflict("A stored value refers to an unexpected option. Review the data before merging.");
+      }
+      for (const [sourceId, optionId] of optionMap) {
+        await tx.productAttributeValue.updateMany({
+          where: { attributeFieldId: fieldId, optionId: sourceId },
+          data: { attributeFieldId: targetId, optionId },
+        });
+      }
+      await tx.productAttributeValue.updateMany({ where: { attributeFieldId: fieldId }, data: { attributeFieldId: targetId } });
+      await tx.attributeSetField.create({ data: {
+        attributeSetId: setId, attributeFieldId: targetId,
+        isRequired: source.isRequired, isArchived: false, sortOrder: source.sortOrder,
+      } });
+      await tx.attributeField.delete({ where: { id: fieldId } });
+    }
+    await recordAudit(tx, request, {
+      action: AuditAction.ATTRIBUTE_FIELD_UPDATE, outcome: "success", entityType: "AttributeSet", entityId: setId,
+      changes: diffFields({ fieldId, scope: "set" }, { fieldId: targetId ?? fieldId, scope: "shared" }),
+    });
+    return toSetDetail(await loadSet(tx, setId));
+  });
+}
+
+export async function migrateLegacyFields(db: Database, request: AuditRequestContext) {
+  const fields = await db.attributeField.findMany({
+    where: { attributeSetId: { not: null } },
+    include: { attributeSet: { select: { nameEn: true } } },
+    orderBy: [{ attributeSet: { nameEn: "asc" } }, { nameEn: "asc" }, { id: "asc" }],
+  });
+  const migrated: { fieldId: string; setId: string; attributeId: string }[] = [];
+  const conflicts: { fieldId: string; setId: string; setName: string; name: string; reason: string }[] = [];
+  for (const field of fields) {
+    const setId = field.attributeSetId!;
+    if (field.isArchived) {
+      conflicts.push({ fieldId: field.id, setId, setName: field.attributeSet!.nameEn, name: field.nameEn, reason: "Archived field requires review." });
+      continue;
+    }
+    const candidates = await db.attributeField.findMany({
+      where: { attributeSetId: null },
+      select: { id: true, nameEn: true, isArchived: true },
+    });
+    const matching = candidates.filter((candidate) => normalizeAttributeName(candidate.nameEn) === normalizeAttributeName(field.nameEn));
+    if (matching.length > 1 || matching.some((candidate) => candidate.isArchived)) {
+      conflicts.push({ fieldId: field.id, setId, setName: field.attributeSet!.nameEn, name: field.nameEn, reason: "The matching reusable attribute is ambiguous or archived." });
+      continue;
+    }
+    const targetId = matching[0]?.id ?? null;
+    try {
+      await makeFieldShared(db, request, setId, field.id, targetId);
+      migrated.push({ fieldId: field.id, setId, attributeId: targetId ?? field.id });
+    } catch (error) {
+      if (!(error instanceof AppError) || ![400, 404, 409].includes(error.statusCode)) throw error;
+      conflicts.push({ fieldId: field.id, setId, setName: field.attributeSet!.nameEn, name: field.nameEn, reason: error.message });
+    }
+  }
+  return { migrated, conflicts };
+}
+
 export async function updateField(
   db: Database,
   request: AuditRequestContext,
@@ -334,6 +463,23 @@ export async function updateField(
   input: UpdateFieldInput,
 ) {
   return db.$transaction(async (tx) => {
+    const membership = await tx.attributeSetField.findUnique({
+      where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: fieldId } },
+    });
+    if (membership) {
+      if (membership.isArchived) throw errors.conflict("Archived fields cannot be edited.");
+      if (input.name !== undefined || input.dataType !== undefined || input.unit !== undefined || input.options !== undefined) {
+        throw errors.validation([{ field: "field", message: "Edit shared attribute definitions from Attributes; only required and order are set-specific." }]);
+      }
+      const updated = await tx.attributeSetField.update({
+        where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: fieldId } },
+        data: { isRequired: input.isRequired, sortOrder: input.sortOrder },
+      });
+      const changes = diffFields({ isRequired: membership.isRequired, sortOrder: membership.sortOrder },
+        { isRequired: updated.isRequired, sortOrder: updated.sortOrder });
+      if (changes) await recordAudit(tx, request, { action: AuditAction.ATTRIBUTE_FIELD_UPDATE, outcome: "success", entityType: "AttributeSet", entityId: setId, changes });
+      return toSetDetail(await loadSet(tx, setId));
+    }
     const field = await loadField(tx, setId, fieldId);
     if (field.isArchived) throw errors.conflict("Archived fields cannot be edited.");
 
@@ -434,7 +580,7 @@ async function syncOptions(
 export async function reorderFields(db: Database, request: AuditRequestContext, setId: string, fieldIds: string[]) {
   return db.$transaction(async (tx) => {
     const set = await loadSet(tx, setId);
-    const current = set.fields.map((f) => f.id);
+    const current = [...set.fields.map((f) => f.id), ...set.sharedFields.map((f) => f.attributeFieldId)];
     const sameMembers =
       fieldIds.length === current.length && new Set(fieldIds).size === fieldIds.length && fieldIds.every((id) => current.includes(id));
     if (!sameMembers) {
@@ -442,11 +588,15 @@ export async function reorderFields(db: Database, request: AuditRequestContext, 
     }
 
     for (const [index, id] of fieldIds.entries()) {
-      await tx.attributeField.update({ where: { id }, data: { sortOrder: index + 1 } });
+      if (set.sharedFields.some((field) => field.attributeFieldId === id)) {
+        await tx.attributeSetField.update({ where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: id } }, data: { sortOrder: index + 1 } });
+      } else {
+        await tx.attributeField.update({ where: { id }, data: { sortOrder: index + 1 } });
+      }
     }
-    const codeById = new Map(set.fields.map((f) => [f.id, f.code]));
+    const codeById = new Map([...set.fields.map((f) => [f.id, f.code] as const), ...set.sharedFields.map((f) => [f.attributeFieldId, f.field.code] as const)]);
     const changes = diffFields(
-      { order: set.fields.map((f) => f.code) },
+      { order: toSetDetail(set).fields.map((f) => f.code) },
       { order: fieldIds.map((id) => codeById.get(id)) },
     );
     if (changes) {
@@ -465,6 +615,24 @@ export async function reorderFields(db: Database, request: AuditRequestContext, 
 /** Archives fields that have values; deletes the rest (FR-ATS-09, SPEC §8.3). */
 export async function removeField(db: Database, request: AuditRequestContext, setId: string, fieldId: string) {
   return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM attribute_sets WHERE id = ${setId}::uuid FOR UPDATE`;
+    const membership = await tx.attributeSetField.findUnique({
+      where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: fieldId } },
+      include: { field: true },
+    });
+    if (membership) {
+      const used = await tx.productAttributeValue.count({ where: { attributeFieldId: fieldId, product: { attributeSetId: setId } } });
+      if (used > 0) {
+        if (!membership.isArchived) {
+          await tx.attributeSetField.update({ where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: fieldId } }, data: { isArchived: true } });
+          await recordAudit(tx, request, { action: AuditAction.ATTRIBUTE_FIELD_ARCHIVE, outcome: "success", entityType: "AttributeSet", entityId: setId, changes: diffFields({ attributeId: fieldId, isArchived: false }, { attributeId: fieldId, isArchived: true }) });
+        }
+        return { result: "archived" as const, attributeSet: toSetDetail(await loadSet(tx, setId)) };
+      }
+      await tx.attributeSetField.delete({ where: { attributeSetId_attributeFieldId: { attributeSetId: setId, attributeFieldId: fieldId } } });
+      await recordAudit(tx, request, { action: AuditAction.ATTRIBUTE_FIELD_DELETE, outcome: "success", entityType: "AttributeSet", entityId: setId, changes: diffFields({ attributeId: fieldId, name: membership.field.nameEn }, { attributeId: null, name: null }) });
+      return { result: "deleted" as const, attributeSet: toSetDetail(await loadSet(tx, setId)) };
+    }
     const field = await loadField(tx, setId, fieldId);
     const labels = field.options.map((o) => o.labelEn);
 

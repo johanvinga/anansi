@@ -1,7 +1,7 @@
 ﻿import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type DragEvent, type FormEvent } from "react";
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, GripVertical, Link2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,10 +21,12 @@ import { apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
 import type { AttributeField, AttributeSetDetail } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import { CheckboxField } from "../../components/checkbox-field";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
 import { PageHeader } from "../../components/page-header";
+import { SelectField } from "../../components/select-field";
 import { FieldDialog } from "./field-dialog";
 
 const TYPE_LABELS: Record<AttributeField["dataType"], string> = {
@@ -48,6 +50,8 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<AttributeField | "new" | null>(null);
+  const [addingShared, setAddingShared] = useState(false);
+  const [sharingField, setSharingField] = useState<AttributeField | null>(null);
   const [removingField, setRemovingField] = useState<AttributeField | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -108,6 +112,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
       });
       cacheDetail(result.attributeSet);
       void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
+      void queryClient.invalidateQueries({ queryKey: ["attribute-set-fields", attributeSetId] });
       setStatus(t("attributeSets.orderSaved"));
     } catch (err) {
       cacheDetail(previous);
@@ -146,6 +151,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
       );
       cacheDetail(result.attributeSet);
       void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
+      void queryClient.invalidateQueries({ queryKey: ["attribute-set-fields", attributeSetId] });
       setStatus(result.result === "archived" ? t("attributeSets.wasArchived", { name: localize(target.name) }) : t("attributeSets.wasDeleted", { name: localize(target.name) }));
     } catch (err) {
       setError(errorMessage(err));
@@ -200,6 +206,9 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
                 <Plus />
                 {t("attributeSets.addField")}
               </Button>
+              <Button type="button" variant="outline" onClick={() => setAddingShared(true)}>
+                <Plus />{t("attributeSets.addShared")}
+              </Button>
             </CardAction>
           ) : null}
         </CardHeader>
@@ -243,6 +252,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <strong className="text-sm font-medium">{localize(field.name)}</strong>
+                    {field.shared ? <Badge variant="outline">{t("attributeSets.shared")}</Badge> : null}
                     <Badge variant="secondary">{TYPE_LABELS[field.dataType]}</Badge>
                     {field.isRequired ? <Badge variant="warning">{t("attributeSets.required")}</Badge> : null}
                     {field.unit ? <Badge variant="outline">{field.unit}</Badge> : null}
@@ -267,6 +277,7 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
                       onClick={() => moveField(field.id, index + 1)}
                     />
                     <IconAction label={t("attributeSets.editFieldAria", { name: localize(field.name) })} icon={Pencil} onClick={() => setEditingField(field)} />
+                    {!field.shared ? <IconAction label={t("attributeSets.makeShared")} icon={Link2} onClick={() => setSharingField(field)} /> : null}
                     <IconAction
                       label={field.hasValues ? t("attributeSets.archiveAria", { name: localize(field.name) }) : t("attributeSets.deleteAria2", { name: localize(field.name) })}
                       icon={field.hasValues ? Archive : Trash2}
@@ -304,7 +315,13 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
       ) : null}
 
       {editingField ? (
-        <FieldDialog
+        editingField !== "new" && editingField.shared ? <SharedFieldDialog
+          attributeSetId={attributeSetId}
+          field={editingField}
+          existingIds={detail.fields.map((field) => field.id)}
+          onClose={() => setEditingField(null)}
+          onSaved={(updated) => { cacheDetail(updated); setEditingField(null); void queryClient.invalidateQueries({ queryKey: ["attribute-set-fields", attributeSetId] }); }}
+        /> : <FieldDialog
           attributeSetId={attributeSetId}
           field={editingField === "new" ? undefined : editingField}
           onClose={() => setEditingField(null)}
@@ -312,10 +329,29 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
             cacheDetail(updated);
             setEditingField(null);
             void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
+            void queryClient.invalidateQueries({ queryKey: ["independent-attributes"] });
+            void queryClient.invalidateQueries({ queryKey: ["attribute-set-fields", attributeSetId] });
             setStatus(t("attributeSets.fieldSaved"));
           }}
         />
       ) : null}
+      {addingShared ? <SharedFieldDialog
+        attributeSetId={attributeSetId}
+        existingIds={detail.fields.map((field) => field.id)}
+        onClose={() => setAddingShared(false)}
+        onSaved={(updated) => { cacheDetail(updated); setAddingShared(false); void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] }); void queryClient.invalidateQueries({ queryKey: ["attribute-set-fields", attributeSetId] }); }}
+      /> : null}
+      {sharingField ? <ShareLegacyFieldDialog
+        attributeSetId={attributeSetId}
+        field={sharingField}
+        onClose={() => setSharingField(null)}
+        onSaved={(updated) => {
+          cacheDetail(updated); setSharingField(null);
+          void queryClient.invalidateQueries({ queryKey: ["independent-attributes"] });
+          void queryClient.invalidateQueries({ queryKey: ["attribute-set-fields", attributeSetId] });
+          void queryClient.invalidateQueries({ queryKey: ["products"] });
+        }}
+      /> : null}
 
       {renaming ? (
         <RenameSetDialog
@@ -352,6 +388,110 @@ export function AttributeSetBuilder({ attributeSetId, isAdmin, onBack, onDeleted
       />
     </>
   );
+}
+
+interface ShareLegacyFieldDialogProps {
+  attributeSetId: string;
+  field: AttributeField;
+  onClose: () => void;
+  onSaved: (detail: AttributeSetDetail) => void;
+}
+
+function ShareLegacyFieldDialog({ attributeSetId, field, onClose, onSaved }: ShareLegacyFieldDialogProps) {
+  const { t } = useTranslation();
+  const [choice, setChoice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const attributes = useQuery({
+    queryKey: ["independent-attributes"],
+    queryFn: async () => (await apiRequest<{ items: AttributeField[] }>("GET", "/attributes")).items,
+  });
+  const normalized = (name: string) => name.normalize("NFKC").trim().toLocaleLowerCase("en").replace(/\s+/g, " ");
+  const matches = (attributes.data ?? []).filter((item) => normalized(item.name.en) === normalized(field.name.en));
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!choice) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await apiRequest<{ attributeSet: AttributeSetDetail }>("POST",
+        `/attribute-sets/${attributeSetId}/fields/${field.id}/share`, { attributeId: choice === "__new__" ? null : choice });
+      onSaved(result.attributeSet);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <DialogContent>
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <DialogHeader><DialogTitle>{t("attributeSets.makeShared")}</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">{t("attributeSets.shareLegacyDescription")}</p>
+        <p>{localize(field.name)} · {field.dataType}{field.unit ? ` (${field.unit})` : ""}</p>
+        <ErrorAlert message={error ?? (attributes.error ? errorMessage(attributes.error) : null)} />
+        <SelectField label={t("attributeSets.shareChoice")} value={choice} onChange={setChoice} required options={[
+          { value: "__new__", label: t("attributeSets.promoteDefinition") },
+          ...matches.map((item) => ({ value: item.id, label: `${localize(item.name)} · ${item.dataType}${item.unit ? ` (${item.unit})` : ""}` })),
+        ]} />
+        <DialogFooter><Button type="button" variant="outline" onClick={onClose}>{t("common.cancel")}</Button>
+          <Button type="submit" disabled={!choice || busy || !attributes.data}>{busy ? t("common.saving") : t("common.save")}</Button></DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>;
+}
+
+interface SharedFieldDialogProps {
+  attributeSetId: string;
+  field?: AttributeField;
+  existingIds: string[];
+  onClose: () => void;
+  onSaved: (detail: AttributeSetDetail) => void;
+}
+
+function SharedFieldDialog({ attributeSetId, field, existingIds, onClose, onSaved }: SharedFieldDialogProps) {
+  const { t } = useTranslation();
+  const [id, setId] = useState<string | null>(field?.id ?? null);
+  const [required, setRequired] = useState(field?.isRequired ?? false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const attributes = useQuery({
+    queryKey: ["independent-attributes"],
+    queryFn: async () => (await apiRequest<{ items: AttributeField[] }>("GET", "/attributes")).items,
+    enabled: !field,
+  });
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = field
+        ? await apiRequest<{ attributeSet: AttributeSetDetail }>("PUT", `/attribute-sets/${attributeSetId}/fields/${field.id}`, { isRequired: required })
+        : await apiRequest<{ attributeSet: AttributeSetDetail }>("POST", `/attribute-sets/${attributeSetId}/shared-fields`, { attributeId: id, isRequired: required });
+      onSaved(result.attributeSet);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <DialogContent>
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <DialogHeader><DialogTitle>{t(field ? "attributeSets.editShared" : "attributeSets.addShared")}</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">{t("attributeSets.sharedDescription")}</p>
+        <ErrorAlert message={error ?? (attributes.error ? errorMessage(attributes.error) : null)} />
+        {field ? <p>{localize(field.name)}</p> : <SelectField
+          label={t("attributes.title")} value={id} onChange={setId} required
+          options={(attributes.data ?? []).filter((item) => !existingIds.includes(item.id)).map((item) => ({ value: item.id, label: localize(item.name) }))}
+        />}
+        <CheckboxField label={t("attributeSets.required")} checked={required} onChange={setRequired} />
+        <DialogFooter><Button type="button" variant="outline" onClick={onClose}>{t("common.cancel")}</Button>
+          <Button type="submit" disabled={!id || busy}>{busy ? t("common.saving") : t("common.save")}</Button></DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>;
 }
 
 interface RenameSetDialogProps {
