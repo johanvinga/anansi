@@ -17,6 +17,8 @@ import { CategoryEditor } from "./category-editor";
 import { toCategoryInputs, type CategoryChip } from "./category-chips";
 import { localize } from "../../api/translations";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
+import { useBulkDelete } from "../../hooks/use-bulk-delete";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
@@ -44,6 +46,14 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
       (await apiRequest<{ items: Catalog[] }>("GET", `/suppliers/${supplierId}/catalogs`)).items,
   });
   const catalogs = catalogsQuery.data ?? [];
+  const bulk = useBulkDelete({
+    scope: supplierId,
+    endpoint: "catalogs",
+    onDeleted: async () => {
+      await Promise.all(["catalogs", "supplier", "suppliers", "categories"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
+    },
+  });
+  const visibleItems = catalogs.map((item) => ({ id: item.id, label: item.name }));
   const refresh = () => {
     setError(null);
     void catalogsQuery.refetch();
@@ -58,6 +68,7 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
     setDeleting(null);
     try {
       await apiRequest<void>("DELETE", `/catalogs/${target.id}`);
+      bulk.remove(target.id);
       await queryClient.invalidateQueries({ queryKey: ["catalogs", "supplier", supplierId] });
     } catch (err) {
       setError(errorMessage(err));
@@ -71,9 +82,11 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
       <ErrorAlert message={error ?? (catalogsQuery.error ? errorMessage(catalogsQuery.error) : settingsQuery.error ? errorMessage(settingsQuery.error) : null)} />
 
       <Card className="gap-0 py-0">
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} warning={t("bulkDelete.catalogsWarning")} /> : null}
         <Table aria-label={t("suppliers.catalogs")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
+              {isAdmin ? <TableHead className="w-10 pl-4"><BulkSelectPage items={visibleItems} selection={bulk} /></TableHead> : null}
               <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
               <TableHead>{t("catalogs.version")}</TableHead>
               <TableHead>{t("catalogs.file")}</TableHead>
@@ -85,9 +98,10 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {catalogs.length === 0 ? <TableEmptyRow colSpan={analysisEnabled ? 8 : 7} message={t("suppliers.noCatalogs")} /> : null}
+            {catalogs.length === 0 ? <TableEmptyRow colSpan={(analysisEnabled ? 8 : 7) + (isAdmin ? 1 : 0)} message={t("suppliers.noCatalogs")} /> : null}
             {catalogs.map((catalog) => (
               <TableRow key={catalog.id}>
+                {isAdmin ? <TableCell className="pl-4"><BulkSelectItem item={{ id: catalog.id, label: catalog.name }} selection={bulk} /></TableCell> : null}
                 <TableCell className="pl-4 font-medium">{catalog.name}</TableCell>
                 <TableCell>
                   {catalog.version ? <Badge variant="outline">{catalog.version}</Badge> : "—"}

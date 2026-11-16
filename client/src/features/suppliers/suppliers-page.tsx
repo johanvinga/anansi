@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
-import type { Category, Page, Supplier } from "../../api/types";
+import type { Page, Supplier } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
+import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
+import { useBulkDelete } from "../../hooks/use-bulk-delete";
+import { CategoryTreeFilter } from "../../components/category-tree-filter";
 import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { PageHeader } from "../../components/page-header";
@@ -37,26 +40,38 @@ export function SuppliersPage() {
   const [search, setSearch] = useState("");
   const categoryIds = useMemo(() => searchParams.getAll("category"), [searchParams]);
   const [page, setPage] = useState(1);
-  const categoriesQuery = useQuery({
-    queryKey: ["categories"],
-    queryFn: async () => (await apiRequest<{ items: Category[] }>("GET", "/categories")).items,
-  });
+  const queryClient = useQueryClient();
+  async function loadSuppliers(targetPage: number, pageSize: number) {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+    if (search) params.set("q", search);
+    for (const id of categoryIds) params.append("category", id);
+    return apiRequest<Page<Supplier>>("GET", `/suppliers?${params.toString()}`);
+  }
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "list", { page, pageSize: PAGE_SIZE, search, categoryIds }],
-    queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-      if (search) params.set("q", search);
-      for (const id of categoryIds) params.append("category", id);
-      return apiRequest<Page<Supplier>>("GET", `/suppliers?${params.toString()}`);
+    queryFn: () => loadSuppliers(page, PAGE_SIZE),
+  });
+  const result = suppliersQuery.data;
+  const bulk = useBulkDelete({
+    scope: JSON.stringify({ search, categoryIds }),
+    endpoint: "suppliers",
+    loadPage: async (targetPage, pageSize) => {
+      const response = await loadSuppliers(targetPage, pageSize);
+      return { total: response.total, items: response.items.map((item) => ({ id: item.id, label: item.name })) };
+    },
+    onDeleted: async () => {
+      setPage(1);
+      await Promise.all(["suppliers", "supplier", "catalogs", "categories"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
     },
   });
-  const categories = categoriesQuery.data ?? [];
-  const result = suppliersQuery.data;
+  const visibleItems = (result?.items ?? []).map((item) => ({ id: item.id, label: item.name }));
 
-  function toggleCategory(id: string) {
-    const next = categoryIds.includes(id) ? categoryIds.filter((c) => c !== id) : [...categoryIds, id];
+  function changeCategories(next: string[]) {
     setPage(1);
-    setSearchParams(next.length > 0 ? { category: next } : {}, { replace: true });
+    const params = new URLSearchParams(searchParams);
+    params.delete("category");
+    for (const id of next) params.append("category", id);
+    setSearchParams(params, { replace: true });
   }
 
   return (
@@ -85,42 +100,20 @@ export function SuppliersPage() {
           </>
         }
         filters={
-          <>
-            <span className="mr-1 text-sm text-muted-foreground">{t("suppliers.categoriesLabel")}:</span>
-            {categories.map((category) => {
-              const active = categoryIds.includes(category.id);
-              return (
-                <Button
-                  key={category.id}
-                  type="button"
-                  variant={active ? "default" : "secondary"}
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  aria-pressed={active}
-                  onClick={() => toggleCategory(category.id)}
-                >
-                  {localize(category.name)}
-                </Button>
-              );
-            })}
-          </>
+          <CategoryTreeFilter selected={categoryIds} onChange={changeCategories} />
         }
       >
-        {categoriesQuery.error ? (
-          <div className="px-4 pb-4">
-            <ErrorAlert message={errorMessage(categoriesQuery.error)} />
-          </div>
-        ) : null}
-
         {suppliersQuery.error ? (
           <div className="px-4 pb-4">
             <ErrorAlert message={errorMessage(suppliersQuery.error)} />
           </div>
         ) : null}
 
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={PAGE_SIZE} warning={t("bulkDelete.suppliersWarning")} /> : null}
         <Table aria-label={t("suppliers.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
+              {isAdmin ? <TableHead className="w-10 pl-4"><BulkSelectPage items={visibleItems} selection={bulk} /></TableHead> : null}
               <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
               <TableHead>{t("suppliers.city")}</TableHead>
               <TableHead>{t("suppliers.country")}</TableHead>
@@ -129,9 +122,10 @@ export function SuppliersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {result && result.items.length === 0 ? <TableEmptyRow colSpan={5} message={t("suppliers.noSuppliers")} /> : null}
+            {result && result.items.length === 0 ? <TableEmptyRow colSpan={isAdmin ? 6 : 5} message={t("suppliers.noSuppliers")} /> : null}
             {result?.items.map((supplier) => (
               <TableRow key={supplier.id}>
+                {isAdmin ? <TableCell className="pl-4"><BulkSelectItem item={{ id: supplier.id, label: supplier.name }} selection={bulk} /></TableCell> : null}
                 <TableCell className="pl-4 font-medium">
                   <Link to={`/suppliers/${supplier.id}`} className="hover:underline">
                     {supplier.name}

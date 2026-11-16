@@ -8,6 +8,7 @@ import { buildApp } from "../app.js";
 import type { Database } from "../db.js";
 import { createLocalAssetStorage } from "../lib/asset-storage.js";
 import { processCatalogExtraction } from "../services/catalog-extraction.js";
+import { processGeminiCatalogExtraction } from "../services/catalog-gemini-extraction.js";
 import {
   ADMIN,
   READER,
@@ -128,6 +129,30 @@ describe("supplier catalogs", () => {
   }
 
   describe("FR-CLG-01/02/03 create catalog", () => {
+    it("accepts a 40 MiB catalog when the upload limit is 50 MiB", async () => {
+      const largeUploadDb = createTestDatabase();
+      const largeUploadApp = await buildApp(testConfig({
+        uploadDir,
+        maxUploadMb: 50,
+        catalogExtractionEnabled: false,
+      }), { db: largeUploadDb, logger: false });
+      try {
+        await largeUploadApp.ready();
+        const pdf = Buffer.alloc(40 * 1024 * 1024);
+        PDF_BYTES.copy(pdf);
+        const res = await request(largeUploadApp.server)
+          .post(`/api/v1/suppliers/${supplierId}/catalogs`)
+          .set(unsafeHeaders(adminCookie))
+          .field("name", "Large catalog")
+          .attach("file", pdf, { filename: "large.pdf", contentType: "application/pdf" });
+        expect(res.status).toBe(201);
+        expect(res.body.catalog.sizeBytes).toBe(pdf.byteLength);
+        expect(await db.auditLog.count({ where: { action: "CATALOG_UPLOAD", entityId: res.body.catalog.id } })).toBe(1);
+      } finally {
+        await largeUploadApp.close();
+      }
+    });
+
     it("uploads a PDF with name and version, stores it under a generated name, and returns metadata", async () => {
       const res = await upload(adminCookie, PDF_BYTES, {
         filename: "../../Price List (2026).pdf",
@@ -277,7 +302,7 @@ describe("supplier catalogs", () => {
   describe("catalog analysis jobs", () => {
     it("disables analysis without Redis while retaining catalog uploads and downloads", async () => {
       const previouslyQueued = await uploadAsAdmin();
-      expect(previouslyQueued.analysisStatus).toBe("queued");
+      expect(previouslyQueued.analysisStatus).toBe("not_processed");
       const disabledDb = createTestDatabase();
       const disabledApp = await buildApp(testConfig({
         uploadDir,
@@ -301,8 +326,8 @@ describe("supplier catalogs", () => {
         const id = uploaded.body.catalog.id as string;
         expect(await db.catalogExtractionJob.count({ where: { catalogId: id } })).toBe(0);
         expect(await db.auditLog.count({ where: { action: "CATALOG_UPLOAD", entityId: id } })).toBe(1);
-        expect((await db.catalog.findUniqueOrThrow({ where: { id: previouslyQueued.id } })).analysisStatus).toBe("queued");
-        expect(await db.catalogExtractionJob.count({ where: { catalogId: previouslyQueued.id } })).toBe(1);
+        expect((await db.catalog.findUniqueOrThrow({ where: { id: previouslyQueued.id } })).analysisStatus).toBe("not_processed");
+        expect(await db.catalogExtractionJob.count({ where: { catalogId: previouslyQueued.id } })).toBe(0);
 
         const download = await request(disabledApp.server).get(`/api/v1/catalogs/${id}/download`).set("Cookie", readerCookie);
         expect(download.status).toBe(200);
@@ -313,6 +338,7 @@ describe("supplier catalogs", () => {
         for (const response of [
           await request(disabledApp.server).get(`/api/v1/catalogs/${id}/extraction`).set("Cookie", readerCookie),
           await request(disabledApp.server).post(`/api/v1/catalogs/${id}/extraction`).set(unsafeHeaders(adminCookie)),
+          await request(disabledApp.server).post(`/api/v1/catalogs/${id}/extraction/preview`).set(unsafeHeaders(adminCookie)).send({ jobId: NIL_UUID, indexes: [0] }),
         ]) {
           expect(response.status).toBe(503);
           expect(response.body.error.code).toBe("FEATURE_DISABLED");
@@ -332,9 +358,12 @@ describe("supplier catalogs", () => {
       }
     });
 
-    it("queues analysis after upload and lets authenticated users check progress", async () => {
+    it("does not queue on upload and lets an admin start analysis", async () => {
       const catalog = await uploadAsAdmin();
-      expect(catalog.analysisStatus).toBe("queued");
+      expect(catalog.analysisStatus).toBe("not_processed");
+      expect(await db.catalogExtractionJob.count({ where: { catalogId: catalog.id } })).toBe(0);
+      const start = await request(app.server).post(`/api/v1/catalogs/${catalog.id}/extraction`).set(unsafeHeaders(adminCookie));
+      expect(start.status).toBe(202);
 
       const res = await request(app.server)
         .get(`/api/v1/catalogs/${catalog.id}/extraction`)
@@ -354,8 +383,18 @@ describe("supplier catalogs", () => {
       expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_VIEW", entityId: catalog.id } })).toBe(1);
     });
 
+    it("reuses one queued job when admins start analysis concurrently", async () => {
+      const catalog = await uploadAsAdmin();
+      const start = () => request(app.server).post(`/api/v1/catalogs/${catalog.id}/extraction`).set(unsafeHeaders(adminCookie));
+      const responses = await Promise.all([start(), start()]);
+      expect(responses.map((response) => response.status)).toEqual([202, 202]);
+      expect(responses[0]!.body.job.jobId).toBe(responses[1]!.body.job.jobId);
+      expect(await db.catalogExtractionJob.count({ where: { catalogId: catalog.id } })).toBe(1);
+    });
+
     it("allows admins to retry a failed analysis and denies retry to standard users", async () => {
       const catalog = await uploadAsAdmin();
+      await request(app.server).post(`/api/v1/catalogs/${catalog.id}/extraction`).set(unsafeHeaders(adminCookie));
       await db.catalogExtractionJob.updateMany({
         where: { catalogId: catalog.id },
         data: { status: "failed", stage: "failed", processingError: "Test failure" },
@@ -373,11 +412,12 @@ describe("supplier catalogs", () => {
       expect(retried.status).toBe(202);
       expect(retried.body.job).toMatchObject({ status: "queued", stage: "queued", progress: 0 });
       expect(await db.catalogExtractionJob.count({ where: { catalogId: catalog.id } })).toBe(2);
-      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_START", entityId: catalog.id } })).toBe(1);
+      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_START", entityId: catalog.id } })).toBe(2);
     });
 
     it("allows admins to rerun a completed analysis", async () => {
       const catalog = await uploadAsAdmin();
+      await request(app.server).post(`/api/v1/catalogs/${catalog.id}/extraction`).set(unsafeHeaders(adminCookie));
       await db.catalogExtractionJob.updateMany({
         where: { catalogId: catalog.id },
         data: { status: "processed", stage: "completed", progress: 100, completedAt: new Date() },
@@ -391,7 +431,7 @@ describe("supplier catalogs", () => {
       expect(retried.status).toBe(202);
       expect(retried.body.job).toMatchObject({ status: "queued", stage: "queued", progress: 0 });
       expect(await db.catalogExtractionJob.count({ where: { catalogId: catalog.id } })).toBe(2);
-      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_START", entityId: catalog.id } })).toBe(1);
+      expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_START", entityId: catalog.id } })).toBe(2);
     });
 
     it("requires authentication and returns 404 for an unknown catalog", async () => {
@@ -416,7 +456,7 @@ describe("supplier catalogs", () => {
       const uploadResult = await upload(adminCookie, pdf);
       expect(uploadResult.status).toBe(201);
       const catalogId = uploadResult.body.catalog.id as string;
-      const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId } });
+      const job = await db.catalogExtractionJob.create({ data: { catalogId } });
 
       await processCatalogExtraction(
         job.id,
@@ -453,7 +493,7 @@ describe("supplier catalogs", () => {
       const uploadResult = await upload(adminCookie, textPdf([]));
       expect(uploadResult.status).toBe(201);
       const catalogId = uploadResult.body.catalog.id as string;
-      const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId } });
+      const job = await db.catalogExtractionJob.create({ data: { catalogId } });
 
       await processCatalogExtraction(
         job.id,
@@ -489,7 +529,7 @@ describe("supplier catalogs", () => {
       const uploadResult = await upload(adminCookie, textPdf([]));
       expect(uploadResult.status).toBe(201);
       const catalogId = uploadResult.body.catalog.id as string;
-      const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId } });
+      const job = await db.catalogExtractionJob.create({ data: { catalogId } });
 
       await processCatalogExtraction(
         job.id,
@@ -545,6 +585,402 @@ describe("supplier catalogs", () => {
         { name: "Material", type: "text" },
         { name: "Finish", type: "text" },
       ]));
+    });
+
+    it("sends the entire PDF once and stores Gemini results as review candidates", async () => {
+      const uploaded = await request(app.server)
+        .post("/api/v1/catalogs")
+        .set(unsafeHeaders(adminCookie))
+        .field("name", "Example catalog")
+        .attach("file", textPdf(["Example catalog"]), { filename: "example.pdf", contentType: "application/pdf" });
+      expect(uploaded.status).toBe(201);
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server).post(`/api/v1/catalogs/${catalogId}/extraction`).set(unsafeHeaders(adminCookie));
+      expect(started.status).toBe(202);
+      let calls = 0;
+      await processGeminiCatalogExtraction(started.body.job.jobId, {
+        db, storage: createLocalAssetStorage(uploadDir), maxPages: 100,
+      }, async (pdf, totalPages) => {
+        calls++;
+        expect(pdf).toEqual(textPdf(["Example catalog"]));
+        expect(totalPages).toBe(1);
+        return { supplier: { name: "CATALOG SUPPLIER", sourcePage: 1, excerpt: "Supplied by Catalog Supplier" }, products: [{
+          name: "Example", sku: "EX-123", description: null, categories: ["Hardware"],
+          attributes: [{ name: "Material", value: "Steel", sourcePage: 1 }], pageNumbers: [1], excerpt: "Example EX-123",
+        }] };
+      });
+      expect(calls).toBe(1);
+      const job = await db.catalogExtractionJob.findUniqueOrThrow({ where: { id: started.body.job.jobId } });
+      expect(job.status).toBe("processed");
+      expect(job.results).toMatchObject({
+        supplier: { name: "CATALOG SUPPLIER", sourcePage: 1, excerpt: "Supplied by Catalog Supplier" },
+        products: [{ name: "Example", sku: "EX-123", attributes: [{ name: "Material", value: "Steel", sourcePage: 1 }], source: { pageNumbers: [1] }, validationStatus: "pending" }],
+        pages: [{ pageNumber: 1, textSource: "gemini", confidence: null }],
+      });
+      expect(await db.product.count()).toBe(0);
+      expect(await db.attributeSet.count()).toBe(0);
+      expect((await db.catalog.findUniqueOrThrow({ where: { id: catalogId } })).supplierId).toBeNull();
+      const review = await request(app.server).get(`/api/v1/catalogs/${catalogId}/extraction`).set("Cookie", readerCookie);
+      expect(review.status).toBe(200);
+      expect(review.body.matchingSupplier).toEqual({ id: supplierId, name: "Catalog Supplier" });
+      expect(await db.supplier.count()).toBe(1);
+      const existing = await request(app.server).post(`/api/v1/suppliers/${supplierId}/products`)
+        .set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Existing" }, supplierSku: "ex-123", cost: "1", currency: "USD", minQuantity: 1 });
+      expect(existing.status).toBe(201);
+      const previewUrl = `/api/v1/catalogs/${catalogId}/extraction/preview`;
+      const previewBody = { jobId: started.body.job.jobId, indexes: [0] };
+      const beforeAssignment = await request(app.server).post(previewUrl).set(unsafeHeaders(adminCookie)).send(previewBody);
+      expect(beforeAssignment.status).toBe(200);
+      expect(beforeAssignment.body).toMatchObject({ supplierId: null, products: [{ duplicateExisting: false }] });
+      const assigned = await request(app.server).patch(`/api/v1/catalogs/${catalogId}`)
+        .set(unsafeHeaders(adminCookie)).send({ supplierId });
+      expect(assigned.status).toBe(200);
+      const afterAssignment = await request(app.server).post(previewUrl).set(unsafeHeaders(adminCookie)).send(previewBody);
+      expect(afterAssignment.status).toBe(200);
+      expect(afterAssignment.body).toMatchObject({ supplierId, products: [{ duplicateExisting: true }] });
+      const assignedReview = await request(app.server).get(`/api/v1/catalogs/${catalogId}/extraction`).set("Cookie", readerCookie);
+      expect(assignedReview.body.matchingSupplier).toBeNull();
+      expect(await db.auditLog.count({ where: { entityId: catalogId, action: "CATALOG_UPDATE" } })).toBe(1);
+    });
+
+    it("does not save partial results when Gemini fails", async () => {
+      const uploaded = await upload(adminCookie, textPdf(["Example catalog"]));
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server).post(`/api/v1/catalogs/${catalogId}/extraction`).set(unsafeHeaders(adminCookie));
+      await expect(processGeminiCatalogExtraction(started.body.job.jobId, {
+        db, storage: createLocalAssetStorage(uploadDir), maxPages: 100,
+      }, async () => { throw new Error("Gemini request failed"); })).rejects.toThrow("Gemini request failed");
+      const job = await db.catalogExtractionJob.findUniqueOrThrow({ where: { id: started.body.job.jobId } });
+      expect(job.results).toBeNull();
+      expect(await db.product.count()).toBe(0);
+    });
+
+    it("requires reviewed typed values and rolls back an invalid bulk import", async () => {
+      const uploaded = await upload(adminCookie, textPdf(["Example catalog"]));
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server).post(`/api/v1/catalogs/${catalogId}/extraction`).set(unsafeHeaders(adminCookie));
+      const jobId = started.body.job.jobId as string;
+      await processGeminiCatalogExtraction(jobId, {
+        db, storage: createLocalAssetStorage(uploadDir), maxPages: 100,
+      }, async () => ({
+        products: [
+          { name: "First", sku: "T1", description: null, categories: [], attributes: [
+            { name: "Length", value: "30 mm", sourcePage: 1 },
+            { name: "Available", value: "No", sourcePage: 1 },
+            { name: "Finish", value: "Matte", sourcePage: 1 },
+            { name: "New", value: "Example", sourcePage: 1 },
+          ], pageNumbers: [1], excerpt: "First" },
+          { name: "Second", sku: "T2", description: null, categories: [], attributes: [
+            { name: "Length", value: "50 mm", sourcePage: 1 },
+          ], pageNumbers: [1], excerpt: "Second" },
+        ],
+      }));
+      const length = await request(app.server).post("/api/v1/attributes").set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Length" }, dataType: "decimal", unit: "mm" });
+      const available = await request(app.server).post("/api/v1/attributes").set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Available" }, dataType: "boolean" });
+      const finish = await request(app.server).post("/api/v1/attributes").set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Finish" }, dataType: "select", options: [{ en: "Matte" }, { en: "Gloss" }] });
+      expect([length.status, available.status, finish.status]).toEqual([201, 201, 201]);
+      const optionId = finish.body.attribute.options[0].id as string;
+      const url = `/api/v1/catalogs/${catalogId}/extraction/import`;
+      const first = { index: 0, sku: "T1", cost: "1", currency: "USD", minQuantity: 1, attributeValues: [
+        { name: "Length", value: "30" }, { name: "Available", value: false }, { name: "Finish", value: optionId },
+      ] };
+      const second = { index: 1, sku: "T2", cost: "2", currency: "USD", minQuantity: 1,
+        attributeValues: [{ name: "Length", value: "50" }] };
+      const body = { jobId, supplierId, products: [first, second], mappings: [
+        { name: "Length", attributeId: length.body.attribute.id },
+        { name: "Available", attributeId: available.body.attribute.id },
+        { name: "Finish", attributeId: finish.body.attribute.id },
+        { name: "New", attributeId: null },
+      ] };
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({
+        jobId, supplierId, products: [{ index: 0, sku: "T1" }],
+      })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({
+        ...body, products: [{ ...first, attributeValues: [] }, second],
+      })).status).toBe(400);
+      const invalidLength = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({
+        ...body, products: [first, { ...second, attributeValues: [{ name: "Length", value: "50 mm" }] }],
+      });
+      expect(invalidLength.status).toBe(400);
+      expect(invalidLength.body.error.details).toEqual(expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining("Second: Length:") }),
+      ]));
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({
+        ...body, products: [{ ...first, attributeValues: [
+          { name: "Length", value: "30" }, { name: "Available", value: false }, { name: "Finish", value: NIL_UUID },
+        ] }, second],
+      })).status).toBe(400);
+      expect(await db.product.count()).toBe(0);
+      expect(await db.attributeField.count({ where: { attributeSetId: null } })).toBe(3);
+      const imported = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send(body);
+      expect(imported.status).toBe(200);
+      expect(imported.body.created).toHaveLength(2);
+      const stored = await request(app.server).get(`/api/v1/products/${imported.body.created[0]}`).set("Cookie", readerCookie);
+      expect(stored.body.product.attributeValues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ fieldId: length.body.attribute.id, value: "30" }),
+        expect.objectContaining({ fieldId: available.body.attribute.id, value: false }),
+        expect.objectContaining({ fieldId: finish.body.attribute.id, value: optionId }),
+        expect.objectContaining({ name: expect.objectContaining({ en: "New" }), value: "Example" }),
+      ]));
+      const repeated = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({
+        ...body, products: [{ index: 0, sku: "T1" }, { index: 1, sku: "T2" }], mappings: [],
+      });
+      expect(repeated.status).toBe(200);
+      expect(repeated.body.skipped).toEqual([0, 1]);
+    });
+
+    it("reviews category decisions and imports approved hierarchy assignments transactionally", async () => {
+      const uploaded = await upload(adminCookie, textPdf(["Example catalog"]));
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server).post(`/api/v1/catalogs/${catalogId}/extraction`).set(unsafeHeaders(adminCookie));
+      const jobId = started.body.job.jobId as string;
+      await processGeminiCatalogExtraction(jobId, {
+        db, storage: createLocalAssetStorage(uploadDir), maxPages: 100,
+      }, async () => ({
+        products: [
+          { name: "First", sku: "C1", description: null, categories: ["Blinds", "Zebra"], attributes: [], pageNumbers: [1], excerpt: "First" },
+          { name: "Second", sku: "C2", description: null, categories: ["Zebra"], attributes: [], pageNumbers: [1], excerpt: "Second" },
+        ],
+      }));
+      async function category(name: string, parentId?: string) {
+        const result = await request(app.server).post("/api/v1/categories").set(unsafeHeaders(adminCookie)).send({ name: { en: name }, parentId });
+        expect(result.status).toBe(201);
+        return result.body.category.id as string;
+      }
+      const home = await category("Home");
+      const smart = await category("Smart");
+      const firstBlinds = await category("Blinds", home);
+      const secondBlinds = await category("Blinds", smart);
+      const previewUrl = `/api/v1/catalogs/${catalogId}/extraction/preview`;
+      const previewRequest = { jobId, indexes: [0, 1] };
+      const preview = await request(app.server).post(previewUrl).set(unsafeHeaders(adminCookie)).send(previewRequest);
+      expect(preview.status).toBe(200);
+      expect(preview.body.products[0].categories).toEqual([
+        { name: "Blinds", matches: expect.arrayContaining([firstBlinds, secondBlinds]) },
+        { name: "Zebra", matches: [] },
+      ]);
+      const importUrl = `/api/v1/catalogs/${catalogId}/extraction/import`;
+      const body = {
+        jobId, supplierId, categoryTreeVersion: preview.body.categoryTree.version,
+        products: [
+          { index: 0, sku: "C1", categoryDecisions: [
+            { name: "Blinds", action: "reuse", categoryId: firstBlinds },
+            { name: "Zebra", action: "create", parentId: firstBlinds },
+          ], additionalCategoryIds: [smart] },
+          { index: 1, sku: "C2", categoryDecisions: [{ name: "Zebra", action: "create", parentId: firstBlinds }] },
+        ],
+      };
+      expect((await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie))
+        .send({ ...body, products: [{ index: 0, sku: "C1" }] })).status).toBe(400);
+      expect((await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie))
+        .send({ ...body, products: [body.products[0], { ...body.products[1], categoryDecisions: [] }] })).status).toBe(400);
+      expect(await db.category.count({ where: { nameKey: "zebra" } })).toBe(0);
+      expect(await db.product.count()).toBe(0);
+      await category("New category");
+      expect((await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie)).send(body)).status).toBe(409);
+      const refreshed = await request(app.server).post(previewUrl).set(unsafeHeaders(adminCookie)).send(previewRequest);
+      const imported = await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie))
+        .send({ ...body, categoryTreeVersion: refreshed.body.categoryTree.version });
+      expect(imported.status).toBe(200);
+      expect(imported.body.created).toHaveLength(2);
+      const zebra = await db.category.findMany({ where: { nameKey: "zebra" } });
+      expect(zebra).toHaveLength(1);
+      expect(zebra[0]!.parentId).toBe(firstBlinds);
+      const first = await db.product.findUniqueOrThrow({ where: { id: imported.body.created[0] }, include: { categories: true } });
+      const second = await db.product.findUniqueOrThrow({ where: { id: imported.body.created[1] }, include: { categories: true } });
+      expect(first.categories.map((link) => link.categoryId)).toEqual(expect.arrayContaining([firstBlinds, smart, zebra[0]!.id]));
+      expect(second.categories.map((link) => link.categoryId)).toEqual([zebra[0]!.id]);
+      expect(await db.auditLog.count({ where: { entityId: zebra[0]!.id, action: "CATEGORY_CREATE" } })).toBe(1);
+      const repeated = await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie)).send(body);
+      expect(repeated.status).toBe(200);
+      expect(repeated.body.skipped).toEqual([0, 1]);
+    });
+
+    it("reuses matched attributes, creates approved attributes, and skips unselected attributes", async () => {
+      const uploaded = await upload(adminCookie, textPdf(["Example catalog"]));
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server).post(`/api/v1/catalogs/${catalogId}/extraction`).set(unsafeHeaders(adminCookie));
+      const jobId = started.body.job.jobId as string;
+      await processGeminiCatalogExtraction(jobId, {
+        db, storage: createLocalAssetStorage(uploadDir), maxPages: 100,
+      }, async () => ({
+        products: [
+          { name: "First", sku: "AUTO-1", description: null, categories: [], attributes: [
+            { name: "Material", value: "Steel", sourcePage: 1 },
+            { name: "Finish", value: "Matte", sourcePage: 1 },
+            { name: "Weight", value: "10 kg", sourcePage: 1 },
+          ], pageNumbers: [1], excerpt: "First" },
+          { name: "Second", sku: "AUTO-2", description: null, categories: [], attributes: [
+            { name: "Matériau", value: "Wood", sourcePage: 1 },
+            { name: "Finish", value: "Gloss", sourcePage: 1 },
+            { name: "Weight", value: "20 kg", sourcePage: 1 },
+          ], pageNumbers: [1], excerpt: "Second" },
+        ],
+      }));
+      const material = await request(app.server).post("/api/v1/attributes").set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Material", fr: "Matériau" } });
+      expect(material.status).toBe(201);
+      const url = `/api/v1/catalogs/${catalogId}/extraction/import`;
+      const base = { jobId, supplierId, products: [
+        { index: 0, sku: "AUTO-1" }, { index: 1, sku: "AUTO-2", cost: "0", currency: "USD", minQuantity: 0 },
+      ] };
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie))
+        .send({ ...base, products: [{ index: 0, sku: "" }] })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie))
+        .send({ ...base, products: [{ index: 0, sku: "AUTO-1", cost: "-1" }] })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie))
+        .send({ ...base, products: [{ index: 0, sku: "AUTO-1", currency: "BAD" }] })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send(base)).status).toBe(400);
+      expect(await db.product.count()).toBe(0);
+      expect(await db.attributeField.count({ where: { attributeSetId: null } })).toBe(1);
+      const mappings = [
+        { name: "Finish", attributeId: null },
+        { name: "Weight", attributeId: null, skip: true },
+      ];
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie))
+        .send({ ...base, mappings: [{ name: "Weight", attributeId: material.body.attribute.id, skip: true }] })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie))
+        .send({ ...base, products: [{ index: 0, sku: "AUTO-1", attributeValues: [{ name: "Weight", value: "10 kg" }] }], mappings })).status).toBe(400);
+      const imported = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({ ...base, mappings });
+      expect(imported.status).toBe(200);
+      expect(imported.body.created).toHaveLength(2);
+      const first = await request(app.server).get(`/api/v1/products/${imported.body.created[0]}`).set("Cookie", readerCookie);
+      expect(first.body.product).toMatchObject({
+        minQuantity: null, cost: null, currency: null,
+        attributeValues: expect.arrayContaining([
+          expect.objectContaining({ fieldId: material.body.attribute.id, value: "Steel" }),
+          expect.objectContaining({ name: expect.objectContaining({ en: "Finish" }), value: "Matte" }),
+        ]),
+      });
+      expect(await db.attributeField.count({ where: { attributeSetId: null } })).toBe(2);
+      expect(await db.attributeField.count({ where: { nameEn: "Weight" } })).toBe(0);
+      expect(first.body.product.attributeValues).toHaveLength(2);
+      const second = await request(app.server).get(`/api/v1/products/${imported.body.created[1]}`).set("Cookie", readerCookie);
+      expect(second.body.product).toMatchObject({ minQuantity: 0, cost: "0.00", currency: "USD" });
+      expect(second.body.product.attributeValues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ fieldId: material.body.attribute.id, value: "Wood" }),
+        expect.objectContaining({ name: expect.objectContaining({ en: "Finish" }), value: "Gloss" }),
+      ]));
+      expect(second.body.product.attributeValues).toHaveLength(2);
+      const edited = await request(app.server).put(`/api/v1/products/${imported.body.created[0]}`)
+        .set(unsafeHeaders(adminCookie)).send({
+          name: { en: "Updated", fr: "Updated" }, supplierSku: "AUTO-1", minQuantity: null, cost: null, currency: null,
+        });
+      expect(edited.status).toBe(200);
+      expect(edited.body.product).toMatchObject({ minQuantity: null, cost: null, currency: null });
+      const repeated = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send(base);
+      expect(repeated.body).toMatchObject({ created: [], skipped: [0, 1] });
+    });
+
+    it("previews selected products and potential field matches without importing", async () => {
+      const uploaded = await upload(adminCookie, textPdf(["Example catalog"]));
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server).post(`/api/v1/catalogs/${catalogId}/extraction`).set(unsafeHeaders(adminCookie));
+      const jobId = started.body.job.jobId as string;
+      await processGeminiCatalogExtraction(jobId, {
+        db, storage: createLocalAssetStorage(uploadDir), maxPages: 100,
+      }, async () => ({
+        products: [
+          {
+            name: "First", sku: "EX-123", description: null, categories: [],
+            attributes: [{ name: "Material", value: "Steel", sourcePage: 1 }, { name: "Overall Length", value: "30 mm", sourcePage: 1 }],
+            pageNumbers: [1], excerpt: "First",
+          },
+          {
+            name: "Second", sku: null, description: null, categories: [],
+            attributes: [{ name: "material", value: "Wood", sourcePage: 1 }, { name: "Finish", value: "Matte", sourcePage: 1 }],
+            pageNumbers: [1], excerpt: "Second",
+          },
+          {
+            name: "Third", sku: "ex-123", description: null, categories: [],
+            attributes: [], pageNumbers: [1], excerpt: "Third",
+          },
+        ],
+      }));
+      const set = await request(app.server).post("/api/v1/attribute-sets").set(unsafeHeaders(adminCookie)).send({
+        name: { en: "Hardware" },
+        fields: [
+          { name: { en: "Material" }, dataType: "text" },
+          { name: { en: "Length" }, dataType: "decimal", unit: "mm" },
+        ],
+      });
+      expect(set.status).toBe(201);
+      const product = await request(app.server).post(`/api/v1/suppliers/${supplierId}/products`).set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Existing" }, supplierSku: "ex-123", cost: "1", currency: "USD", minQuantity: 1 });
+      expect(product.status).toBe(201);
+      const url = `/api/v1/catalogs/${catalogId}/extraction/preview`;
+      const payload = { jobId, indexes: [0, 1, 2] };
+      expect((await request(app.server).post(url).set(unsafeHeaders()).send(payload)).status).toBe(401);
+      expect((await request(app.server).post(url).set(unsafeHeaders(readerCookie)).send(payload)).status).toBe(403);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({ jobId, indexes: [0, 0] })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({ jobId, indexes: [3] })).status).toBe(400);
+      expect((await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({ jobId: NIL_UUID, indexes: [0] })).status).toBe(409);
+      const response = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send(payload);
+      expect(response.status).toBe(200);
+      expect(response.body.products).toMatchObject([
+        { name: "First", duplicateExisting: true, duplicateInSelection: true, attributeNames: ["Material", "Overall Length"], missing: [] },
+        { name: "Second", duplicateExisting: false, attributeNames: ["Material", "Finish"], attributeValues: [{ name: "Material", value: "Wood" }, { name: "Finish", value: "Matte" }], missing: ["sku"] },
+        { name: "Third", duplicateExisting: true, duplicateInSelection: true, attributeNames: [] },
+      ]);
+      expect(response.body.attributes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "Material", status: "review", examples: ["Steel", "Wood"] }),
+        expect.objectContaining({ name: "Overall Length", status: "review", examples: ["30 mm"] }),
+        expect.objectContaining({ name: "Finish", status: "create", examples: ["Matte"] }),
+      ]));
+      expect(await db.product.count()).toBe(1);
+      expect(await db.attributeField.count()).toBe(2);
+      expect(await db.auditLog.count({ where: { entityId: catalogId, action: "CATALOG_ANALYSIS_VIEW" } })).toBe(1);
+      const individual = await request(app.server).post(url).set(unsafeHeaders(adminCookie)).send({ jobId, indexes: [1] });
+      expect(individual.body.products).toHaveLength(1);
+      expect(individual.body.attributes.find((attribute: { name: string }) => attribute.name === "material").examples).toEqual(["Wood"]);
+
+      const independent = await request(app.server).post("/api/v1/attributes").set(unsafeHeaders(adminCookie))
+        .send({ name: { en: "Material" } });
+      expect(independent.status).toBe(201);
+      const importUrl = `/api/v1/catalogs/${catalogId}/extraction/import`;
+      const importBody = {
+        jobId, supplierId,
+        products: [
+          { index: 0, sku: "EX-123" },
+          { index: 1, sku: "NEW-2", cost: "12.50", currency: "USD", minQuantity: 2 },
+          { index: 2, sku: "EX-123" },
+        ],
+        mappings: [{ name: "material", attributeId: independent.body.attribute.id }, { name: "Finish", attributeId: null }],
+      };
+      expect((await request(app.server).post(importUrl).set(unsafeHeaders()).send(importBody)).status).toBe(401);
+      expect((await request(app.server).post(importUrl).set(unsafeHeaders(readerCookie)).send(importBody)).status).toBe(403);
+      expect((await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie))
+        .send({ ...importBody, supplierId: NIL_UUID })).status).toBe(409);
+      const conflictingMappings = await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie))
+        .send({ ...importBody, mappings: [
+          { name: "material", attributeId: independent.body.attribute.id },
+          { name: "Finish", attributeId: independent.body.attribute.id },
+        ] });
+      expect(conflictingMappings.status).toBe(400);
+      expect(await db.product.count()).toBe(1);
+      expect(await db.attributeField.count({ where: { attributeSetId: null } })).toBe(1);
+      const imported = await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie)).send(importBody);
+      expect(imported.status).toBe(200);
+      expect(imported.body.created).toHaveLength(1);
+      expect(imported.body.skipped).toEqual([0, 2]);
+      const stored = await request(app.server).get(`/api/v1/products/${imported.body.created[0]}`).set("Cookie", readerCookie);
+      expect(stored.body.product).toMatchObject({
+        supplierSku: "NEW-2", cost: "12.50",
+        attributeValues: expect.arrayContaining([
+          expect.objectContaining({ name: expect.objectContaining({ en: "Material" }), value: "Wood" }),
+          expect.objectContaining({ name: expect.objectContaining({ en: "Finish" }), value: "Matte" }),
+        ]),
+      });
+      expect(await db.auditLog.count({ where: { entityId: imported.body.created[0], action: "PRODUCT_CREATE" } })).toBe(1);
+      const repeated = await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie)).send(importBody);
+      expect(repeated.status).toBe(200);
+      expect(repeated.body.created).toEqual([]);
+      expect(repeated.body.skipped).toEqual([0, 1, 2]);
+      expect(await db.product.count()).toBe(2);
     });
   });
 

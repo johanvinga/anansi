@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Database } from "../db.js";
+import { categoryInputSchema } from "../lib/category-input.js";
 import { isCurrencyCode } from "../lib/currency.js";
 import { translatedNameInput, translatedNameUpdate, translatedTextInput } from "../lib/translations.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
@@ -33,11 +34,6 @@ const attributeValueSchema = z.object({
   value: z.union([z.string().max(5000), z.number(), z.boolean(), z.null()]),
 });
 
-const categoryInputSchema = z.union([
-  z.object({ id: uuidSchema }),
-  z.object({ name: z.string().trim().min(1).max(100) }),
-]);
-
 const productBodySchema = z.object({
   name: translatedNameInput(200),
   description: translatedTextInput,
@@ -52,16 +48,25 @@ const productBodySchema = z.object({
   categories: z.array(categoryInputSchema).max(100).optional(),
   attributeSetId: uuidSchema.nullish(),
   attributeValues: z.array(attributeValueSchema).max(200).optional(),
+  directAttributeValues: z.array(attributeValueSchema).max(200).optional(),
 });
 
 const productUpdateSchema = productBodySchema.extend({
   name: translatedNameUpdate(200),
   supplierId: uuidSchema.optional(),
+  minQuantity: productBodySchema.shape.minQuantity.nullable(),
+  cost: costSchema.nullable(),
+  currency: currencySchema.nullable(),
 });
 
 const listQuerySchema = paginationSchema.extend({
   q: z.string().trim().max(200).optional(),
   supplierId: uuidSchema.optional(),
+  category: z.preprocess(
+    (value) => value === undefined ? [] : Array.isArray(value) ? value : [value],
+    z.array(uuidSchema).max(20),
+  ),
+  uncategorized: z.enum(["true", "false"]).optional().transform((value) => value === "true"),
 });
 
 const idParams = z.object({ id: uuidSchema });

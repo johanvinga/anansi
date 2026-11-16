@@ -4,6 +4,7 @@ import type { CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../gen
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
 import { hasPdfSignature, PDF_MIME_TYPE, sanitizeFileName } from "../lib/pdf.js";
+import { nameKeyOf } from "../lib/text.js";
 import type { CatalogExtractionQueue } from "./catalog-extraction.queue.js";
 import {
   AuditAction,
@@ -12,7 +13,7 @@ import {
   type AuditRequestContext,
 } from "./audit.service.js";
 import { removeStoredFiles, type AssetDeps, type UploadedFile } from "./asset.service.js";
-import { resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
 
 export interface CatalogMetadata {
   name: string;
@@ -143,7 +144,7 @@ export async function listAllCatalogs(
   request: AuditRequestContext,
   filters: ListCatalogsFilters,
 ) {
-  const categoryIds = filters.categoryIds ?? [];
+  const categoryIds = await expandCategoryIds(db, filters.categoryIds ?? []);
   const where: Prisma.CatalogWhereInput = {
     OR: filters.q
       ? [
@@ -256,7 +257,6 @@ export async function uploadCatalog(
   supplierId: string | null,
   file: UploadedFile,
   metadata: CatalogMetadata,
-  extractionQueue: CatalogExtractionQueue | undefined,
 ): Promise<CatalogDto> {
   if (file.mimeType !== PDF_MIME_TYPE || !hasPdfSignature(file.buffer)) {
     throw new AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only PDF files can be uploaded.");
@@ -270,13 +270,10 @@ export async function uploadCatalog(
 
   let saved: Awaited<ReturnType<typeof createCatalogWithExtractionJob>>;
   try {
-    saved = await createCatalogWithExtractionJob(deps.db, request, supplierId, file, metadata, storageKey, Boolean(extractionQueue));
+    saved = await createCatalogWithExtractionJob(deps.db, request, supplierId, file, metadata, storageKey);
   } catch (error) {
     await removeStoredFiles(deps.storage, [storageKey], deps.log);
     throw error;
-  }
-  if (extractionQueue && saved.extractionJob) {
-    await enqueueExtraction(deps.db, extractionQueue, saved.extractionJob, deps.log);
   }
   const catalog = await deps.db.catalog.findUniqueOrThrow({ where: { id: saved.catalog.id }, include: catalogInclude });
   return toCatalogDto(catalog);
@@ -289,7 +286,6 @@ async function createCatalogWithExtractionJob(
   file: UploadedFile,
   metadata: CatalogMetadata,
   storageKey: string,
-  extractionEnabled: boolean,
 ) {
   return db.$transaction(async (tx) => {
   if (supplierId) await assertSupplierExists(tx, supplierId);
@@ -304,15 +300,12 @@ async function createCatalogWithExtractionJob(
       mimeType: PDF_MIME_TYPE,
       sizeBytes: BigInt(file.buffer.byteLength),
       uploadedById: request.actor.userId,
-      analysisStatus: extractionEnabled ? "queued" : "not_processed",
+      analysisStatus: "not_processed",
       categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
     },
     include: catalogInclude,
   });
   if (supplierId) await mergeSupplierCategories(tx, request, supplierId, categoryIds);
-  const extractionJob = extractionEnabled
-    ? await tx.catalogExtractionJob.create({ data: { catalogId: row.id } })
-    : null;
   await recordAudit(tx, request, {
     action: AuditAction.CATALOG_UPLOAD,
     outcome: "success",
@@ -330,7 +323,7 @@ async function createCatalogWithExtractionJob(
       },
     ),
   });
-  return { catalog: row, extractionJob };
+  return { catalog: row };
   });
 }
 
@@ -369,7 +362,11 @@ export async function getCatalogExtraction(
   db: Database,
   request: AuditRequestContext,
   catalogId: string,
-): Promise<{ analysisStatus: CatalogAnalysisStatus; job: CatalogExtractionJobDto | null }> {
+): Promise<{
+  analysisStatus: CatalogAnalysisStatus;
+  job: CatalogExtractionJobDto | null;
+  matchingSupplier: { id: string; name: string } | null;
+}> {
   const catalog = await db.catalog.findUnique({
   where: { id: catalogId },
   include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
@@ -382,7 +379,20 @@ export async function getCatalogExtraction(
   entityId: catalogId,
   });
   const job = catalog.extractionJobs[0];
-  return { analysisStatus: catalog.analysisStatus, job: job ? toExtractionJobDto(job) : null };
+  const results = job?.results;
+  const suggestion = results && typeof results === "object" && !Array.isArray(results)
+    ? results.supplier
+    : null;
+  const suggestedName = suggestion && typeof suggestion === "object" && !Array.isArray(suggestion)
+    ? suggestion.name
+    : null;
+  const matchingSupplier = !catalog.supplierId && typeof suggestedName === "string" && suggestedName.trim()
+    ? await db.supplier.findUnique({
+      where: { nameKey: nameKeyOf(suggestedName) },
+      select: { id: true, name: true },
+    })
+    : null;
+  return { analysisStatus: catalog.analysisStatus, job: job ? toExtractionJobDto(job) : null, matchingSupplier };
 }
 
 export async function startCatalogExtraction(
@@ -391,31 +401,26 @@ export async function startCatalogExtraction(
   catalogId: string,
   extractionQueue: CatalogExtractionQueue,
 ): Promise<CatalogExtractionJobDto> {
-  const existing = await deps.db.catalog.findUnique({
-  where: { id: catalogId },
-  include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
-  });
-  if (!existing) throw errors.notFound("Catalog");
-  const latest = existing.extractionJobs[0];
-  if (latest?.status === "processing") {
-  throw errors.conflict("Catalog analysis is already running.");
-  }
-  if (latest?.status === "queued") {
-  await enqueueExtraction(deps.db, extractionQueue, latest, deps.log);
-  const current = await deps.db.catalogExtractionJob.findUniqueOrThrow({ where: { id: latest.id } });
-  return toExtractionJobDto(current);
-  }
-
   const job = await deps.db.$transaction(async (tx) => {
-  const created = await tx.catalogExtractionJob.create({ data: { catalogId } });
-  await tx.catalog.update({ where: { id: catalogId }, data: { analysisStatus: "queued" } });
-  await recordAudit(tx, request, {
-    action: AuditAction.CATALOG_ANALYSIS_START,
-    outcome: "success",
-    entityType: "Catalog",
-    entityId: catalogId,
-  });
-  return created;
+    await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
+    const existing = await tx.catalog.findUnique({
+      where: { id: catalogId },
+      include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    if (!existing) throw errors.notFound("Catalog");
+    const latest = existing.extractionJobs[0];
+    if (latest?.status === "processing") throw errors.conflict("Catalog analysis is already running.");
+    const queued = latest?.status === "queued"
+      ? latest
+      : await tx.catalogExtractionJob.create({ data: { catalogId } });
+    await tx.catalog.update({ where: { id: catalogId }, data: { analysisStatus: "queued" } });
+    await recordAudit(tx, request, {
+      action: AuditAction.CATALOG_ANALYSIS_START,
+      outcome: "success",
+      entityType: "Catalog",
+      entityId: catalogId,
+    });
+    return queued;
   });
   await enqueueExtraction(deps.db, extractionQueue, job, deps.log);
   const queued = await deps.db.catalogExtractionJob.findUniqueOrThrow({ where: { id: job.id } });

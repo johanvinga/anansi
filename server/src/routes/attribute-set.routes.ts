@@ -5,10 +5,13 @@ import { parseInput, uuidSchema } from "../lib/validation.js";
 import { translatedNameInput, translatedNameUpdate } from "../lib/translations.js";
 import {
   addField,
+  addSharedField,
   createAttributeSet,
+  createSharedField,
   deleteAttributeSet,
   getAttributeSet,
   listAttributeSets,
+  makeFieldShared,
   removeField,
   renameAttributeSet,
   reorderFields,
@@ -84,6 +87,26 @@ export function registerAttributeSetRoutes(app: FastifyInstance, db: Database, g
     const body = parseInput(createFieldSchema, request.body);
     const attributeSet = await addField(db, auditContext(request), id, body);
     return reply.status(201).send({ attributeSet });
+  });
+
+  app.post("/attribute-sets/:id/shared-fields", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { id } = parseInput(setParams, request.params);
+    const body = parseInput(z.object({ attributeId: uuidSchema, isRequired: z.boolean().default(false) }), request.body);
+    const attributeSet = await addSharedField(db, auditContext(request), id, body.attributeId, body.isRequired);
+    return reply.status(201).send({ attributeSet });
+  });
+
+  app.post("/attribute-sets/:id/shared-fields/create", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { id } = parseInput(setParams, request.params);
+    const input = parseInput(createFieldSchema, request.body);
+    const attributeSet = await createSharedField(db, auditContext(request), id, input);
+    return reply.status(201).send({ attributeSet });
+  });
+
+  app.post("/attribute-sets/:id/fields/:fieldId/share", { preHandler: guards.requireAdmin }, async (request) => {
+    const { id, fieldId } = parseInput(fieldParams, request.params);
+    const { attributeId } = parseInput(z.object({ attributeId: uuidSchema.nullable() }), request.body);
+    return { attributeSet: await makeFieldShared(db, auditContext(request), id, fieldId, attributeId) };
   });
 
   app.post("/attribute-sets/:id/fields/reorder", { preHandler: guards.requireAdmin }, async (request) => {

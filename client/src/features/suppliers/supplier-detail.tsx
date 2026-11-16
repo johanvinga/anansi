@@ -214,6 +214,7 @@ interface CategoriesTabProps {
 }
 
 function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabProps) {
+  const queryClient = useQueryClient();
   const [chips, setChips] = useState<CategoryChip[]>(chipsFrom(supplier.assignedCategories));
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
@@ -231,6 +232,7 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
         country: supplier.country,
         categories: toCategoryInputs(chips),
       });
+      await queryClient.invalidateQueries({ queryKey: ["categories"] });
       onSaved(result.supplier);
       setChips(chipsFrom(result.supplier.assignedCategories));
     } catch (err) {

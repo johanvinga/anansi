@@ -42,7 +42,7 @@ export function PaginationControls({ total, pageSize, page, onPageChange }: Pagi
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
       <p className="text-sm text-muted-foreground">
-        {t("pagination.summary", { page, totalPages, total })}
+        {t("pagination.summary", { page, totalPages, count: total })}
       </p>
       <Pagination className="mx-0 w-auto">
         <PaginationContent>

@@ -15,15 +15,16 @@ import { loadCatalogSuppliers } from "./supplier-picker";
 
 interface CatalogEditDialogProps {
   catalog: Catalog;
+  initialSupplierId?: string;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function CatalogEditDialog({ catalog, onClose, onSaved }: CatalogEditDialogProps) {
+export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved }: CatalogEditDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(catalog.name);
   const [version, setVersion] = useState(catalog.version ?? "");
-  const [supplierId, setSupplierId] = useState(catalog.supplierId);
+  const [supplierId, setSupplierId] = useState(catalog.supplierId ?? initialSupplierId ?? null);
   const [categories, setCategories] = useState(() => chipsFrom(catalog.categories));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

@@ -49,6 +49,8 @@ export interface CategoryRef {
 }
 
 export interface Category extends CategoryRef {
+  parentId: string | null;
+  path: CategoryRef[];
   createdAt: string;
 }
 
@@ -120,8 +122,9 @@ export interface CatalogProductCandidate {
 
 export interface CatalogExtractionResults {
   products: CatalogProductCandidate[];
+  supplier?: { name: string; sourcePage: number; excerpt: string } | null;
   suggestedAttributeFields: { name: string; type: "text" }[];
-  pages: { pageNumber: number; textSource: "pdf" | "ocr"; confidence: number | null }[];
+  pages: { pageNumber: number; textSource: "pdf" | "ocr" | "gemini"; confidence: number | null }[];
 }
 
 export interface CatalogExtractionJob {
@@ -143,6 +146,7 @@ export interface CatalogExtractionJob {
 export interface CatalogExtraction {
   analysisStatus: CatalogAnalysisStatus;
   job: CatalogExtractionJob | null;
+  matchingSupplier: { id: string; name: string } | null;
 }
 
 /** A catalog joined with its supplier summary, as returned by the global catalogs list. */
@@ -170,6 +174,7 @@ export interface AttributeField {
   sortOrder: number;
   options: AttributeOption[];
   hasValues: boolean;
+  shared?: boolean;
 }
 
 export interface AttributeSetSummary {
@@ -197,9 +202,9 @@ export interface ProductSummary {
   supplierName: string;
   name: Translated;
   supplierSku: string;
-  minQuantity: number;
-  cost: string;
-  currency: string;
+  minQuantity: number | null;
+  cost: string | null;
+  currency: string | null;
   categories: CategoryRef[];
   attributeSet: { id: string; name: Translated } | null;
   createdAt: string;

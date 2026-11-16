@@ -19,9 +19,14 @@ describe("loadConfig (SPEC §11)", () => {
   });
 
   it("accepts only explicit true or false for catalog analysis", () => {
-    expect(loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "true" }).catalogExtractionEnabled).toBe(true);
+    expect(loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "true", GEMINI_API_KEY: "test-key" }).catalogExtractionEnabled).toBe(true);
     expect(loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "false" }).catalogExtractionEnabled).toBe(false);
     expect(() => loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "yes" })).toThrow(/CATALOG_EXTRACTION_ENABLED/);
+  });
+
+  it("requires a Gemini API key only when catalog analysis is enabled", () => {
+    expect(() => loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "true" })).toThrow(/GEMINI_API_KEY/);
+    expect(loadConfig(required).geminiModel).toBe("gemini-3.5-flash-lite");
   });
 
   it("requires SESSION_SECRET", () => {

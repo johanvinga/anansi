@@ -4,7 +4,7 @@ import { AppError, errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated, TranslatedText } from "../lib/translations.js";
 import { loadFieldDefinitions } from "./attribute-set.service.js";
-import { resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
 import {
   fromValueColumns,
   toValueColumns,
@@ -26,16 +26,17 @@ export interface ProductInput {
   /** Optional in both locales; omitted or empty values are stored as null (FR-PRD-10). */
   description: TranslatedText;
   supplierSku: string;
-  minQuantity: number;
+  minQuantity: number | null;
   /** Decimal string with at most 2 decimal places; validated by the route schema. */
-  cost: string;
-  currency: string;
+  cost: string | null;
+  currency: string | null;
   /** Replaces product categories when supplied on update. */
   categories?: CategoryInput[] | undefined;
   /** `undefined` keeps the current set on update; `null` removes it. */
   attributeSetId?: string | null | undefined;
   /** When omitted on update and the set is unchanged, existing values are kept. */
   attributeValues?: AttributeValueInput[] | undefined;
+  directAttributeValues?: AttributeValueInput[] | undefined;
 }
 
 export interface ProductUpdateInput extends ProductInput {
@@ -46,6 +47,8 @@ export interface ProductUpdateInput extends ProductInput {
 export interface ListProductsFilters {
   supplierId?: string | undefined;
   q?: string | undefined;
+  category?: string[] | undefined;
+  uncategorized?: boolean | undefined;
   page: number;
   pageSize: number;
 }
@@ -58,7 +61,7 @@ const listInclude = {
 
 const detailInclude = {
   ...listInclude,
-  values: { include: { field: true, option: true } },
+  values: { include: { field: { include: { sets: true } }, option: true } },
 } satisfies Prisma.ProductInclude;
 
 type ListRow = Prisma.ProductGetPayload<{ include: typeof listInclude }>;
@@ -72,7 +75,7 @@ function toProductSummary(row: ListRow) {
     name: { en: row.nameEn, fr: row.nameFr },
     supplierSku: row.supplierSku,
     minQuantity: row.minQuantity,
-    cost: row.cost.toFixed(2),
+    cost: row.cost?.toFixed(2) ?? null,
     currency: row.currency,
     attributeSet: row.attributeSet
       ? { id: row.attributeSet.id, name: { en: row.attributeSet.nameEn, fr: row.attributeSet.nameFr } }
@@ -103,7 +106,7 @@ function toProductDetail(row: DetailRow) {
         name: { en: value.field.nameEn, fr: value.field.nameFr },
         dataType: value.field.dataType,
         unit: value.field.unit,
-        isArchived: value.field.isArchived,
+        isArchived: value.field.isArchived || value.field.sets.some((membership) => membership.attributeSetId === row.attributeSetId && membership.isArchived),
         value: fromValueColumns(value.field.dataType as AttributeDataType, value),
         optionLabel: value.option ? { en: value.option.labelEn, fr: value.option.labelFr } : null,
       })),
@@ -122,7 +125,7 @@ function snapshotOf(row: DetailRow): Record<string, unknown> {
     "description.fr": row.descriptionFr,
     supplierSku: row.supplierSku,
     minQuantity: row.minQuantity,
-    cost: row.cost.toFixed(2),
+    cost: row.cost?.toFixed(2) ?? null,
     currency: row.currency,
     attributeSet: row.attributeSet?.nameEn ?? null,
     categories: row.categories.map((link) => link.category.nameEn).sort(),
@@ -174,6 +177,7 @@ async function prepareValues(tx: Tx, attributeSetId: string | null, inputs: Attr
     }
     return [];
   }
+  await tx.$queryRaw`SELECT id FROM attribute_sets WHERE id = ${attributeSetId}::uuid FOR UPDATE`;
   const set = await tx.attributeSet.findUnique({ where: { id: attributeSetId }, select: { id: true } });
   if (!set) {
     throw errors.validation([{ field: "attributeSetId", message: "The selected attribute set does not exist." }]);
@@ -186,6 +190,24 @@ async function prepareValues(tx: Tx, attributeSetId: string | null, inputs: Attr
   return [...values.entries()].map(([attributeFieldId, value]) => ({ attributeFieldId, ...toValueColumns(value) }));
 }
 
+async function prepareDirectValues(tx: Tx, inputs: AttributeValueInput[]) {
+  for (const id of [...new Set(inputs.map((input) => input.fieldId))].sort()) {
+    await tx.$queryRaw`SELECT id FROM attribute_fields WHERE id = ${id}::uuid FOR UPDATE`;
+  }
+  const fields = await tx.attributeField.findMany({
+    where: { attributeSetId: null, id: { in: inputs.map((input) => input.fieldId) } },
+    include: { options: true },
+  });
+  const definitions = fields.map((field) => ({
+    id: field.id, name: field.nameEn, dataType: field.dataType,
+    isRequired: false, isArchived: field.isArchived,
+    options: field.options.map((option) => ({ id: option.id, label: option.labelEn })),
+  }));
+  const { values, errors: problems } = validateAttributeValues(definitions, inputs);
+  if (problems.length) throw new AppError(400, "VALIDATION_ERROR", "Some attribute values are invalid.", problems);
+  return [...values.entries()].map(([attributeFieldId, value]) => ({ attributeFieldId, ...toValueColumns(value) }));
+}
+
 async function assertSupplierExists(db: Database | Tx, supplierId: string, asValidation = false) {
   const supplier = await db.supplier.findUnique({ where: { id: supplierId }, select: { id: true } });
   if (!supplier) {
@@ -195,6 +217,10 @@ async function assertSupplierExists(db: Database | Tx, supplierId: string, asVal
 }
 
 export async function listProducts(db: Database, request: AuditRequestContext, filters: ListProductsFilters) {
+  const categoryIds = await expandCategoryIds(db, filters.category ?? []);
+  const categoryFilters: Prisma.ProductWhereInput[] = [];
+  if (categoryIds.length) categoryFilters.push({ categories: { some: { categoryId: { in: categoryIds } } } });
+  if (filters.uncategorized) categoryFilters.push({ categories: { none: {} } });
   const where: Prisma.ProductWhereInput = {
     supplierId: filters.supplierId,
     OR: filters.q
@@ -204,6 +230,7 @@ export async function listProducts(db: Database, request: AuditRequestContext, f
           { supplierSku: { contains: filters.q, mode: "insensitive" } },
         ]
       : undefined,
+    AND: categoryFilters.length ? [{ OR: categoryFilters }] : undefined,
   };
   const [total, rows] = await db.$transaction([
     db.product.count({ where }),
@@ -250,37 +277,42 @@ export async function createProduct(
   await assertSkuAvailable(db, supplierId, input.supplierSku);
   try {
     return await db.$transaction(async (tx) => {
-      const attributeSetId = input.attributeSetId ?? null;
-      const values = await prepareValues(tx, attributeSetId, input.attributeValues ?? []);
-      const categoryIds = await resolveCategoryIds(tx, request, input.categories ?? []);
-      const created = await tx.product.create({
-        data: {
-          supplierId,
-          ...nameAndDescriptionColumns(input),
-          supplierSku: input.supplierSku.trim(),
-          skuKey: nameKeyOf(input.supplierSku),
-          minQuantity: input.minQuantity,
-          cost: input.cost,
-          currency: input.currency,
-          attributeSetId,
-          values: { create: values },
-          categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
-        },
-      });
-      const row = await loadDetail(tx, created.id);
-      await recordAudit(tx, request, {
-        action: AuditAction.PRODUCT_CREATE,
-        outcome: "success",
-        entityType: "Product",
-        entityId: row.id,
-        changes: diffFields({}, snapshotOf(row)),
-      });
-      return toProductDetail(row);
+      return createProductInTransaction(tx, request, supplierId, input);
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw duplicateSku();
     throw error;
   }
+}
+
+export async function createProductInTransaction(
+  tx: Tx,
+  request: AuditRequestContext,
+  supplierId: string,
+  input: ProductInput,
+): Promise<ProductDetailDto> {
+  const attributeSetId = input.attributeSetId ?? null;
+  const values = await prepareValues(tx, attributeSetId, input.attributeValues ?? []);
+  const directValues = await prepareDirectValues(tx, input.directAttributeValues ?? []);
+  const setFieldIds = attributeSetId ? (await loadFieldDefinitions(tx, attributeSetId)).map((field) => field.id) : [];
+  if ((input.directAttributeValues ?? []).some((value) => setFieldIds.includes(value.fieldId))) {
+    throw errors.validation([{ field: "directAttributeValues", message: "An attribute cannot be submitted both directly and through the set." }]);
+  }
+  const categoryIds = await resolveCategoryIds(tx, request, input.categories ?? []);
+  const created = await tx.product.create({
+    data: {
+      supplierId, ...nameAndDescriptionColumns(input), supplierSku: input.supplierSku.trim(),
+      skuKey: nameKeyOf(input.supplierSku), minQuantity: input.minQuantity, cost: input.cost,
+      currency: input.currency, attributeSetId, values: { create: [...values, ...directValues] },
+      categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
+    },
+  });
+  const row = await loadDetail(tx, created.id);
+  await recordAudit(tx, request, {
+    action: AuditAction.PRODUCT_CREATE, outcome: "success", entityType: "Product",
+    entityId: row.id, changes: diffFields({}, snapshotOf(row)),
+  });
+  return toProductDetail(row);
 }
 
 export async function updateProduct(
@@ -300,6 +332,15 @@ export async function updateProduct(
 
       const attributeSetId = input.attributeSetId === undefined ? existing.attributeSetId : input.attributeSetId;
       const setChanged = attributeSetId !== existing.attributeSetId;
+      for (const setId of [...new Set([existing.attributeSetId, attributeSetId].filter((value): value is string => value !== null))].sort()) {
+        await tx.$queryRaw`SELECT id FROM attribute_sets WHERE id = ${setId}::uuid FOR UPDATE`;
+      }
+      const membershipIds = attributeSetId
+        ? (await tx.attributeSetField.findMany({ where: { attributeSetId }, select: { attributeFieldId: true, isArchived: true } }))
+        : [];
+      if (input.directAttributeValues?.some((value) => membershipIds.some((member) => member.attributeFieldId === value.fieldId))) {
+        throw errors.validation([{ field: "directAttributeValues", message: "Set attributes must be submitted through attributeValues." }]);
+      }
       if (input.categories !== undefined) {
         const categoryIds = await resolveCategoryIds(tx, request, input.categories);
         await tx.productCategory.deleteMany({ where: { productId: id } });
@@ -311,12 +352,19 @@ export async function updateProduct(
       if (setChanged) {
         // Values for fields outside the new set are removed (FR-PRD-07, SPEC §8.2).
         const values = await prepareValues(tx, attributeSetId, input.attributeValues ?? []);
-        await tx.productAttributeValue.deleteMany({ where: { productId: id } });
+        await tx.productAttributeValue.deleteMany({ where: { productId: id, field: { attributeSetId: { not: null } } } });
+        await tx.productAttributeValue.deleteMany({ where: { productId: id, attributeFieldId: { in: membershipIds.filter((member) => !member.isArchived).map((member) => member.attributeFieldId) } } });
         await tx.productAttributeValue.createMany({ data: values.map((v) => ({ productId: id, ...v })) });
       } else if (input.attributeValues !== undefined) {
         // Archived field values are kept; only active fields are replaced.
         const values = await prepareValues(tx, attributeSetId, input.attributeValues);
-        await tx.productAttributeValue.deleteMany({ where: { productId: id, field: { isArchived: false } } });
+        await tx.productAttributeValue.deleteMany({ where: { productId: id, field: { isArchived: false, attributeSetId: { not: null } } } });
+        await tx.productAttributeValue.deleteMany({ where: { productId: id, attributeFieldId: { in: membershipIds.filter((member) => !member.isArchived).map((member) => member.attributeFieldId) } } });
+        await tx.productAttributeValue.createMany({ data: values.map((v) => ({ productId: id, ...v })) });
+      }
+      if (input.directAttributeValues !== undefined) {
+        const values = await prepareDirectValues(tx, input.directAttributeValues);
+        await tx.productAttributeValue.deleteMany({ where: { productId: id, attributeFieldId: { notIn: membershipIds.map((member) => member.attributeFieldId) }, field: { isArchived: false, attributeSetId: null } } });
         await tx.productAttributeValue.createMany({ data: values.map((v) => ({ productId: id, ...v })) });
       }
 

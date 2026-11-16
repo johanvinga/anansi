@@ -1,7 +1,7 @@
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 
-export const CATALOG_EXTRACTION_QUEUE = "catalog-extraction";
+export const CATALOG_EXTRACTION_QUEUE = "catalog-extraction-gemini";
 
 export interface CatalogExtractionQueue {
   enqueue(extractionJobId: string): Promise<void>;
@@ -24,7 +24,7 @@ export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractio
         { extractionJobId },
         {
           jobId: extractionJobId,
-          attempts: 3,
+          attempts: 1,
           backoff: { type: "exponential", delay: 5_000 },
           removeOnComplete: { count: 500 },
           removeOnFail: { count: 500 },

@@ -14,6 +14,7 @@ import { createGuards } from "./lib/auth-guards.js";
 import { LoginLimiter } from "./lib/login-limiter.js";
 import { registerAssetRoutes } from "./routes/asset.routes.js";
 import { registerAttributeSetRoutes } from "./routes/attribute-set.routes.js";
+import { registerIndependentAttributeRoutes } from "./routes/independent-attribute.routes.js";
 import { registerCatalogRoutes } from "./routes/catalog.routes.js";
 import { registerProductRoutes } from "./routes/product.routes.js";
 import { registerSettingsRoutes } from "./routes/settings.routes.js";
@@ -159,6 +160,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       registerAssetRoutes(v1, { db, storage, log: app.log }, guards);
       registerCatalogRoutes(v1, { db, storage, log: app.log, extractionQueue }, guards);
       registerAttributeSetRoutes(v1, db, guards);
+      registerIndependentAttributeRoutes(v1, db, guards);
       registerProductRoutes(v1, db, guards);
       registerSettingsRoutes(v1, config, guards);
     },

@@ -17,13 +17,12 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 - Secure login for users.
 - Create and maintain suppliers with a name, an address, and directly assigned categories; supplier category summaries also include product categories.
 - Attach supporting files of any type to each supplier.
-- Link products to suppliers with a name, supplier SKU, minimum quantity, and cost.
+- Link products to suppliers with a name and supplier SKU, and optional cost, currency and minimum quantity for catalog imports.
 - Define reusable **attribute sets** (for example, "MDF Panel" or "Paint") containing custom fields, and apply them to products.
-- Provide a data model and API that support searching suppliers by category in a future release.
+- Browse and filter suppliers, products and catalogs using a shared category hierarchy.
 
 ### 1.2 Non-Goals (this release)
 
-- Category search UI (the backend filter is included; the UI is deferred).
 - Purchase orders, inventory levels, or pricing history.
 - Multi-tenant (organization-level) separation.
 - Supplier self-service portal.
@@ -34,7 +33,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | Term | Definition |
 |---|---|
 | Supplier | An organization that provides products. Previously referred to as "vendor". |
-| Category | A label applied directly to suppliers or products. Supplier category summaries also include categories inherited from their products. |
+| Category | A node in a shared hierarchy, directly assignable to suppliers, products or catalogs. Ancestor membership is derived; supplier summaries also include product-inherited categories. |
 | Asset | A file of any type attached to a supplier. |
 | Catalog | A named, versioned PDF price or product catalog attached to a supplier. A catalog is a separate entity from an asset. |
 | Product | An item provided by a supplier. |
@@ -52,7 +51,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | D1 | User roles | Two roles: `admin` and `standard`. Standard users are read-only. Admins have full write access and manage users. |
 | D2 | Registration | No self-registration. Admins create accounts and reset passwords. |
 | D3 | First admin | Created by a command-line seed script that takes an email and password. |
-| D4 | Currency | Each product has its own currency, any valid ISO 4217 code. |
+| D4 | Currency | A product's currency, when specified, is a valid ISO 4217 code. |
 | D5 | Stack | TypeScript end-to-end: React with Vite (frontend), Node.js with Fastify (backend), PostgreSQL with Prisma. |
 | D6 | UI components | All React UI components must come from shadcn/ui (https://ui.shadcn.com), built on Radix UI and Tailwind CSS. Untitled UI and Ark UI are no longer used. |
 | D7 | Hosting | Local or on-premises only for now. |
@@ -99,7 +98,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-SUP-04 | The user shall be able to edit a supplier's name, address, and categories. |
 | FR-SUP-05 | An admin shall be able to delete a supplier. Deletion is blocked if the supplier has products (see §8.3). |
 | FR-SUP-06 | The supplier list shall support filtering by free-text name match. |
-| FR-SUP-07 | The API shall support filtering suppliers by one or more categories (`GET /suppliers?category=<id>`) to enable future search. |
+| FR-SUP-07 | Supplier category filtering matches any selected category or its descendants, including direct and product-inherited assignments. Results are not duplicated. |
 | FR-SUP-08 | Supplier name shall be unique (case-insensitive) to prevent accidental duplicates. |
 | FR-SUP-09 | Supplier creation shall open a modal dialog (FR-MODAL-01). The categories editor and asset upload remain available inside the dialog. Supplier name and address are not translated. |
 | FR-SUP-10 | After a supplier is created from the dialog, the app shall navigate to the supplier detail page. |
@@ -109,12 +108,21 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 
 | ID | Requirement |
 |---|---|
-| FR-CAT-01 | The user shall be able to create a category with an English name that is unique (case-insensitive) and a French name (see FR-I18N-02). |
-| FR-CAT-02 | The user shall be able to list all categories. |
-| FR-CAT-03 | The user shall be able to rename a category. |
-| FR-CAT-04 | The user shall be able to delete a category. Deleting it removes associations from suppliers, products and catalogs but does not delete those records. |
-| FR-CAT-05 | Suppliers, products and catalogs may each have any number of categories; categories may be shared. |
-| FR-CAT-06 | Categories may be created inline while assigning them to a supplier, product or catalog. |
+| FR-CAT-01 | Categories form a shared tree with at most one parent; roots have no parent. English names are case-insensitively unique among siblings, including roots; French names are required (FR-I18N-02). No taxonomy is preloaded. |
+| FR-CAT-02 | Users can list and search categories, identify their parents and display full paths, including when names repeat in different branches. |
+| FR-CAT-03 | Admins can create, rename and move categories. Moves preserve IDs, assignments and subtrees; self-parenting, cycles and sibling-name conflicts are rejected. Hierarchy changes are audited. |
+| FR-CAT-04 | Before deletion the UI shows direct product, supplier and catalog assignment counts, products left without any direct category, and immediate children to be moved. Confirmed deletion removes the category's direct assignments and moves immediate children to its parent, or to root if it has no parent. Descendant assignments and records remain. Sibling-name conflicts block deletion. Products with no remaining assignment are uncategorized; no special category is created. Changes are transactional and audited. |
+| FR-CAT-05 | Products, suppliers and catalogs may have any number of direct categories at any tree level. Only direct assignments are stored; ancestor membership is derived. |
+| FR-CAT-06 | Assignment editors offer a searchable, keyboard-accessible tree with full paths and multiple selections. Inline creation requires a parent selection. Name-only inputs must not silently resolve ambiguous names. |
+| FR-CAT-07 | Category tree filters allow multiple selections at any level and match any selected category or descendant, without duplicate results. Product lists support an uncategorized filter. |
+| FR-CAT-08 | Existing flat categories become roots during migration; IDs, translated names and direct assignments remain unchanged. |
+| FR-CAT-09 | Category suggestions in catalog imports must be reviewed: reuse unambiguous matches; resolve ambiguous or unknown suggestions by selecting an existing category or approving each new category and parent. A suggestion must be resolved before import; products without a suggestion may remain uncategorized. Import revalidates changes transactionally. |
+
+Assignment inputs may identify an existing category with `{ id }`, or explicitly
+create one with `{ name, parentId }` (`parentId: null` selects the root). Explicit
+creation is part of the enclosing write transaction and initially uses the
+provided name for both languages. Legacy `{ name }` inputs reuse a unique match
+or create a root, but reject ambiguous names.
 
 ### 4.4 Supplier Assets (FR-AST)
 
@@ -142,10 +150,13 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-CLG-05 | The user shall be able to download a catalog. |
 | FR-CLG-06 | An admin may edit a catalog's name, version, supplier and categories. **Last updated** is set automatically to the time of the most recent change. |
 | FR-CLG-07 | The user shall be able to delete a catalog (file and metadata). |
-| FR-CLG-08 | When catalog analysis is enabled, an uploaded catalog PDF shall be queued for asynchronous analysis. When disabled (the default), uploads remain available and their status is `not_processed`. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
-| FR-CLG-09 | Analysis shall extract selectable PDF text before using OCR, and use English/French OCR for scanned pages. It shall identify product candidates and labeled attributes when recognizable, preserving source page references and excerpts. |
+| FR-CLG-08 | Catalog analysis is disabled by default. When enabled, an admin explicitly starts asynchronous Gemini analysis; uploads are not analyzed automatically. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
+| FR-CLG-09 | Analysis sends the entire catalog PDF to Google Gemini and identifies product candidates and attributes when recognizable, preserving source page references and excerpts. Output is unverified and is validated before storage. |
 | FR-CLG-10 | Extracted products and suggested attribute fields shall remain review candidates; analysis shall not create products or attribute sets automatically. An admin may review candidates, create products from selected candidates, create an attribute set from suggested fields, and retry a failed or completed analysis. |
 | FR-CLG-11 | Catalogs have independent categories. Assigning a supplier or adding catalog categories merges those categories into the supplier's direct categories without duplicates. Existing supplier categories remain, including after catalog unassignment, reassignment, category removal, or deletion. |
+| FR-CLG-12 | Gemini catalog analysis shall limit requests to eight per rolling minute per API key across application instances using the same Redis. Uploads, readiness checks, analysis, retries, and deletion count toward the limit. Requests wait for capacity; Redis errors prevent requests rather than bypassing the limit. |
+| FR-CLG-13 | For an unassigned catalog, an admin may review a suggested supplier, select an existing supplier, or create one. Supplier creation and catalog assignment require separate confirmation; a suggested name is not proof of identity. |
+| FR-CLG-14 | Catalog imports list extracted fields without an exact compatible independent attribute before product information. An admin may select which new text attributes to create, map fields to existing independent attributes, or skip them. Exact compatible independent attributes are reused unless changed or skipped. Selected attributes receive each product's extracted value. For typed or unit-bearing attributes, an admin must explicitly review each product value in the selected type and unit; the system validates it and never assumes or converts units. |
 
 ### 4.5 Attribute Sets (FR-ATS)
 
@@ -161,6 +172,9 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-ATS-08 | The user shall be able to reorder fields. |
 | FR-ATS-09 | Fields in use by products shall be **archived**, not hard-deleted. Archived fields are hidden from forms but their values are preserved. |
 | FR-ATS-10 | An attribute set may be deleted only if no products reference it. |
+| FR-ATS-11 | Independent attributes of the supported field types may be created, listed, renamed and removed without an attribute set. Their type, unit and select options are fixed at creation. Removing an attribute with product values archives it and preserves those values; an unused attribute is deleted. Product API requests may submit `directAttributeValues` for attributes outside the selected set; these values are preserved when an existing product is edited without them. |
+| FR-ATS-12 | An independent attribute can be shared by multiple sets, with required status, order and archival status stored per membership. Products use the same attribute and option IDs whether assigned directly or through a set. An attribute referenced by a set cannot be removed. |
+| FR-ATS-13 | An admin may convert existing set fields into reusable attributes individually or in bulk. Exact compatible definitions may be merged only if translated names, type, unit and ordered translated options agree and no product has values for both definitions. Product values are preserved; option references are remapped to the retained definition. Incompatible, archived or conflicting fields remain unchanged and are reported for review. Each bulk conversion is separately transactional and audited. |
 
 **Example attribute sets (seed data):**
 
@@ -178,7 +192,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | ID | Requirement |
 |---|---|
 | FR-PRD-01 | The user shall be able to create a product linked to exactly one supplier. |
-| FR-PRD-02 | A product shall have: **name** (English and French, both required, 1–200 chars), **supplier SKU** (required), **minimum quantity** (integer ≥ 0, required), **cost** (decimal ≥ 0, up to 2 decimal places, required), and **currency** (any valid ISO 4217 code, required). |
+| FR-PRD-02 | A product shall have a **name** (English and French, 1–200 chars) and **supplier SKU**. Manual creation also requires **minimum quantity** (integer ≥ 0), **cost** (decimal ≥ 0, up to 2 decimal places), and **currency** (ISO 4217). Catalog imports may leave these three fields unset; editing a product may preserve or clear them. |
 | FR-PRD-03 | Supplier SKU shall be unique per supplier (case-insensitive). The same SKU may exist under different suppliers. |
 | FR-PRD-04 | A product may optionally be assigned one attribute set. |
 | FR-PRD-05 | When an attribute set is assigned, the product form shall render that set's fields and validate values against their types, units, and required flags. |
@@ -200,6 +214,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-UI-03 | Forms shall display inline validation errors. |
 | FR-UI-04 | Destructive actions (delete supplier, delete product, delete asset, change attribute set) shall require confirmation. |
 | FR-UI-05 | All UI components in the React app shall come from shadcn/ui (https://ui.shadcn.com). |
+| FR-UI-06 | Admins may select individual rows or a whole page of suppliers, products or catalogs for deletion. Paginated lists offer selection of all records matching the current filters across pages. A confirmation warns about the scope and consequences. Each deletion follows existing authorization, audit and dependency rules; failures are reported individually while remaining selections are processed. |
 
 ---
 
@@ -269,7 +284,7 @@ Where other requirements say "the user", they apply to admins only. Standard use
 | FR-I18N-04 | Rename dialogs show both `en` and `fr` inputs side by side. |
 | FR-I18N-05 | Lists, filter chips, and detail views display the name in the active UI language, falling back to `en` when the active value is empty. |
 | FR-I18N-06 | Search matches text in either locale, case-insensitively. |
-| FR-I18N-07 | Name uniqueness (case-insensitive) applies to the `en` value only, for categories and attribute sets. Attribute field names are unique within a set on the `en` value. |
+| FR-I18N-07 | Name uniqueness (case-insensitive) applies to the `en` value: within a parent for categories, globally for attribute sets, and within a set for attribute fields. |
 | FR-I18N-08 | Audit entries for renames record before and after values for both `en` and `fr`. |
 | FR-I18N-09 | Attribute option labels follow the same rules as attribute field names. Supplier name and address are not translated. |
 
@@ -352,7 +367,8 @@ erDiagram
 | Column | Type | Constraints |
 |---|---|---|
 | id | UUID | PK |
-| name | varchar(100) | Not null, unique (case-insensitive index) |
+| name | varchar(100) | Not null, case-insensitively unique within parent |
+| parent_id | UUID | Nullable FK → Category, on delete restrict |
 | created_at | timestamptz | Not null |
 
 **SupplierCategory** (join table)
@@ -441,9 +457,9 @@ Unique: (attribute_field_id, label).
 | supplier_id | UUID | FK → Supplier, on delete restrict |
 | name | varchar(200) | Not null |
 | supplier_sku | varchar(100) | Not null |
-| min_quantity | int | Not null, ≥ 0 |
-| cost | numeric(12,2) | Not null, ≥ 0 |
-| currency | char(3) | Not null, ISO 4217 code |
+| min_quantity | int | Nullable, ≥ 0 when set |
+| cost | numeric(12,2) | Nullable, ≥ 0 when set |
+| currency | char(3) | Nullable, ISO 4217 code when set |
 | attribute_set_id | UUID | FK → AttributeSet, nullable, on delete restrict |
 | created_at | timestamptz | Not null |
 | updated_at | timestamptz | Not null |
@@ -510,7 +526,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/suppliers?page&pageSize&q&category` | List with filters. `category` accepts one or more category IDs and matches directly assigned or product-inherited categories. |
+| GET | `/suppliers?page&pageSize&q&category` | List with filters. `category` matches any selected ID or its descendants against direct or product-inherited categories. |
 | POST | `/suppliers` | Create. |
 | GET | `/suppliers/{id}` | Detail including effective `categories`, directly assigned `assignedCategories`, and product-derived `inheritedCategories`. |
 | PUT | `/suppliers/{id}` | Update name, address, and directly assigned categories. |
@@ -520,10 +536,11 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/categories?q` | List. |
-| POST | `/categories` | Create. Body `name: { en, fr? }`; `fr` defaults to `en` (FR-I18N-02). |
-| PUT | `/categories/{id}` | Rename. Body `name: { en, fr }`. |
-| DELETE | `/categories/{id}` | Delete and unlink. |
+| GET | `/categories?q` | List categories with `parentId` and full translated `path`. |
+| POST | `/categories` | Create. Body `name: { en, fr? }`, optional nullable `parentId`; `fr` defaults to `en`. |
+| PUT | `/categories/{id}` | Rename and/or move. Body optional `name: { en, fr }` and nullable `parentId`; at least one is required and an omitted parent is unchanged. |
+| GET | `/categories/{id}/deletion-impact` | Admin-only deletion preview: direct assignment counts, products left uncategorized and children moved. |
+| DELETE | `/categories/{id}` | Delete and unlink, promoting immediate children to the deleted node's parent. |
 
 ### 6.4 Supplier Assets
 
@@ -539,12 +556,14 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/catalogs` | Global list including unassigned catalogs. Query: `q` (searches name, version, supplier name), repeated `category` (catalog or effective supplier category ids), `page`, `pageSize`. Each item includes nullable `supplierName`, catalog `categories`, effective `supplierCategoryNames`, and `analysisStatus`. |
+| GET | `/catalogs` | Global list including unassigned catalogs. Query: `q` (searches name, version, supplier name), repeated `category` (any selected category or descendants of a catalog or effective supplier assignment), `page`, `pageSize`. Each item includes nullable `supplierName`, catalog `categories`, effective `supplierCategoryNames`, and `analysisStatus`. |
 | GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes`, `updatedAt`, and `analysisStatus`. |
-| POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; optional `version`, `supplierId`, and JSON `categories`). Admin only. Analysis is queued only when enabled. |
+| POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; optional `version`, `supplierId`, and JSON `categories`). Admin only. Analysis must be started separately. |
 | POST | `/suppliers/{id}/catalogs` | Upload for an existing supplier using the same fields; catalog categories are merged into that supplier. Admin only. |
 | GET | `/catalogs/{catalogId}/extraction` | Get analysis status, progress, errors, and extracted product candidates. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
 | POST | `/catalogs/{catalogId}/extraction` | Queue a new analysis or retry after a completed/failed run. Admin only. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
+| POST | `/catalogs/{catalogId}/extraction/preview` | Admin-only, read-only review of the latest completed analysis. Body: `jobId` and distinct zero-based product `indexes`. Returns selected products, missing required information, existing or repeated SKU warnings, extracted attribute examples and possible matches to existing set fields. Preview mappings are suggestions and do not create or import records. |
+| POST | `/catalogs/{catalogId}/extraction/import` | Admin-only confirmed import using the latest completed analysis and an already assigned supplier. Name comes from the analysis and SKU is required; cost, currency and minimum quantity may be omitted. For products with category suggestions, `categoryDecisions` explicitly maps each suggestion to an existing `categoryId` or approves creation under nullable `parentId`; `additionalCategoryIds` adds other direct assignments. `categoryTreeVersion` from the preview is required for category decisions and additional assignments; a changed tree requires a refreshed review. Attribute mappings select an existing `attributeId`, explicitly create a text attribute with `attributeId: null`, or skip it with `attributeId: null, skip: true`. Only exact compatible independent attributes can be reused without an explicit mapping. Each product's `attributeValues` supplies reviewed values by extracted name for typed or unit-bearing mappings; select values are option IDs and booleans are JSON booleans. Existing supplier SKUs are skipped; approved categories, attributes, products, values and audit entries are created in one transaction. |
 | GET | `/catalogs/{catalogId}/download` | Download with `Content-Disposition: attachment`. |
 | PATCH | `/catalogs/{catalogId}` | Update `name`, `version`, nullable `supplierId`, and/or `categories` (at least one required). Admin only. |
 | DELETE | `/catalogs/{catalogId}` | Delete the catalog and its file. Admin only. |
@@ -553,12 +572,20 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/attributes` | List active independent attributes, including type, unit, options and value usage. |
+| POST | `/attributes` | Admin-only creation. Body: `name`, optional `dataType` (defaults to text), optional `unit`, and `options` for select fields. |
+| PUT | `/attributes/{id}` | Admin-only rename with `name: { en, fr }`; type, unit and options cannot be changed. |
+| DELETE | `/attributes/{id}` | Admin-only removal: archives if used, otherwise deletes. |
+| POST | `/attributes/migrate-legacy` | Admin-only conversion of compatible legacy set fields. Returns converted fields and conflicts; each conversion commits independently. |
 | GET | `/attribute-sets` | List. |
 | POST | `/attribute-sets` | Create. Body `name: { en, fr? }`; `fr` defaults to `en`. Optional `fields` creates initial fields in the same transaction. |
 | GET | `/attribute-sets/{id}` | Detail including fields and options. |
 | PUT | `/attribute-sets/{id}` | Rename. Body `name: { en, fr }`. |
 | DELETE | `/attribute-sets/{id}` | Delete if unused. |
 | POST | `/attribute-sets/{id}/fields` | Add field. |
+| POST | `/attribute-sets/{id}/shared-fields` | Add an existing independent attribute, with an optional set-specific `isRequired` flag. |
+| POST | `/attribute-sets/{id}/shared-fields/create` | Atomically create a reusable attribute and add it to the set. |
+| POST | `/attribute-sets/{id}/fields/{fieldId}/share` | Convert a legacy set field into a shared attribute or merge it with an explicitly selected compatible independent attribute. |
 | PUT | `/attribute-sets/{id}/fields/{fieldId}` | Update field. |
 | POST | `/attribute-sets/{id}/fields/reorder` | Body: ordered list of field IDs. |
 | DELETE | `/attribute-sets/{id}/fields/{fieldId}` | Archive if used, otherwise delete. |
@@ -567,7 +594,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/products?page&pageSize&supplierId&q` | Global list. |
+| GET | `/products?page&pageSize&supplierId&q&category&uncategorized` | Global list. Repeated `category` IDs match any selected category or descendant. `uncategorized=true` also includes products with no direct category (OR with any selected categories). |
 | GET | `/suppliers/{id}/products` | Products for one supplier. |
 | POST | `/suppliers/{id}/products` | Create product under supplier. Body `name: { en, fr? }` (`fr` defaults to `en`), optional `description: { en?, fr? }` (FR-PRD-10), and optional `categories` (category IDs or names). |
 | GET | `/products/{id}` | Detail including categories and attribute values. |
@@ -601,7 +628,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Entity | Rule |
 |---|---|
 | Supplier.name | Required; trimmed; 1–200 chars; unique case-insensitive. |
-| Category.name | Required; trimmed; 1–100 chars; unique case-insensitive. |
+| Category.name | Required; trimmed; 1–100 chars; unique case-insensitive among siblings. |
 | Product.name | Required; trimmed; 1–200 chars. |
 | Product.supplier_sku | Required; trimmed; 1–100 chars; unique per supplier. |
 | Product.min_quantity | Integer; ≥ 0. |
@@ -638,7 +665,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Action | Behavior |
 |---|---|
 | Delete supplier | Blocked if the supplier has products. Assets and their files are deleted. Catalogs and their files are retained and become unassigned. |
-| Delete category | Removes links from all suppliers. |
+| Delete category | Removes direct supplier, product and catalog links and promotes immediate children, subject to sibling-name conflicts. |
 | Delete attribute set | Blocked if any product references it. |
 | Delete attribute field | Archived if any product has a value for it; otherwise deleted. |
 | Delete product | Deletes its attribute values. |
@@ -685,7 +712,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Table | Index | Purpose |
 |---|---|---|
 | Supplier | `lower(name)` unique | Duplicate prevention, search. |
-| Category | `lower(name)` unique | Duplicate prevention. |
+| Category | `(parent_id, name_key)` unique, including roots | Sibling duplicate prevention. |
 | SupplierCategory | `category_id` | Supplier category search. |
 | ProductCategory | `category_id` | Product and inherited supplier category search. |
 | Product | `supplier_id` | Supplier product list. |
@@ -708,6 +735,11 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Variable | Description | Default |
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection string | – |
+| `CATALOG_EXTRACTION_ENABLED` | Enable manual Gemini catalog analysis | `false` |
+| `GEMINI_API_KEY` | Server-side Google AI Studio API key; required when analysis is enabled | – |
+| `GEMINI_MODEL` | Gemini model used for catalog analysis | `gemini-3.5-flash-lite` |
+| `CATALOG_EXTRACTION_MAX_PAGES` | Maximum pages analyzed per catalog | 200 |
+| `CATALOG_EXTRACTION_CONCURRENCY` | Maximum concurrent catalog jobs | 1 |
 | `SESSION_SECRET` | Secret for session signing | – (required) |
 | `SESSION_IDLE_MINUTES` | Idle session timeout | 480 |
 | `UPLOAD_DIR` | Local storage path for assets | `./storage/assets` |
@@ -761,7 +793,6 @@ Acceptance tests must cover every requirement ID in §4.
 
 ## 15. Future Enhancements (out of scope)
 
-- Search UI for suppliers by category (backend filter already available).
 - Full-text search across suppliers and products.
 - Additional data types (multi-select, file attributes, currency).
 - Product import/export (CSV, Excel).

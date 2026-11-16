@@ -28,6 +28,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     LOG_LEVEL: "silent",
     LOGIN_RATE_LIMIT: "1000",
     CATALOG_EXTRACTION_ENABLED: "true",
+    GEMINI_API_KEY: "test-key",
   });
   return { ...base, ...overrides };
 }

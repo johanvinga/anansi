@@ -9,9 +9,12 @@ import { apiRequest, errorMessage } from "../../api/client";
 import { loadSettings } from "../../api/settings";
 import { localize } from "../../api/translations";
 import { formatDateTime } from "../../api/format";
-import type { CatalogWithSupplier, Category, Page } from "../../api/types";
+import type { CatalogWithSupplier, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
+import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
+import { useBulkDelete } from "../../hooks/use-bulk-delete";
+import { CategoryTreeFilter } from "../../components/category-tree-filter";
 import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
@@ -42,28 +45,30 @@ export function CatalogsPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
   const analysisEnabled = settingsQuery.data?.catalogExtractionEnabled === true;
-  const categoriesQuery = useQuery({
-    queryKey: ["categories"],
-    queryFn: async () => (await apiRequest<{ items: Category[] }>("GET", "/categories")).items,
-  });
+  async function loadCatalogs(targetPage: number, pageSize: number) {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+    if (search) params.set("q", search);
+    for (const id of categoryIds) params.append("category", id);
+    return apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`);
+  }
   const catalogsQuery = useQuery({
     queryKey: ["catalogs", "all", { page, pageSize: PAGE_SIZE, search, categoryIds }],
-    queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-      if (search) params.set("q", search);
-      for (const id of categoryIds) params.append("category", id);
-      return apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`);
+    queryFn: () => loadCatalogs(page, PAGE_SIZE),
+  });
+  const result = catalogsQuery.data;
+  const bulk = useBulkDelete({
+    scope: JSON.stringify({ search, categoryIds }),
+    endpoint: "catalogs",
+    loadPage: async (targetPage, pageSize) => {
+      const response = await loadCatalogs(targetPage, pageSize);
+      return { total: response.total, items: response.items.map((item) => ({ id: item.id, label: item.name })) };
+    },
+    onDeleted: async () => {
+      setPage(1);
+      await Promise.all(["catalogs", "supplier", "suppliers", "categories"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
     },
   });
-  const categories = categoriesQuery.data ?? [];
-  const result = catalogsQuery.data;
-
-  function toggleCategory(id: string) {
-    setPage(1);
-    setCategoryIds((current) =>
-      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
-    );
-  }
+  const visibleItems = (result?.items ?? []).map((item) => ({ id: item.id, label: item.name }));
 
   async function deleteCatalog() {
     if (!deleting) return;
@@ -71,6 +76,7 @@ export function CatalogsPage() {
     setDeleting(null);
     try {
       await apiRequest("DELETE", `/catalogs/${id}`);
+      bulk.remove(id);
       setDeleteError(null);
       void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
     } catch (error) {
@@ -103,37 +109,21 @@ export function CatalogsPage() {
           </>
         }
         filters={
-          <>
-            <span className="mr-1 text-sm text-muted-foreground">{t("suppliers.categoriesLabel")}:</span>
-            {categories.map((category) => {
-              const active = categoryIds.includes(category.id);
-              return (
-                <Button
-                  key={category.id}
-                  type="button"
-                  variant={active ? "default" : "secondary"}
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  aria-pressed={active}
-                  onClick={() => toggleCategory(category.id)}
-                >
-                  {localize(category.name)}
-                </Button>
-              );
-            })}
-          </>
+          <CategoryTreeFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }} />
         }
       >
 
-        {deleteError || categoriesQuery.error || catalogsQuery.error || settingsQuery.error ? (
+        {deleteError || catalogsQuery.error || settingsQuery.error ? (
           <div className="px-4 pb-4">
-            <ErrorAlert message={deleteError ?? (categoriesQuery.error ? errorMessage(categoriesQuery.error) : catalogsQuery.error ? errorMessage(catalogsQuery.error) : settingsQuery.error ? errorMessage(settingsQuery.error) : null)} />
+            <ErrorAlert message={deleteError ?? (catalogsQuery.error ? errorMessage(catalogsQuery.error) : settingsQuery.error ? errorMessage(settingsQuery.error) : null)} />
           </div>
         ) : null}
 
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={PAGE_SIZE} warning={t("bulkDelete.catalogsWarning")} /> : null}
         <Table aria-label={t("catalogs.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
+              {isAdmin ? <TableHead className="w-10 pl-4"><BulkSelectPage items={visibleItems} selection={bulk} /></TableHead> : null}
               <TableHead className="pl-4">{t("catalogs.catalogName")}</TableHead>
               <TableHead>{t("catalogs.pdfFile")}</TableHead>
               <TableHead>{t("catalogs.supplier")}</TableHead>
@@ -145,10 +135,11 @@ export function CatalogsPage() {
           </TableHeader>
           <TableBody>
             {result && result.items.length === 0 ? (
-              <TableEmptyRow colSpan={analysisEnabled ? 7 : 6} message="No catalogs found." />
+              <TableEmptyRow colSpan={(analysisEnabled ? 7 : 6) + (isAdmin ? 1 : 0)} message="No catalogs found." />
             ) : null}
             {result?.items.map((catalog) => (
               <TableRow key={catalog.id}>
+                {isAdmin ? <TableCell className="pl-4"><BulkSelectItem item={{ id: catalog.id, label: catalog.name }} selection={bulk} /></TableCell> : null}
                 <TableCell className="pl-4 font-medium">{catalog.name}</TableCell>
                 <TableCell>{catalog.originalFileName}</TableCell>
                 <TableCell>{catalog.supplierName ?? t("catalogs.unassigned")}</TableCell>

@@ -13,6 +13,7 @@ import { chipsFrom, toCategoryInputs, type CategoryChip } from "./category-chips
 
 interface SupplierFormProps {
   supplier?: Supplier;
+  initialName?: string;
   onSaved: (supplier: Supplier) => void;
   onCancel: () => void;
 }
@@ -32,10 +33,10 @@ function useAddressFields(): { key: AddressKey; label: string }[] {
 
 
 /** Create or edit a supplier's name, address, and categories (FR-SUP-01, FR-SUP-04). */
-export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps) {
+export function SupplierForm({ supplier, initialName, onSaved, onCancel }: SupplierFormProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [name, setName] = useState(supplier?.name ?? "");
+  const [name, setName] = useState(supplier?.name ?? initialName ?? "");
   const [address, setAddress] = useState<Record<AddressKey, string>>({
     street: supplier?.street ?? "",
     city: supplier?.city ?? "",
@@ -59,6 +60,7 @@ export function SupplierForm({ supplier, onSaved, onCancel }: SupplierFormProps)
         ? await apiRequest<{ supplier: Supplier }>("PUT", `/suppliers/${supplier.id}`, body)
         : await apiRequest<{ supplier: Supplier }>("POST", "/suppliers", body);
       await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+      await queryClient.invalidateQueries({ queryKey: ["categories"] });
       onSaved(result.supplier);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));
