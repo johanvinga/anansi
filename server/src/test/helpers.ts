@@ -57,7 +57,7 @@ export async function createTestApp(
 export async function resetDatabase(db: Database): Promise<void> {
   await db.$executeRawUnsafe("ALTER TABLE audit_logs DISABLE TRIGGER USER");
   await db.$executeRawUnsafe(
-    "TRUNCATE audit_logs, sessions, product_attribute_values, products, attribute_options, attribute_fields, attribute_sets, catalog_extraction_jobs, catalogs, supplier_assets, supplier_categories, suppliers, categories, users CASCADE",
+    "TRUNCATE stored_file_cleanup, audit_logs, sessions, product_attribute_values, products, attribute_options, attribute_fields, attribute_sets, catalog_extraction_jobs, catalogs, supplier_assets, supplier_categories, suppliers, categories, users CASCADE",
   );
   await db.$executeRawUnsafe("ALTER TABLE audit_logs ENABLE TRIGGER USER");
 }

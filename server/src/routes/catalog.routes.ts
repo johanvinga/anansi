@@ -16,6 +16,7 @@ import {
   listAllCatalogs,
   listCatalogs,
   prepareCatalogDownload,
+  prepareCatalogImage,
   startCatalogExtraction,
   updateCatalog,
   uploadCatalog,
@@ -68,6 +69,7 @@ const updateCatalogSchema = z
 
 const idParamsSchema = z.object({ id: uuidSchema });
 const catalogParamsSchema = z.object({ catalogId: uuidSchema });
+const catalogImageParamsSchema = z.object({ catalogId: uuidSchema, jobId: uuidSchema, imageId: uuidSchema });
 const previewSchema = z.object({
   jobId: uuidSchema,
   indexes: z.array(z.number().int().min(0).max(999)).min(1).max(1000),
@@ -78,6 +80,7 @@ const importSchema = z.object({
   products: z.array(z.object({
     index: z.number().int().min(0).max(999),
     sku: z.string().trim().min(1).max(100),
+    imageId: uuidSchema.nullish(),
     cost: z.string().trim().regex(/^\d{1,10}(\.\d{1,2})?$/).optional(),
     currency: z.string().trim().toUpperCase().refine(isCurrencyCode).optional(),
     minQuantity: z.number().int().min(0).max(2_147_483_647).optional(),
@@ -196,11 +199,19 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     return previewCatalogImport(deps.db, context(request), catalogId, body.jobId, body.indexes);
   });
 
+  app.get("/catalogs/:catalogId/extraction/:jobId/images/:imageId", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { catalogId, jobId, imageId } = parseInput(catalogImageParamsSchema, request.params);
+    const image = await prepareCatalogImage(deps, context(request), catalogId, jobId, imageId);
+    return reply.header("Content-Type", image.mimeType).header("Content-Length", String(image.sizeBytes))
+      .header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store")
+      .send(image.buffer);
+  });
+
   app.post("/catalogs/:catalogId/extraction/import", { preHandler: guards.requireAdmin }, async (request) => {
     if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
     const { catalogId } = parseInput(catalogParamsSchema, request.params);
     const body = parseInput(importSchema, request.body);
-    return importCatalogProducts(deps.db, context(request), catalogId, body.jobId, body.supplierId, body.products, body.mappings, body.categoryTreeVersion);
+    return importCatalogProducts(deps, context(request), catalogId, body.jobId, body.supplierId, body.products, body.mappings, body.categoryTreeVersion);
   });
 
   app.get("/catalogs/:catalogId/download", { preHandler: guards.requireUser }, async (request, reply) => {

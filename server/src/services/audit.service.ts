@@ -51,6 +51,8 @@ export const AuditAction = {
   PRODUCT_DELETE: "PRODUCT_DELETE",
   PRODUCT_VIEW: "PRODUCT_VIEW",
   PRODUCT_LIST: "PRODUCT_LIST",
+  PRODUCT_IMAGE_VIEW: "PRODUCT_IMAGE_VIEW",
+  PRODUCT_IMAGE_UPDATE: "PRODUCT_IMAGE_UPDATE",
 } as const;
 
 export type AuditActionName = (typeof AuditAction)[keyof typeof AuditAction];

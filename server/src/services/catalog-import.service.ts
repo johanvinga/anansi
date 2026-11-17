@@ -1,4 +1,3 @@
-import type { Database } from "../db.js";
 import { errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import { AuditAction, recordAudit, type AuditRequestContext } from "./audit.service.js";
@@ -8,10 +7,14 @@ import { createIndependentAttributeInTransaction } from "./independent-attribute
 import { createProductInTransaction } from "./product.service.js";
 import { validateAttributeValues, type RawAttributeValue } from "./attribute-values.js";
 import { categoryTreeSnapshot, createCategoryInTransaction, lockCategoryTree } from "./category.service.js";
+import type { AssetDeps } from "./asset.service.js";
+import { readPrivateImage } from "../lib/read-private-image.js";
+import { commitStagedImage, discardStagedImage, stageImage } from "./stored-file-cleanup.js";
 
 export interface ImportProductInput {
   index: number;
   sku: string;
+  imageId?: string | null | undefined;
   cost?: string | undefined;
   currency?: string | undefined;
   minQuantity?: number | undefined;
@@ -27,7 +30,7 @@ export interface ImportMapping {
 }
 
 export async function importCatalogProducts(
-  db: Database,
+  deps: AssetDeps,
   request: AuditRequestContext,
   catalogId: string,
   jobId: string,
@@ -36,8 +39,26 @@ export async function importCatalogProducts(
   mappings: ImportMapping[],
   categoryTreeVersion?: string,
 ) {
+  const { db } = deps;
+  const staged = new Map<number, { key: string; imageId: string; pageNumber: number; mimeType: string; sizeBytes: number }>();
+  const committed = new Set<number>();
   try {
-    return await db.$transaction(async (tx) => {
+    if (new Set(products.map((product) => product.index)).size !== products.length) {
+      throw errors.validation([{ field: "products", message: "Select distinct product candidates from this analysis." }]);
+    }
+    for (const product of products) {
+      const imageId = product.imageId;
+      if (!imageId) continue;
+      const { image, buffer } = await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
+        const image = await tx.catalogImageCandidate.findFirst({ where: { id: imageId, jobId, job: { catalogId } } });
+        if (!image) throw errors.conflict("A selected image is no longer available. Review the analysis again.");
+        return { image, buffer: await readPrivateImage(deps.storage, image.storageKey, image.sizeBytes) };
+      }, { timeout: 120_000 });
+      const key = await stageImage(db, deps.storage, buffer, image.mimeType);
+      staged.set(product.index, { key, imageId: image.id, pageNumber: image.pageNumber, mimeType: image.mimeType, sizeBytes: buffer.length });
+    }
+    const outcome = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
       const catalog = await tx.catalog.findUnique({
         where: { id: catalogId },
@@ -54,6 +75,16 @@ export async function importCatalogProducts(
       if (!parsed.success) throw errors.conflict("The saved analysis results cannot be imported.");
       if (new Set(products.map((p) => p.index)).size !== products.length || products.some((p) => p.index >= parsed.data.products.length)) {
         throw errors.validation([{ field: "products", message: "Select distinct product candidates from this analysis." }]);
+      }
+      for (const selection of products) {
+        const stagedImage = staged.get(selection.index);
+        if (!stagedImage) continue;
+        const candidate = await tx.catalogImageCandidate.findFirst({
+          where: { id: stagedImage.imageId, jobId, pageNumber: stagedImage.pageNumber },
+        });
+        if (!candidate || !parsed.data.products[selection.index]!.source?.pageNumbers.includes(stagedImage.pageNumber)) {
+          throw errors.conflict("A selected image is not available for this product. Review the analysis again.");
+        }
       }
       const skuKeys = products.map((p) => nameKeyOf(p.sku));
       const existing = await tx.product.findMany({
@@ -211,15 +242,30 @@ export async function importCatalogProducts(
           minQuantity: selection.minQuantity ?? null, categories: (categoryIdsByProduct.get(selection.index) ?? []).map((id) => ({ id })),
           directAttributeValues: productValues.get(selection.index)!,
         });
+        const image = staged.get(selection.index);
+        if (image) {
+          await tx.productImage.create({
+            data: { productId: product.id, storageKey: image.key, mimeType: image.mimeType, sizeBytes: image.sizeBytes },
+          });
+          await commitStagedImage(tx, image.key);
+          await recordAudit(tx, request, {
+            action: AuditAction.PRODUCT_IMAGE_UPDATE, outcome: "success", entityType: "Product", entityId: product.id,
+            changes: { image: { before: null, after: { mimeType: image.mimeType, sizeBytes: image.sizeBytes } } },
+          });
+        }
         created.push(product.id);
       }
       await recordAudit(tx, request, {
         action: AuditAction.CATALOG_ANALYSIS_VIEW, outcome: "success",
         entityType: "Catalog", entityId: catalogId,
       });
-      return { created, skipped };
+      return { created, skipped, importedIndexes: selected.map((selection) => selection.index) };
     }, { timeout: 120_000 });
+    for (const index of outcome.importedIndexes) committed.add(index);
+    for (const [index, image] of staged) if (!committed.has(index)) await discardStagedImage(db, image.key);
+    return { created: outcome.created, skipped: outcome.skipped };
   } catch (error) {
+    for (const [index, image] of staged) if (!committed.has(index)) await discardStagedImage(db, image.key);
     if ((error as { code?: string } | null)?.code === PRISMA_UNIQUE_VIOLATION) {
       throw errors.conflict("An attribute or SKU changed during import. Review and retry.");
     }

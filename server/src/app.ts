@@ -29,6 +29,7 @@ import {
   type CatalogExtractionRuntime,
 } from "./services/catalog-extraction.runtime.js";
 import type { CatalogExtractionQueue } from "./services/catalog-extraction.queue.js";
+import { processStoredFileCleanup } from "./services/stored-file-cleanup.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -181,18 +182,32 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       registerPublicCatalogRoutes(v1, deps, { db, storage, log: app.log });
       registerAttributeSetRoutes(v1, db, guards);
       registerIndependentAttributeRoutes(v1, db, guards);
-      registerProductRoutes(v1, db, guards);
+      registerProductRoutes(v1, { db, storage, log: app.log }, guards);
       registerSettingsRoutes(v1, config, guards);
     },
     { prefix: "/api/v1" },
   );
 
+  let cleanupRunning: Promise<void> | undefined;
+  const cleanup = () => {
+    if (cleanupRunning) return;
+    cleanupRunning = processStoredFileCleanup(db, storage, app.log).catch((error: unknown) => {
+      app.log.error({ errorType: error instanceof Error ? error.name : "Unknown" }, "Stored image cleanup worker failed");
+    }).finally(() => {
+      cleanupRunning = undefined;
+    });
+  };
+  const cleanupTimer = setInterval(cleanup, 60_000);
+  cleanupTimer.unref();
+  cleanup();
   app.addHook("onClose", async () => {
+    clearInterval(cleanupTimer);
     if (extractionRuntime) {
       await extractionRuntime.close();
     } else if (extractionQueue) {
       await extractionQueue.close();
     }
+    await cleanupRunning;
     await db.$disconnect();
   });
 
