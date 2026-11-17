@@ -80,9 +80,9 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 |---|---|
 | FR-AUTH-01 | The system shall allow a user to log in with email and password. |
 | FR-AUTH-02 | Passwords shall be stored only as hashes (bcrypt or argon2). |
-| FR-AUTH-03 | Successful login shall create a session identified by an `httpOnly`, `Secure` (in production), `SameSite=Lax` cookie. |
+| FR-AUTH-03 | Successful session login shall create a session identified by an `httpOnly`, `Secure` (in production), `SameSite=Lax` cookie. |
 | FR-AUTH-04 | The user shall be able to log out, which invalidates the session. |
-| FR-AUTH-05 | All routes except the login page and health check shall require an authenticated session. |
+| FR-AUTH-05 | All routes except the login page and health check shall require an authenticated session, except the machine-to-machine catalog upload route in FR-CLG-15, which requires HTTP Basic authentication. |
 | FR-AUTH-06 | Login attempts shall be rate-limited per IP and per account. |
 | FR-AUTH-07 | Generic error messages shall be returned for failed logins (no user-enumeration). |
 | FR-AUTH-08 | A command-line seed script shall create the first admin account from an email and password. |
@@ -144,7 +144,7 @@ or create a root, but reject ambiguous names.
 | ID | Requirement |
 |---|---|
 | FR-CLG-01 | The user shall be able to upload a catalog with or without a supplier and assign, change or remove its supplier later. A catalog is a PDF file with a required **name** (1–200 chars) and an optional **version** (1–50 chars). |
-| FR-CLG-02 | Catalog uploads shall be PDF only, validated by MIME type and `%PDF-` signature, and follow FR-AST-03 and FR-AST-04. |
+| FR-CLG-02 | Catalog uploads shall be PDF only, validated by MIME type and `%PDF-` signature, and follow FR-AST-03 and FR-AST-04. The public catalog endpoint has a separate configurable size limit, default 100 MiB. |
 | FR-CLG-03 | The catalog's **weight** is its file size in bytes. It is computed at upload and is read-only. |
 | FR-CLG-04 | The user shall be able to list a supplier's catalogs with name, version, weight, and last updated date. |
 | FR-CLG-05 | The user shall be able to download a catalog. |
@@ -157,6 +157,7 @@ or create a root, but reject ambiguous names.
 | FR-CLG-12 | Gemini catalog analysis shall limit requests to eight per rolling minute per API key across application instances using the same Redis. Uploads, readiness checks, analysis, retries, and deletion count toward the limit. Requests wait for capacity; Redis errors prevent requests rather than bypassing the limit. |
 | FR-CLG-13 | For an unassigned catalog, an admin may review a suggested supplier, select an existing supplier, or create one. Supplier creation and catalog assignment require separate confirmation; a suggested name is not proof of identity. |
 | FR-CLG-14 | Catalog imports list extracted fields without an exact compatible independent attribute before product information. An admin may select which new text attributes to create, map fields to existing independent attributes, or skip them. Exact compatible independent attributes are reused unless changed or skipped. Selected attributes receive each product's extracted value. For typed or unit-bearing attributes, an admin must explicitly review each product value in the selected type and unit; the system validates it and never assumes or converts units. |
+| FR-CLG-15 | An external client may upload a PDF to the machine-to-machine catalog endpoint using an active admin's email and password over HTTPS. The caller may omit the name; the server generates a valid name from the sanitized filename. Uploads are unassigned, remain `not_processed`, and follow the same storage, validation, authorization and audit rules as other catalog uploads. Browser-session uploads still require a name. |
 
 ### 4.5 Attribute Sets (FR-ATS)
 
@@ -559,6 +560,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | GET | `/catalogs` | Global list including unassigned catalogs. Query: `q` (searches name, version, supplier name), repeated `category` (any selected category or descendants of a catalog or effective supplier assignment), `page`, `pageSize`. Each item includes nullable `supplierName`, catalog `categories`, effective `supplierCategoryNames`, and `analysisStatus`. |
 | GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes`, `updatedAt`, and `analysisStatus`. |
 | POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; optional `version`, `supplierId`, and JSON `categories`). Admin only. Analysis must be started separately. |
+| POST | `/public/catalogs` | Machine-to-machine PDF upload using HTTPS and HTTP Basic with an active admin's email and password. Requires `X-Catalog-Upload: 1`; rejects `Origin` and `Sec-Fetch-*` headers and CORS preflights. Multipart field `file` is required; `name` is optional and is generated from the sanitized filename if omitted. Returns `201` with `{ catalog }`; no session is created. See [public upload specification](spec/public-catalog-upload-api.md). |
 | POST | `/suppliers/{id}/catalogs` | Upload for an existing supplier using the same fields; catalog categories are merged into that supplier. Admin only. |
 | GET | `/catalogs/{catalogId}/extraction` | Get analysis status, progress, errors, and extracted product candidates. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
 | POST | `/catalogs/{catalogId}/extraction` | Queue a new analysis or retry after a completed/failed run. Admin only. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
@@ -640,7 +642,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | AttributeField.date | ISO 8601 date (`YYYY-MM-DD`). |
 | Asset upload | Any file type; size ≤ configured max. An invalid or overly long MIME type is stored as `application/octet-stream`. |
 | Catalog upload | PDF MIME type, `%PDF-` signature, size ≤ configured max. |
-| Catalog name | Trimmed, 1–200 characters, required. |
+| Catalog name | Stored name is trimmed and 1–200 characters. Required on session uploads; on machine-to-machine uploads an omitted name is generated from the sanitized filename. An explicitly empty name is invalid. |
 | Catalog version | Trimmed, 1–50 characters, optional. |
 | Catalog upload | Same rules as asset upload. |
 | Password (on creation or reset) | Minimum 12 characters. |
@@ -704,6 +706,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | NFR-15 | Localization | Currency and date display respect the configured locale; English UI in this release. |
 | NFR-16 | Portability | Application runs locally via Docker Compose (app + PostgreSQL). |
 | NFR-17 | Auditability | Audit entries are append-only and written in the same transaction as the change they record. |
+| NFR-18 | Security | The Basic-authenticated catalog upload endpoint accepts machine-to-machine requests only, requires HTTPS in production, rejects browser Origin and Fetch Metadata headers and preflights, and rate-limits authentication failures per account and IP. Credentials and file contents must never be logged. Production Fastify binds to loopback behind a trusted TLS proxy that overwrites forwarding headers. |
 
 ---
 
@@ -743,7 +746,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | `SESSION_SECRET` | Secret for session signing | – (required) |
 | `SESSION_IDLE_MINUTES` | Idle session timeout | 480 |
 | `UPLOAD_DIR` | Local storage path for assets | `./storage/assets` |
-| `MAX_UPLOAD_MB` | Maximum upload size | 25 |
+| `MAX_UPLOAD_MB` | Maximum size in MiB for session-authenticated asset and catalog uploads | 25 |
+| `PUBLIC_CATALOG_MAX_UPLOAD_MB` | Maximum size in MiB for public catalog API uploads | 100 |
 | `DEFAULT_CURRENCY` | Currency pre-selected in new product forms (ISO 4217) | `USD` |
 | `LOGIN_RATE_LIMIT` | Attempts per 15 minutes per IP | 10 |
 | `APP_ORIGIN` | Allowed frontend origin | `http://localhost:5173` |
@@ -755,7 +759,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | HTTP | Code | Used when |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Input fails validation. |
-| 401 | `UNAUTHENTICATED` | Missing or expired session. |
+| 401 | `UNAUTHENTICATED` | Missing or expired session, or invalid HTTP Basic credentials on the public catalog upload endpoint. |
 | 403 | `FORBIDDEN` | CSRF failure or insufficient permission. |
 | 404 | `NOT_FOUND` | Resource does not exist. |
 | 409 | `CONFLICT` | Duplicate name or SKU, or delete blocked by references. |

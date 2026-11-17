@@ -6,6 +6,7 @@ interface Attempt {
 /** In-memory fixed-window counter for failed logins, keyed by account email. */
 export class LoginLimiter {
   private readonly attempts = new Map<string, Attempt>();
+  private readonly pending = new Map<string, number>();
 
   constructor(
     private readonly maxAttempts: number,
@@ -16,6 +17,27 @@ export class LoginLimiter {
   isBlocked(key: string): boolean {
     const attempt = this.current(key);
     return attempt !== undefined && attempt.count >= this.maxAttempts;
+  }
+
+  retryAfterSeconds(key: string): number {
+    const attempt = this.current(key);
+    return attempt && attempt.count >= this.maxAttempts
+      ? Math.max(1, Math.ceil((attempt.resetAt - this.now()) / 1000))
+      : 0;
+  }
+
+  beginAttempt(key: string): boolean {
+    const pending = this.pending.get(key) ?? 0;
+    const failures = this.current(key)?.count ?? 0;
+    if (failures + pending >= this.maxAttempts) return false;
+    this.pending.set(key, pending + 1);
+    return true;
+  }
+
+  finishAttempt(key: string): void {
+    const pending = this.pending.get(key) ?? 0;
+    if (pending <= 1) this.pending.delete(key);
+    else this.pending.set(key, pending - 1);
   }
 
   recordFailure(key: string): void {

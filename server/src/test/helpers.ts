@@ -7,7 +7,10 @@ import type { UserRole } from "../generated/prisma/client.js";
 import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
 import { createUser } from "../services/user.service.js";
 
-export const TEST_DATABASE_URL = "postgresql://app:app@localhost:5432/supplier_app_test";
+export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "postgresql://app:app@localhost:5432/supplier_app_test";
+if (!new URL(TEST_DATABASE_URL).pathname.endsWith("_test")) {
+  throw new Error("Refusing to run tests against a non-test database.");
+}
 export const TEST_ORIGIN = "http://localhost:5173";
 
 export const ADMIN = { email: "admin@test.local", password: "AdminPassword123!" } as const;
@@ -34,9 +37,6 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 }
 
 export function createTestDatabase(): Database {
-  if (!TEST_DATABASE_URL.endsWith("_test")) {
-    throw new Error("Refusing to run tests against a non-test database.");
-  }
   return createDatabase(TEST_DATABASE_URL);
 }
 

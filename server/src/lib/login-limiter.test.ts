@@ -26,4 +26,16 @@ describe("LoginLimiter (FR-AUTH-06)", () => {
     limiter.reset("a@test.local");
     expect(limiter.isBlocked("a@test.local")).toBe(false);
   });
+
+  it("limits simultaneous attempts and releases capacity afterward", () => {
+    const limiter = new LoginLimiter(1, 60_000);
+    expect(limiter.beginAttempt("a@test.local")).toBe(true);
+    expect(limiter.beginAttempt("a@test.local")).toBe(false);
+    limiter.finishAttempt("a@test.local");
+    expect(limiter.beginAttempt("a@test.local")).toBe(true);
+    limiter.recordFailure("a@test.local");
+    limiter.finishAttempt("a@test.local");
+    expect(limiter.beginAttempt("a@test.local")).toBe(false);
+    expect(limiter.retryAfterSeconds("a@test.local")).toBeGreaterThan(0);
+  });
 });

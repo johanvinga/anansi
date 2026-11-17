@@ -11,11 +11,19 @@ describe("loadConfig (SPEC §11)", () => {
     const config = loadConfig(required);
     expect(config.sessionIdleMinutes).toBe(480);
     expect(config.maxUploadMb).toBe(25);
+    expect(config.publicCatalogMaxUploadMb).toBe(100);
     expect(config.defaultCurrency).toBe("USD");
     expect(config.loginRateLimit).toBe(10);
     expect(config.appOrigin).toBe("http://localhost:5173");
     expect(config.uploadDir).toBe("./storage/assets");
     expect(config.catalogExtractionEnabled).toBe(false);
+  });
+
+  it("allows an independent public catalog upload limit", () => {
+    const config = loadConfig({ ...required, MAX_UPLOAD_MB: "25", PUBLIC_CATALOG_MAX_UPLOAD_MB: "80" });
+    expect(config.maxUploadMb).toBe(25);
+    expect(config.publicCatalogMaxUploadMb).toBe(80);
+    expect(() => loadConfig({ ...required, PUBLIC_CATALOG_MAX_UPLOAD_MB: "0" })).toThrow(/PUBLIC_CATALOG_MAX_UPLOAD_MB/);
   });
 
   it("accepts only explicit true or false for catalog analysis", () => {
