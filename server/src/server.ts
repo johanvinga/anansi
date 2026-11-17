@@ -13,4 +13,4 @@ const shutdown = async (signal: string): Promise<void> => {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-await app.listen({ port: config.port, host: "0.0.0.0" });
+await app.listen({ port: config.port, host: config.nodeEnv === "production" ? "127.0.0.1" : "0.0.0.0" });

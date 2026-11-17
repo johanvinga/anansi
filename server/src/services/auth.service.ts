@@ -27,6 +27,84 @@ export interface AuthDeps {
   db: Database;
   config: AppConfig;
   limiter: LoginLimiter;
+  ipLimiter: LoginLimiter;
+}
+
+async function verifyCredentials(
+  db: Database,
+  email: string | null,
+  password: string,
+): Promise<{ user: User | null; valid: boolean }> {
+  const user = email ? await db.user.findUnique({ where: { email } }) : null;
+  const passwordOk = user
+    ? await verifyPassword(password, user.passwordHash)
+    : await verifyAgainstDummyHash(password);
+  return { user, valid: Boolean(user && user.isActive && passwordOk) };
+}
+
+export async function authenticateCatalogUpload(
+  deps: AuthDeps,
+  request: RequestInfo,
+  email: string | null,
+  password: string,
+): Promise<SessionUser> {
+  const { db, limiter, ipLimiter } = deps;
+  const ipKey = request.ipAddress ?? "unknown";
+  const actorEmail = email ?? "unknown";
+  const failure = (userId: string | null) =>
+    recordAudit(db, contextFor(request, { userId, email: actorEmail }), {
+      action: AuditAction.LOGIN_FAILED,
+      outcome: "failure",
+      entityType: "User",
+      entityId: userId ?? undefined,
+    });
+
+  const accountStarted = email ? limiter.beginAttempt(email) : true;
+  const ipStarted = accountStarted && ipLimiter.beginAttempt(ipKey);
+  if (!ipStarted) {
+    if (email && accountStarted) limiter.finishAttempt(email);
+    await failure(null);
+    throw errors.rateLimited();
+  }
+
+  try {
+    const { user, valid } = await verifyCredentials(db, email, password);
+    if (!valid || !user || !email) {
+      if (email) limiter.recordFailure(email);
+      ipLimiter.recordFailure(ipKey);
+      await failure(user?.id ?? null);
+      throw errors.unauthenticated("Invalid email or password.");
+    }
+
+    limiter.reset(email);
+    const updated = await db.$transaction(async (tx) => {
+      const result = await tx.user.updateMany({
+        where: { id: user.id, passwordHash: user.passwordHash, isActive: true },
+        data: { lastLoginAt: new Date() },
+      });
+      if (result.count !== 1) return null;
+      const current = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
+      await recordAudit(tx, contextFor(request, { userId: user.id, email: user.email }), {
+        action: AuditAction.LOGIN_SUCCESS,
+        outcome: "success",
+        entityType: "User",
+        entityId: user.id,
+      });
+      return current;
+    });
+    if (!updated) {
+      ipLimiter.recordFailure(ipKey);
+      limiter.recordFailure(email);
+      await failure(null);
+      throw errors.unauthenticated("Invalid email or password.");
+    }
+    if (updated.mustChangePassword) throw errors.forbidden("You must change your password before continuing.");
+    if (updated.role !== "admin") throw errors.forbidden("Admin role required.");
+    return toSessionUser(updated);
+  } finally {
+    if (email) limiter.finishAttempt(email);
+    ipLimiter.finishAttempt(ipKey);
+  }
 }
 
 function idleExpiry(config: AppConfig): Date {
@@ -53,12 +131,8 @@ export async function login(
     throw errors.rateLimited();
   }
 
-  const user = await db.user.findUnique({ where: { email } });
-  const passwordOk = user
-    ? await verifyPassword(password, user.passwordHash)
-    : await verifyAgainstDummyHash(password);
-
-  if (!user || !user.isActive || !passwordOk) {
+  const { user, valid } = await verifyCredentials(db, email, password);
+  if (!valid || !user) {
     limiter.recordFailure(email);
     await failure(user?.id ?? null);
     throw errors.unauthenticated("Invalid email or password.");

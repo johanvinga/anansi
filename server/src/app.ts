@@ -17,6 +17,7 @@ import { registerAttributeSetRoutes } from "./routes/attribute-set.routes.js";
 import { registerIndependentAttributeRoutes } from "./routes/independent-attribute.routes.js";
 import { registerCatalogRoutes } from "./routes/catalog.routes.js";
 import { registerProductRoutes } from "./routes/product.routes.js";
+import { registerPublicCatalogRoutes } from "./routes/public-catalog.routes.js";
 import { registerSettingsRoutes } from "./routes/settings.routes.js";
 import { registerAuditRoutes } from "./routes/audit.routes.js";
 import { registerAuthRoutes } from "./routes/auth.routes.js";
@@ -70,7 +71,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
             ],
           },
     genReqId: () => randomUUID(),
-    trustProxy: false,
+    trustProxy: config.nodeEnv === "production" ? ["127.0.0.1", "::1"] : false,
   });
   const extractionRuntime: CatalogExtractionRuntime | undefined = !config.catalogExtractionEnabled || options.catalogExtractionQueue
     ? undefined
@@ -86,6 +87,23 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
 
   // CSRF: cookie-authenticated state changes must originate from the app origin (NFR-03).
   app.addHook("onRequest", async (request) => {
+    const publicCatalogPath = request.url.split("?")[0] === "/api/v1/public/catalogs";
+    if (publicCatalogPath && request.method === "OPTIONS") {
+      throw errors.forbidden("This endpoint only accepts machine-to-machine requests.");
+    }
+    if (request.method === "POST" && publicCatalogPath) {
+      if (config.nodeEnv === "production" && request.protocol !== "https") {
+        throw errors.forbidden("HTTPS is required.");
+      }
+      if (
+        request.headers.origin !== undefined ||
+        Object.keys(request.headers).some((name) => name.startsWith("sec-fetch-")) ||
+        request.headers["x-catalog-upload"] !== "1"
+      ) {
+        throw errors.forbidden("This endpoint only accepts machine-to-machine requests.");
+      }
+      return;
+    }
     if (!SAFE_METHODS.has(request.method) && request.headers.origin !== config.appOrigin) {
       throw errors.forbidden("Request origin is not allowed.");
     }
@@ -146,7 +164,8 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   );
 
   const limiter = new LoginLimiter(config.loginRateLimit, LOGIN_WINDOW_MS);
-  const deps = { db, config, limiter };
+  const ipLimiter = new LoginLimiter(config.loginRateLimit, LOGIN_WINDOW_MS);
+  const deps = { db, config, limiter, ipLimiter };
   const guards = createGuards(deps);
 
   await app.register(
@@ -159,6 +178,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       registerSupplierRoutes(v1, { db, config, storage, log: app.log }, guards);
       registerAssetRoutes(v1, { db, storage, log: app.log }, guards);
       registerCatalogRoutes(v1, { db, storage, log: app.log, extractionQueue }, guards);
+      registerPublicCatalogRoutes(v1, deps, { db, storage, log: app.log });
       registerAttributeSetRoutes(v1, db, guards);
       registerIndependentAttributeRoutes(v1, db, guards);
       registerProductRoutes(v1, db, guards);

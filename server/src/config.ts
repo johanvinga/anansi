@@ -31,6 +31,7 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().min(1).default(""),
   R2_BUCKET: z.string().min(1).default(""),
   MAX_UPLOAD_MB: z.coerce.number().positive().default(25),
+  PUBLIC_CATALOG_MAX_UPLOAD_MB: z.coerce.number().positive().default(100),
   DEFAULT_CURRENCY: z
     .string()
     .refine(isCurrencyCode, "DEFAULT_CURRENCY must be an ISO 4217 code")
@@ -64,6 +65,7 @@ export interface AppConfig {
   r2SecretAccessKey: string;
   r2Bucket: string;
   maxUploadMb: number;
+  publicCatalogMaxUploadMb: number;
   defaultCurrency: string;
   loginRateLimit: number;
   appOrigin: string;
@@ -117,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     r2SecretAccessKey: e.R2_SECRET_ACCESS_KEY,
     r2Bucket: e.R2_BUCKET,
     maxUploadMb: e.MAX_UPLOAD_MB,
+    publicCatalogMaxUploadMb: e.PUBLIC_CATALOG_MAX_UPLOAD_MB,
     defaultCurrency: e.DEFAULT_CURRENCY,
     loginRateLimit: e.LOGIN_RATE_LIMIT,
     appOrigin: e.APP_ORIGIN,
