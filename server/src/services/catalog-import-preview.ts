@@ -7,6 +7,7 @@ import { matchCatalogAttribute, normalizeAttributeName } from "./catalog-attribu
 import { categoryTreeSnapshot } from "./category.service.js";
 
 export const resultsSchema = z.object({
+  imageWarnings: z.array(z.string().max(200)).max(100).optional(),
   products: z.array(z.object({
     name: z.string().trim().min(1).max(200),
     sku: z.string().trim().max(100).nullable(),
@@ -16,6 +17,7 @@ export const resultsSchema = z.object({
       name: z.string().trim().min(1).max(100),
       value: z.string().trim().min(1).max(500),
     })).max(100),
+    source: z.object({ pageNumbers: z.array(z.number().int().positive()) }).optional(),
   })).max(1000),
 });
 
@@ -51,6 +53,9 @@ export async function previewCatalogImport(
   const fieldById = new Map(fields.map((field) => [field.id, field]));
   const grouped = new Map<string, { name: string; examples: string[] }>();
   const selected = indexes.map((index) => ({ index, ...parsed.data.products[index]! }));
+  const imageCandidates = await db.catalogImageCandidate.findMany({
+    where: { jobId }, select: { id: true, pageNumber: true }, orderBy: [{ pageNumber: "asc" }, { id: "asc" }],
+  });
   const tree = await categoryTreeSnapshot(db);
   for (const product of selected) {
     for (const attribute of product.attributes) {
@@ -88,6 +93,7 @@ export async function previewCatalogImport(
       index: product.index,
       name: product.name,
       sku: product.sku,
+      images: imageCandidates.filter((image) => product.source?.pageNumbers.includes(image.pageNumber)),
       categories: [...new Map((product.categories ?? []).map((name) => [nameKeyOf(name), name.trim()])).values()].map((name) => ({
         name,
         matches: tree.categories.filter((category) => nameKeyOf(category.name.en) === nameKeyOf(name)).map((category) => category.id),
@@ -109,5 +115,5 @@ export async function previewCatalogImport(
     entityType: "Catalog",
     entityId: catalogId,
   });
-  return { jobId, supplierId: catalog.supplierId, products, attributes, categoryTree: tree };
+  return { jobId, supplierId: catalog.supplierId, products, attributes, categoryTree: tree, imageWarnings: parsed.data.imageWarnings ?? [] };
 }

@@ -18,6 +18,7 @@ import {
   recordAudit,
   type AuditRequestContext,
 } from "./audit.service.js";
+import { queueStoredFileRemoval } from "./stored-file-cleanup.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -57,6 +58,7 @@ const listInclude = {
   supplier: { select: { id: true, name: true } },
   attributeSet: { select: { id: true, nameEn: true, nameFr: true } },
   categories: { include: { category: true } },
+  image: true,
 } satisfies Prisma.ProductInclude;
 
 const detailInclude = {
@@ -77,6 +79,7 @@ function toProductSummary(row: ListRow) {
     minQuantity: row.minQuantity,
     cost: row.cost?.toFixed(2) ?? null,
     currency: row.currency,
+    image: row.image ? { mimeType: row.image.mimeType, sizeBytes: row.image.sizeBytes } : null,
     attributeSet: row.attributeSet
       ? { id: row.attributeSet.id, name: { en: row.attributeSet.nameEn, fr: row.attributeSet.nameFr } }
       : null,
@@ -401,9 +404,11 @@ export async function updateProduct(
   }
 }
 
-export async function deleteProduct(db: Database, request: AuditRequestContext, id: string): Promise<void> {
-  await db.$transaction(async (tx) => {
+export async function deleteProduct(db: Database, request: AuditRequestContext, id: string): Promise<boolean> {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM products WHERE id = ${id}::uuid FOR UPDATE`;
     const existing = await loadDetail(tx, id);
+    if (existing.image) await queueStoredFileRemoval(tx, existing.image.storageKey);
     // Attribute values are removed by the database cascade (SPEC §8.3).
     await tx.product.delete({ where: { id } });
     await recordAudit(tx, request, {
@@ -413,5 +418,6 @@ export async function deleteProduct(db: Database, request: AuditRequestContext, 
       entityId: id,
       changes: diffFields(snapshotOf(existing), {}),
     });
+    return existing.image !== null;
   });
 }

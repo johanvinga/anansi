@@ -14,6 +14,8 @@ import {
 } from "./audit.service.js";
 import { removeStoredFiles, type AssetDeps, type UploadedFile } from "./asset.service.js";
 import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import { queueStoredFileRemoval } from "./stored-file-cleanup.js";
+import { readPrivateImage } from "../lib/read-private-image.js";
 
 export interface CatalogMetadata {
   name: string;
@@ -395,6 +397,27 @@ export async function getCatalogExtraction(
   return { analysisStatus: catalog.analysisStatus, job: job ? toExtractionJobDto(job) : null, matchingSupplier };
 }
 
+export async function prepareCatalogImage(
+  deps: AssetDeps, request: AuditRequestContext, catalogId: string, jobId: string, imageId: string,
+) {
+  return deps.db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
+    const catalog = await tx.catalog.findUnique({
+      where: { id: catalogId },
+      include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    const job = catalog?.extractionJobs[0];
+    if (!job || job.id !== jobId || job.status !== "processed") throw errors.notFound("Catalog image");
+    const image = await tx.catalogImageCandidate.findFirst({ where: { id: imageId, jobId } });
+    if (!image) throw errors.notFound("Catalog image");
+    const buffer = await readPrivateImage(deps.storage, image.storageKey, image.sizeBytes);
+    await recordAudit(tx, request, {
+      action: AuditAction.CATALOG_ANALYSIS_VIEW, outcome: "success", entityType: "Catalog", entityId: catalogId,
+    });
+    return { mimeType: image.mimeType, sizeBytes: image.sizeBytes, buffer };
+  }, { timeout: 120_000 });
+}
+
 export async function startCatalogExtraction(
   deps: AssetDeps,
   request: AuditRequestContext,
@@ -410,6 +433,13 @@ export async function startCatalogExtraction(
     if (!existing) throw errors.notFound("Catalog");
     const latest = existing.extractionJobs[0];
     if (latest?.status === "processing") throw errors.conflict("Catalog analysis is already running.");
+    if (latest?.status !== "queued") {
+      const previousImages = await tx.catalogImageCandidate.findMany({
+        where: { job: { catalogId } }, select: { storageKey: true },
+      });
+      for (const image of previousImages) await queueStoredFileRemoval(tx, image.storageKey);
+      await tx.catalogImageCandidate.deleteMany({ where: { job: { catalogId } } });
+    }
     const queued = latest?.status === "queued"
       ? latest
       : await tx.catalogExtractionJob.create({ data: { catalogId } });
@@ -468,8 +498,13 @@ export async function updateCatalog(
 
 export async function deleteCatalog(deps: AssetDeps, request: AuditRequestContext, catalogId: string): Promise<void> {
   const storageKey = await deps.db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
     const existing = await tx.catalog.findUnique({ where: { id: catalogId } });
     if (!existing) throw errors.notFound("Catalog");
+    const images = await tx.catalogImageCandidate.findMany({
+      where: { job: { catalogId } }, select: { storageKey: true },
+    });
+    for (const image of images) await queueStoredFileRemoval(tx, image.storageKey);
 
     await tx.catalog.delete({ where: { id: catalogId } });
     await recordAudit(tx, request, {

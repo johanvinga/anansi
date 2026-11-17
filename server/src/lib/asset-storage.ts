@@ -11,7 +11,7 @@ export interface AssetStorage {
   remove(key: string): Promise<void>;
 }
 
-const STORAGE_KEY_PATTERN = /^(?:(?:assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|(?:(?:catalogs\/)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf))$/;
+const STORAGE_KEY_PATTERN = /^(?:(?:assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|(?:(?:catalogs\/)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf)|(?:images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))$/;
 
 export function assertValidStorageKey(key: string): void {
   if (!STORAGE_KEY_PATTERN.test(key)) throw new Error("Invalid storage key");

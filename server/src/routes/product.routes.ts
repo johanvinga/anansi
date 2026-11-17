@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { Database } from "../db.js";
+import { AppError, errors } from "../errors.js";
+import { MAX_PRODUCT_IMAGE_BYTES } from "../lib/product-image.js";
+import type { AssetDeps } from "../services/asset.service.js";
+import { deleteProductImage, getProductImage, uploadProductImage } from "../services/product-image.service.js";
 import { categoryInputSchema } from "../lib/category-input.js";
 import { isCurrencyCode } from "../lib/currency.js";
 import { translatedNameInput, translatedNameUpdate, translatedTextInput } from "../lib/translations.js";
@@ -71,7 +74,8 @@ const listQuerySchema = paginationSchema.extend({
 
 const idParams = z.object({ id: uuidSchema });
 
-export function registerProductRoutes(app: FastifyInstance, db: Database, guards: Guards): void {
+export function registerProductRoutes(app: FastifyInstance, deps: AssetDeps, guards: Guards): void {
+  const { db } = deps;
   app.get("/products", { preHandler: guards.requireUser }, async (request) => {
     const query = parseInput(listQuerySchema, request.query);
     return listProducts(db, auditContext(request), { ...query, q: query.q || undefined });
@@ -95,6 +99,37 @@ export function registerProductRoutes(app: FastifyInstance, db: Database, guards
     return { product: await getProduct(db, auditContext(request), id) };
   });
 
+  app.get("/products/:id/image", { preHandler: guards.requireUser }, async (request, reply) => {
+    const { id } = parseInput(idParams, request.params);
+    const image = await getProductImage(deps, auditContext(request), id);
+    return reply.header("Content-Type", image.mimeType).header("Content-Length", String(image.sizeBytes))
+      .header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store").send(image.buffer);
+  });
+
+  app.put("/products/:id/image", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { id } = parseInput(idParams, request.params);
+    let file: { buffer: Buffer; mimeType: string } | undefined;
+    for await (const part of request.parts({ limits: { fileSize: MAX_PRODUCT_IMAGE_BYTES, files: 1, fields: 0, parts: 1 } })) {
+      if (part.type !== "file" || part.fieldname !== "file" || file) {
+        if (part.type === "file") part.file.resume();
+        throw errors.validation([{ field: "file", message: "Provide exactly one image file." }]);
+      }
+      const buffer = await part.toBuffer();
+      if (part.file.truncated) throw new AppError(413, "PAYLOAD_TOO_LARGE", "The image exceeds 5 MiB.");
+      file = { buffer, mimeType: part.mimetype };
+    }
+    if (!file) throw errors.validation([{ field: "file", message: "An image file is required." }]);
+    const result = await uploadProductImage(deps, auditContext(request), id, file.buffer, file.mimeType);
+    if (result.cleanupPending) reply.header("X-Storage-Cleanup", "pending");
+    return { image: result.image };
+  });
+
+  app.delete("/products/:id/image", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { id } = parseInput(idParams, request.params);
+    await deleteProductImage(deps, auditContext(request), id);
+    return reply.header("X-Storage-Cleanup", "pending").status(204).send();
+  });
+
   app.put("/products/:id", { preHandler: guards.requireAdmin }, async (request) => {
     const { id } = parseInput(idParams, request.params);
     const body = parseInput(productUpdateSchema, request.body);
@@ -103,7 +138,8 @@ export function registerProductRoutes(app: FastifyInstance, db: Database, guards
 
   app.delete("/products/:id", { preHandler: guards.requireAdmin }, async (request, reply) => {
     const { id } = parseInput(idParams, request.params);
-    await deleteProduct(db, auditContext(request), id);
+    const cleanupPending = await deleteProduct(db, auditContext(request), id);
+    if (cleanupPending) reply.header("X-Storage-Cleanup", "pending");
     return reply.status(204).send();
   });
 }
