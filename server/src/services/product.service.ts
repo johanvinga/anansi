@@ -38,6 +38,7 @@ export interface ProductInput {
   /** When omitted on update and the set is unchanged, existing values are kept. */
   attributeValues?: AttributeValueInput[] | undefined;
   directAttributeValues?: AttributeValueInput[] | undefined;
+  catalogSource?: { catalogId: string; pageNumbers: number[] } | undefined;
 }
 
 export interface ProductUpdateInput extends ProductInput {
@@ -59,6 +60,7 @@ const listInclude = {
   attributeSet: { select: { id: true, nameEn: true, nameFr: true } },
   categories: { include: { category: true } },
   image: true,
+  sourceCatalog: { select: { id: true, name: true, version: true } },
 } satisfies Prisma.ProductInclude;
 
 const detailInclude = {
@@ -80,6 +82,14 @@ function toProductSummary(row: ListRow) {
     cost: row.cost?.toFixed(2) ?? null,
     currency: row.currency,
     image: row.image ? { mimeType: row.image.mimeType, sizeBytes: row.image.sizeBytes } : null,
+    catalogSource: row.sourceCatalog
+      ? {
+          id: row.sourceCatalog.id,
+          name: row.sourceCatalog.name,
+          version: row.sourceCatalog.version,
+          pageNumbers: [...row.sourcePageNumbers].sort((a, b) => a - b),
+        }
+      : null,
     attributeSet: row.attributeSet
       ? { id: row.attributeSet.id, name: { en: row.attributeSet.nameEn, fr: row.attributeSet.nameFr } }
       : null,
@@ -132,6 +142,8 @@ function snapshotOf(row: DetailRow): Record<string, unknown> {
     currency: row.currency,
     attributeSet: row.attributeSet?.nameEn ?? null,
     categories: row.categories.map((link) => link.category.nameEn).sort(),
+    catalogSource: row.sourceCatalog?.name ?? null,
+    catalogPages: row.sourcePageNumbers,
   };
   for (const value of row.values) {
     const output = fromValueColumns(value.field.dataType as AttributeDataType, value);
@@ -219,6 +231,38 @@ async function assertSupplierExists(db: Database | Tx, supplierId: string, asVal
   }
 }
 
+async function assertCatalogSource(
+  tx: Tx,
+  supplierId: string,
+  source: ProductInput["catalogSource"],
+) {
+  if (!source) return;
+  const pages = [...new Set(source.pageNumbers)].sort((a, b) => a - b);
+  if (pages.length === 0 || pages.some((page) => !Number.isInteger(page) || page <= 0)) {
+    throw errors.validation([{ field: "catalogSource.pageNumbers", message: "Catalog page numbers must be positive integers." }]);
+  }
+  const catalog = await tx.catalog.findUnique({
+    where: { id: source.catalogId },
+    select: {
+      supplierId: true,
+      extractionJobs: {
+        where: { status: "processed" },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { totalPages: true },
+      },
+    },
+  });
+  if (!catalog || catalog.supplierId !== supplierId) {
+    throw errors.validation([{ field: "catalogSource.catalogId", message: "The source catalog must belong to this product's supplier." }]);
+  }
+  const totalPages = catalog.extractionJobs[0]?.totalPages;
+  if (pages.some((page) => totalPages !== undefined && page > totalPages)) {
+    throw errors.validation([{ field: "catalogSource.pageNumbers", message: "A catalog page number is outside the analyzed catalog." }]);
+  }
+  return pages;
+}
+
 export async function listProducts(db: Database, request: AuditRequestContext, filters: ListProductsFilters) {
   const categoryIds = await expandCategoryIds(db, filters.category ?? []);
   const categoryFilters: Prisma.ProductWhereInput[] = [];
@@ -302,11 +346,14 @@ export async function createProductInTransaction(
     throw errors.validation([{ field: "directAttributeValues", message: "An attribute cannot be submitted both directly and through the set." }]);
   }
   const categoryIds = await resolveCategoryIds(tx, request, input.categories ?? []);
+  const sourcePageNumbers = await assertCatalogSource(tx, supplierId, input.catalogSource);
   const created = await tx.product.create({
     data: {
       supplierId, ...nameAndDescriptionColumns(input), supplierSku: input.supplierSku.trim(),
       skuKey: nameKeyOf(input.supplierSku), minQuantity: input.minQuantity, cost: input.cost,
       currency: input.currency, attributeSetId, values: { create: [...values, ...directValues] },
+      sourceCatalogId: input.catalogSource?.catalogId ?? null,
+      sourcePageNumbers,
       categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
     },
   });

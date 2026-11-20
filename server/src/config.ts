@@ -6,14 +6,14 @@ const envSchema = z.object({
   REDIS_URL: z.url().default("redis://127.0.0.1:6379"),
   CATALOG_EXTRACTION_ENABLED: z.enum(["true", "false"]).default("false"),
   GEMINI_API_KEY: z.string().default(""),
-  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.5-flash-lite"),
+  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.1-flash-lite"),
   CATALOG_OCR_LANGUAGES: z.string().min(1).default("eng+fra"),
   CATALOG_EXTRACTION_MAX_PAGES: z.coerce
     .number()
     .int()
     .positive()
     .max(500)
-    .default(200),
+    .default(300),
   CATALOG_EXTRACTION_CONCURRENCY: z.coerce
     .number()
     .int()

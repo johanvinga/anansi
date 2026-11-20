@@ -7,8 +7,10 @@ Status: **implemented**. Production use requires the deployment checks below.
 
 Allow an external script or integration to upload a PDF catalog over HTTPS using
 an existing administrator's email address and password. A caller may omit the
-catalog name; the server generates one from the uploaded filename. The catalog
-is created without a supplier or categories and can be edited in the existing UI.
+catalog name; the server immediately generates one from the uploaded filename.
+No Gemini request blocks upload. A later, explicitly started full analysis may
+replace that generated placeholder and assign a complete root-to-leaf category
+path. The catalog is created without a supplier and can be edited in the existing UI.
 
 This is an authenticated public-facing endpoint, not anonymous access. It only
 adds catalog upload; supplier assignment, catalog editing, download, analysis,
@@ -18,8 +20,8 @@ the application, not just this endpoint.
 
 ## Existing behavior and compatibility
 
-- `POST /api/v1/catalogs` currently requires an admin session, an `Origin`
-  matching `APP_ORIGIN`, and a nonempty catalog `name`.
+- `POST /api/v1/catalogs` requires an admin session and an `Origin` matching
+  `APP_ORIGIN`; its catalog `name` is optional.
 - `Catalog.name` is non-null and limited to 200 characters. Keep that invariant:
   no database migration or nullable-name UI changes are needed.
 - Catalog uploads validate both PDF MIME type and `%PDF-` signature, store files
@@ -27,8 +29,8 @@ the application, not just this endpoint.
   records transactionally. Reuse this service rather than duplicating it.
 - Analysis is disabled by default and, when enabled, is started explicitly.
   An upload remains `not_processed` and must not start analysis or import data.
-- Existing session-authenticated endpoints, CSRF rules, and their required-name
-  behavior must remain unchanged.
+- Existing session-authenticated endpoints and CSRF rules remain unchanged;
+  browser and machine-to-machine uploads use the same metadata inference.
 
 ## Endpoint
 
@@ -48,18 +50,29 @@ Request: `multipart/form-data`.
 | Field | Required | Behavior |
 |---|---|---|
 | `file` | Yes | Exactly one PDF file part; declare `application/pdf`. |
-| `name` | No | If supplied, trim and validate as 1–200 characters. Empty or whitespace-only is invalid. If omitted, derive as below. |
+| `name` | No | If supplied, trim and validate as 1–200 characters. Omitted, empty, or whitespace-only values use vendor deduction and the filename fallback below. |
 
 Reject duplicate fields, additional file parts, and unsupported fields with a
 validation error. The file part must have a multipart filename parameter so the
 server can recognize it as a file; a catalog name field is not required.
 
-**Name derivation:** sanitize the supplied filename using the existing
+**Name derivation:** when no non-empty name is supplied, sanitize the supplied
+filename using the existing
 `sanitizeFileName` helper, remove a trailing `.pdf` case-insensitively, trim
 the result, and truncate safely to the existing 200-character validator limit
 without splitting a surrogate pair. If the result is empty, use `Catalog`.
 The original sanitized filename is still stored separately. Generated names
 need not be unique. For example, `spring prices.PDF` becomes `spring prices`.
+
+**Analysis metadata:** a later full Gemini analysis classifies the catalog into
+every distinct category represented by its extracted products and identifies a
+clear catalog title in the same request. Gemini returns complete bilingual
+root-to-leaf paths. Existing nodes are reused under the same parent by their
+English name, while missing nodes are created and audited when the analysis
+completes. Only the leaf of each path is directly assigned to the catalog. The
+inferred title replaces a filename-derived placeholder but never an explicitly
+supplied catalog name. If either value is uncertain, the existing name or
+categories are retained.
 
 **File validation:** enforce the `PUBLIC_CATALOG_MAX_UPLOAD_MB` limit (default
 100 MiB), PDF MIME type and `%PDF-` signature, private storage, and cleanup on
@@ -204,8 +217,8 @@ catalog accepted for upload.
 - Existing admin credentials can upload a valid PDF without `name`; response is
   `201`, generated name and DTO fields are correct, the catalog appears in the
   existing UI, and `analysisStatus` is `not_processed`.
-- Explicit valid name is preserved after trimming; blank, oversized, duplicate,
-  and unknown fields fail. Test filenames with paths, unsafe characters,
+- Explicit valid name is preserved after trimming; blank names use deduction,
+  while oversized, duplicate, and unknown fields fail. Test filenames with paths, unsafe characters,
   uppercase extension, empty stem, long and non-ASCII names; generated names
   always meet the existing validator and stored filenames remain sanitized.
 - Missing, malformed, wrong, inactive, standard-user, and password-change

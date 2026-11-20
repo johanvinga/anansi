@@ -279,6 +279,7 @@
     "suppliers": "Fournisseurs",
     "actions": "Actions",
     "noCategories": "Aucune catégorie trouvée.",
+    "noChildCategories": "Aucune catégorie enfant trouvée.",
     "confirmDelete": "Supprimer la catégorie ?",
     "confirmDeleteDescription": "La catégorie est retirée des fournisseurs, produits et catalogues. Ces éléments sont conservés.",
     "noneAssigned": "Aucune catégorie attribuée.",
@@ -319,6 +320,7 @@
     "addCatalog": "Ajouter un catalogue",
     "editCatalog": "Modifier le catalogue",
     "catalogName": "Nom du catalogue",
+    "catalogNameOptional": "Nom du catalogue (facultatif)",
     "pdfFile": "Fichier PDF",
     "uploadedAt": "Téléversé le",
     "searchLabel": "Rechercher des catalogues",
@@ -329,7 +331,6 @@
     "existingSupplier": "Utiliser un fournisseur existant",
     "addNewSupplier": "Ajouter un nouveau fournisseur",
     "uploading": "Téléversement en cours…",
-    "catalogNameRequired": "Le nom du catalogue est obligatoire.",
     "selectSupplier": "Sélectionnez un fournisseur ou ajoutez-en un nouveau.",
     "analysis": "Analyse",
     "analysisStatus": {
@@ -580,7 +581,9 @@
     "deleteAria": "Supprimer {{name}}",
     "confirmDeleteTitle": "Supprimer {{name}} ?",
     "chooseSupplier": "Choisissez un fournisseur.",
-    "archivedKept": "Champs archivés conservés sur ce produit"
+    "archivedKept": "Champs archivés conservés sur ce produit",
+    "catalogSource": "Catalogue source",
+    "catalogPages": "pages"
   },
   "pagination": {
     "summary_one": "Page {{page}} sur {{totalPages}} · {{count}} élément",

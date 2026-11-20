@@ -143,21 +143,21 @@ or create a root, but reject ambiguous names.
 
 | ID | Requirement |
 |---|---|
-| FR-CLG-01 | The user shall be able to upload a catalog with or without a supplier and assign, change or remove its supplier later. A catalog is a PDF file with a required **name** (1–200 chars) and an optional **version** (1–50 chars). |
+| FR-CLG-01 | The user shall be able to upload a catalog with or without a supplier and assign, change or remove its supplier later. A catalog has a stored **name** (1–200 chars) and an optional **version** (1–50 chars). Uploads complete immediately without making a Gemini request. The upload name may be omitted, in which case a sanitized filename is used as a temporary name. When the admin later starts full analysis, Gemini may replace only that generated placeholder with a clear catalog title and generate every distinct category represented by the extracted product candidates as complete bilingual root-to-leaf paths. Existing category ancestors are reused by exact sibling concept and missing nodes are created in the analysis completion transaction. Explicitly supplied names are preserved. |
 | FR-CLG-02 | Catalog uploads shall be PDF only, validated by MIME type and `%PDF-` signature, and follow FR-AST-03 and FR-AST-04. The public catalog endpoint has a separate configurable size limit, default 100 MiB. |
 | FR-CLG-03 | The catalog's **weight** is its file size in bytes. It is computed at upload and is read-only. |
 | FR-CLG-04 | The user shall be able to list a supplier's catalogs with name, version, weight, and last updated date. |
 | FR-CLG-05 | The user shall be able to download a catalog. |
 | FR-CLG-06 | An admin may edit a catalog's name, version, supplier and categories. **Last updated** is set automatically to the time of the most recent change. |
 | FR-CLG-07 | The user shall be able to delete a catalog (file and metadata). |
-| FR-CLG-08 | Catalog analysis is disabled by default. When enabled, an admin explicitly starts asynchronous Gemini analysis; uploads are not analyzed automatically. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
+| FR-CLG-08 | Full catalog analysis is disabled by default. When enabled, an admin explicitly starts asynchronous Gemini analysis. Upload itself makes no Gemini request and does not create an extraction job. The full Gemini analysis identifies the catalog title and all distinct product-derived categories together with product candidates. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
 | FR-CLG-09 | Analysis sends the entire catalog PDF to Google Gemini and identifies product candidates and attributes when recognizable, preserving source page references and excerpts. Output is unverified and is validated before storage. |
 | FR-CLG-10 | Extracted products and suggested attribute fields shall remain review candidates; analysis shall not create products or attribute sets automatically. An admin may review candidates, create products from selected candidates, create an attribute set from suggested fields, and retry a failed or completed analysis. |
 | FR-CLG-11 | Catalogs have independent categories. Assigning a supplier or adding catalog categories merges those categories into the supplier's direct categories without duplicates. Existing supplier categories remain, including after catalog unassignment, reassignment, category removal, or deletion. |
 | FR-CLG-12 | Gemini catalog analysis shall limit requests to eight per rolling minute per API key across application instances using the same Redis. Uploads, readiness checks, analysis, retries, and deletion count toward the limit. Requests wait for capacity; Redis errors prevent requests rather than bypassing the limit. |
 | FR-CLG-13 | For an unassigned catalog, an admin may review a suggested supplier, select an existing supplier, or create one. Supplier creation and catalog assignment require separate confirmation; a suggested name is not proof of identity. |
 | FR-CLG-14 | Catalog imports list extracted fields without an exact compatible independent attribute before product information. An admin may select which new text attributes to create, map fields to existing independent attributes, or skip them. Exact compatible independent attributes are reused unless changed or skipped. Selected attributes receive each product's extracted value. For typed or unit-bearing attributes, an admin must explicitly review each product value in the selected type and unit; the system validates it and never assumes or converts units. |
-| FR-CLG-15 | An external client may upload a PDF to the machine-to-machine catalog endpoint using an active admin's email and password over HTTPS. The caller may omit the name; the server generates a valid name from the sanitized filename. Uploads are unassigned, remain `not_processed`, and follow the same storage, validation, authorization and audit rules as other catalog uploads. Browser-session uploads still require a name. |
+| FR-CLG-15 | An external client may upload a PDF to the machine-to-machine catalog endpoint using an active admin's email and password over HTTPS. The caller may omit the name; the server immediately applies the same sanitized filename fallback as browser-session uploads without calling Gemini. Uploads are unassigned, remain `not_processed`, and follow the same storage, validation, authorization and audit rules as other catalog uploads. |
 
 ### 4.5 Attribute Sets (FR-ATS)
 
@@ -205,6 +205,7 @@ or create a root, but reject ambiguous names.
 | FR-PRD-11 | The product create and edit forms shall include the name and description fields in both locales. The product detail view shows the description in the active language, falling back to English. |
 | FR-PRD-10 | Products shall display their cost with the product's own currency. |
 | FR-PRD-12 | A product may have zero or more categories. Product create/edit forms shall allow admins to assign categories; supplier category summaries inherit the categories of their products (FR-SUP-11). |
+| FR-PRD-13 | A product imported from a catalog shall retain the source catalog and all distinct 1-based physical PDF page numbers on which it was identified. Manually created products may have no catalog source. |
 
 ### 4.7 Supplier Detail View (FR-UI)
 
@@ -559,8 +560,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 |---|---|---|
 | GET | `/catalogs` | Global list including unassigned catalogs. Query: `q` (searches name, version, supplier name), repeated `category` (any selected category or descendants of a catalog or effective supplier assignment), `page`, `pageSize`. Each item includes nullable `supplierName`, catalog `categories`, effective `supplierCategoryNames`, and `analysisStatus`. |
 | GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes`, `updatedAt`, and `analysisStatus`. |
-| POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, required `name`; optional `version`, `supplierId`, and JSON `categories`). Admin only. Analysis must be started separately. |
-| POST | `/public/catalogs` | Machine-to-machine PDF upload using HTTPS and HTTP Basic with an active admin's email and password. Requires `X-Catalog-Upload: 1`; rejects `Origin` and `Sec-Fetch-*` headers and CORS preflights. Multipart field `file` is required; `name` is optional and is generated from the sanitized filename if omitted. Returns `201` with `{ catalog }`; no session is created. See [public upload specification](spec/public-catalog-upload-api.md). |
+| POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, optional `name`, `version`, `supplierId`, and JSON `categories`). An omitted name is deduced from the vendor on physical pages 1–3 or generated from the sanitized filename. Admin only. Full analysis must be started separately. |
+| POST | `/public/catalogs` | Machine-to-machine PDF upload using HTTPS and HTTP Basic with an active admin's email and password. Requires `X-Catalog-Upload: 1`; rejects `Origin` and `Sec-Fetch-*` headers and CORS preflights. Multipart field `file` is required; `name` is optional and follows the same vendor deduction and filename fallback as browser uploads. Returns `201` with `{ catalog }`; no session is created. See [public upload specification](spec/public-catalog-upload-api.md). |
 | POST | `/suppliers/{id}/catalogs` | Upload for an existing supplier using the same fields; catalog categories are merged into that supplier. Admin only. |
 | GET | `/catalogs/{catalogId}/extraction` | Get analysis status, progress, errors, and extracted product candidates. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
 | POST | `/catalogs/{catalogId}/extraction` | Queue a new analysis or retry after a completed/failed run. Admin only. Returns 503 `FEATURE_DISABLED` when analysis is disabled. |
@@ -642,7 +643,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | AttributeField.date | ISO 8601 date (`YYYY-MM-DD`). |
 | Asset upload | Any file type; size ≤ configured max. An invalid or overly long MIME type is stored as `application/octet-stream`. |
 | Catalog upload | PDF MIME type, `%PDF-` signature, size ≤ configured max. |
-| Catalog name | Stored name is trimmed and 1–200 characters. Required on session uploads; on machine-to-machine uploads an omitted name is generated from the sanitized filename. An explicitly empty name is invalid. |
+| Catalog name | Stored name is trimmed and 1–200 characters. On all upload endpoints, omitted, empty, or whitespace-only names trigger vendor deduction from physical pages 1–3 and then sanitized-filename fallback. A non-empty supplied name is preserved. |
 | Catalog version | Trimmed, 1–50 characters, optional. |
 | Catalog upload | Same rules as asset upload. |
 | Password (on creation or reset) | Minimum 12 characters. |
@@ -740,8 +741,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | `DATABASE_URL` | PostgreSQL connection string | – |
 | `CATALOG_EXTRACTION_ENABLED` | Enable manual Gemini catalog analysis | `false` |
 | `GEMINI_API_KEY` | Server-side Google AI Studio API key; required when analysis is enabled | – |
-| `GEMINI_MODEL` | Gemini model used for catalog analysis | `gemini-3.5-flash-lite` |
-| `CATALOG_EXTRACTION_MAX_PAGES` | Maximum pages analyzed per catalog | 200 |
+| `GEMINI_MODEL` | Gemini model used for catalog analysis | `gemini-3.1-flash-lite` |
+| `CATALOG_EXTRACTION_MAX_PAGES` | Maximum pages analyzed per catalog | 300 |
 | `CATALOG_EXTRACTION_CONCURRENCY` | Maximum concurrent catalog jobs | 1 |
 | `SESSION_SECRET` | Secret for session signing | – (required) |
 | `SESSION_IDLE_MINUTES` | Idle session timeout | 480 |

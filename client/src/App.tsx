@@ -86,6 +86,7 @@ export function App() {
         <Route path="attribute-sets" element={<AttributeSetsPage />} />
         <Route path="attribute-sets/:attributeSetId" element={<AttributeSetBuilderPage />} />
         <Route path="categories" element={<CategoriesPage />} />
+        <Route path="categories/:categoryId" element={<CategoriesPage />} />
         {isAdmin ? <Route path="users" element={<UsersPage />} /> : null}
         {isAdmin ? <Route path="audit" element={<AuditLogPage />} /> : null}
         <Route path="account" element={<AccountPage />} />

@@ -179,25 +179,45 @@ describe("supplier catalogs", () => {
       const res = await upload(adminCookie, PDF_BYTES, {
         fields: { name: "  Autumn  ", version: " v3 " },
       });
+
       expect(res.status).toBe(201);
       expect(res.body.catalog).toEqual(expect.objectContaining({ name: "Autumn", version: "v3" }));
     });
 
-    it("returns 400 when name is missing, and allows an omitted optional version", async () => {
+    it("uses a filename immediately for omitted or blank names and preserves a supplied name", async () => {
+      const inferred = await upload(adminCookie, PDF_BYTES, {
+        filename: "generic.pdf",
+        fields: {},
+      });
+      const fallback = await upload(adminCookie, PDF_BYTES, {
+        filename: "Fallback Catalog.pdf",
+        fields: { name: "   " },
+      });
+      const supplied = await upload(adminCookie, PDF_BYTES, {
+        filename: "ignored.pdf",
+        fields: { name: "My title" },
+      });
+
+      expect(inferred.status).toBe(201);
+      expect(inferred.body.catalog.name).toBe("generic");
+      expect(fallback.status).toBe(201);
+      expect(fallback.body.catalog.name).toBe("Fallback Catalog");
+      expect(supplied.status).toBe(201);
+      expect(supplied.body.catalog.name).toBe("My title");
+    });
+
+    it("deduces a missing name and allows an omitted optional version", async () => {
       const missingName = await upload(adminCookie, PDF_BYTES, { fields: { version: "1" } });
-      expect(missingName.status).toBe(400);
-      expect(missingName.body.error.code).toBe("VALIDATION_ERROR");
-      expect(missingName.body.error.details).toEqual(
-        expect.arrayContaining([expect.objectContaining({ field: "name" })]),
-      );
-      expect(await db.catalog.count()).toBe(0);
+      expect(missingName.status).toBe(201);
+      expect(missingName.body.catalog).toEqual(expect.objectContaining({ name: "price-list", version: "1" }));
+      expect(await db.catalog.count()).toBe(1);
 
       // Version is optional since FR-CLG-01 was relaxed (2026-11-08).
       const noVersion = await upload(adminCookie, PDF_BYTES, { fields: { name: "List" } });
       expect(noVersion.status).toBe(201);
       expect(noVersion.body.catalog).toEqual(expect.objectContaining({ version: null }));
-      expect(await db.catalog.count()).toBe(1);
-      expect(await storedFiles()).toHaveLength(1);
+      expect(await db.catalog.count()).toBe(2);
+      expect(await storedFiles()).toHaveLength(2);
     });
 
     it("returns 400 when name exceeds 200 characters", async () => {
@@ -381,6 +401,62 @@ describe("supplier catalogs", () => {
         },
       });
       expect(await db.auditLog.count({ where: { action: "CATALOG_ANALYSIS_VIEW", entityId: catalog.id } })).toBe(1);
+    });
+
+    it("applies the catalog name and all product-derived category paths only while analysis runs", async () => {
+      const materials = await db.category.create({
+        data: {
+          nameEn: "Building materials",
+          nameFr: "Matériaux de construction",
+          nameKey: "building materials",
+        },
+      });
+      const uploaded = await upload(adminCookie, textPdf(["Fasteners"]), {
+        filename: "generic.pdf",
+        fields: {},
+      });
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.body.catalog.name).toBe("generic");
+      expect(uploaded.body.catalog.categories).toEqual([]);
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server)
+        .post(`/api/v1/catalogs/${catalogId}/extraction`)
+        .set(unsafeHeaders(adminCookie));
+
+      await processGeminiCatalogExtraction(
+        started.body.job.jobId,
+        { db, storage: createLocalAssetStorage(uploadDir), maxPages: 100 },
+        async () => ({
+          catalog: {
+            name: "Structural Fastener Catalog",
+            categoryPaths: [
+              [
+                { en: "Building materials", fr: "Matériaux de construction" },
+                { en: "Fasteners", fr: "Fixations" },
+              ],
+              [
+                { en: "Building materials", fr: "Matériaux de construction" },
+                { en: "Brackets", fr: "Équerres" },
+              ],
+            ],
+          },
+          products: [],
+        }),
+      );
+
+      const catalog = await db.catalog.findUniqueOrThrow({
+        where: { id: catalogId },
+        include: { categories: { include: { category: true } } },
+      });
+      expect(catalog.name).toBe("Structural Fastener Catalog");
+      expect(catalog.analysisStatus).toBe("processed");
+      expect(catalog.categories).toHaveLength(2);
+      expect(catalog.categories.map((link) => link.category)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ nameEn: "Fasteners", nameFr: "Fixations", parentId: materials.id }),
+        expect.objectContaining({ nameEn: "Brackets", nameFr: "Équerres", parentId: materials.id }),
+      ]));
+      expect(await db.auditLog.count({ where: { action: "CATEGORY_CREATE" } })).toBe(2);
+      expect(await db.supplierCategory.count({ where: { supplierId } })).toBe(2);
     });
 
     it("reuses one queued job when admins start analysis concurrently", async () => {
@@ -794,6 +870,19 @@ describe("supplier catalogs", () => {
       const second = await db.product.findUniqueOrThrow({ where: { id: imported.body.created[1] }, include: { categories: true } });
       expect(first.categories.map((link) => link.categoryId)).toEqual(expect.arrayContaining([firstBlinds, smart, zebra[0]!.id]));
       expect(second.categories.map((link) => link.categoryId)).toEqual([zebra[0]!.id]);
+      expect(first).toMatchObject({
+        sourceCatalogId: catalogId,
+        sourcePageNumbers: [1],
+      });
+      const productResponse = await request(app.server)
+        .get(`/api/v1/products/${first.id}`)
+        .set("Cookie", readerCookie);
+      expect(productResponse.body.product.catalogSource).toMatchObject({
+        id: catalogId,
+        name: uploaded.body.catalog.name,
+        version: uploaded.body.catalog.version,
+        pageNumbers: [1],
+      });
       expect(await db.auditLog.count({ where: { entityId: zebra[0]!.id, action: "CATEGORY_CREATE" } })).toBe(1);
       const repeated = await request(app.server).post(importUrl).set(unsafeHeaders(adminCookie)).send(body);
       expect(repeated.status).toBe(200);

@@ -5,7 +5,7 @@
 PDF catalog analysis is disabled by default. To enable it, set
 `CATALOG_EXTRACTION_ENABLED=true` and `GEMINI_API_KEY` in the server environment,
 and restart the server with Redis available. `GEMINI_MODEL` defaults to
-`gemini-3.5-flash-lite`. An admin must start each analysis explicitly. The complete
+`gemini-3.1-flash-lite`. An admin must start each analysis explicitly. The complete
 PDF is uploaded to Google Gemini for analysis; this may incur charges.
 Catalog and supplier-asset uploads share the server's `MAX_UPLOAD_MB` limit
 (default 25 MiB). Increase it in `server/.env` and restart the server to accept

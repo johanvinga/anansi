@@ -310,6 +310,14 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                     <dt className="text-muted-foreground">{t("products.attributeSet")}</dt>
                     <dd>{viewing.attributeSet ? localize(viewing.attributeSet.name) : "—"}</dd>
                   </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("products.catalogSource")}</dt>
+                    <dd>
+                      {viewing.catalogSource
+                        ? `${viewing.catalogSource.name} · ${t("products.catalogPages")}: ${viewing.catalogSource.pageNumbers.join(", ")}`
+                        : "—"}
+                    </dd>
+                  </div>
                 </dl>
                 <section className="space-y-2 border-t pt-4">
                   <h3 className="font-medium">{t("products.productDescription")}</h3>

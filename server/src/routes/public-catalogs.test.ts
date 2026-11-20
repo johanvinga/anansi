@@ -23,7 +23,6 @@ import {
 
 const PDF = Buffer.from("%PDF-1.4\n%%EOF\n");
 const endpoint = "/api/v1/public/catalogs";
-
 describe("public catalog upload", () => {
   let db: Database;
   let app: FastifyInstance;
@@ -32,7 +31,10 @@ describe("public catalog upload", () => {
   beforeAll(async () => {
     db = createTestDatabase();
     uploadDir = await mkdtemp(path.join(tmpdir(), "public-catalog-tests-"));
-    app = await createTestApp(db, { uploadDir, maxUploadMb: 1, publicCatalogMaxUploadMb: 1 });
+    app = await createTestApp(
+      db,
+      { uploadDir, maxUploadMb: 1, publicCatalogMaxUploadMb: 1 },
+    );
   });
 
   afterAll(async () => {
@@ -113,11 +115,13 @@ describe("public catalog upload", () => {
       .auth(ADMIN.email, ADMIN.password)
       .set("Content-Type", "multipart/form-data; boundary=example")
       .send('--example\r\nContent-Disposition: form-data; name="file"; filename="a.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4');
-    for (const res of [blank, long, duplicate, extra, multiple, missing, malformed, truncated]) {
+    expect(blank.status).toBe(201);
+    expect(blank.body.catalog.name).toBe("spring prices");
+    for (const res of [long, duplicate, extra, multiple, missing, malformed, truncated]) {
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("VALIDATION_ERROR");
     }
-    expect(await db.catalog.count()).toBe(0);
+    expect(await db.catalog.count()).toBe(1);
   });
 
   it("rejects non-PDF content and oversized uploads without storing a catalog", async () => {
@@ -244,7 +248,8 @@ describe("public catalog upload", () => {
     expect(oldRoute.status).toBe(403);
     const oldWithoutName = await request(app.server).post("/api/v1/catalogs").set(unsafeHeaders(cookie))
       .attach("file", PDF, { filename: "a.pdf", contentType: "application/pdf" });
-    expect(oldWithoutName.status).toBe(400);
+    expect(oldWithoutName.status).toBe(201);
+    expect(oldWithoutName.body.catalog.name).toBe("a");
   });
 
   it("shares account throttling with login, limits failures by IP, and does not limit successes", async () => {

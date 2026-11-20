@@ -43,6 +43,7 @@ interface ProductFormProps {
   defaultSupplierId?: string;
   defaultAttributeSetId?: string;
   initialProduct?: Pick<CatalogProductCandidate, "name" | "sku" | "description" | "attributes" | "categories">;
+  sourceCatalog?: { catalogId: string; pageNumbers: number[] };
   onClose: () => void;
   onSaved: (product: ProductDetail) => void;
 }
@@ -123,6 +124,7 @@ export function ProductForm({
   defaultSupplierId,
   defaultAttributeSetId,
   initialProduct,
+  sourceCatalog,
   onClose,
   onSaved,
 }: ProductFormProps) {
@@ -219,6 +221,7 @@ export function ProductForm({
       cost: product ? cost.trim() || null : cost.trim(),
       currency: product ? currency : currency ?? defaultCurrency,
       categories: toCategoryInputs(categories),
+      ...(sourceCatalog ? { catalogSource: sourceCatalog } : {}),
       attributeSetId,
       attributeValues: fields.map((field) => ({ fieldId: field.id, value: toSubmitValue(field, valueForSetField(field)) })),
       ...(independentAttributes.data ? {
