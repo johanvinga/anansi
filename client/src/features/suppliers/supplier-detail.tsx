@@ -17,6 +17,7 @@ import { AssetsPanel } from "./assets-panel";
 import { CatalogsPanel } from "./catalogs-panel";
 import { CategoryEditor } from "./category-editor";
 import { chipsFrom, toCategoryInputs, type CategoryChip } from "./category-chips";
+import { ContactsPanel } from "./contacts-panel";
 import { SupplierForm } from "./supplier-form";
 
 export type DetailTab = "details" | "categories" | "assets" | "catalogs" | "products";
@@ -133,46 +134,49 @@ export function SupplierDetail({
           </div>
 
           <TabsContent value="details">
-            {isAdmin && editing ? (
-              <SupplierForm
-                supplier={supplier}
-                onCancel={() => setEditing(false)}
-                onSaved={(updated) => {
-                  updateSupplier(updated);
-                  setEditing(false);
-                }}
-              />
-            ) : (
-              <Card className="gap-6 py-6">
-                <CardHeader className="px-6">
-                  <CardTitle>
-                    <h2>{t("suppliers.address")}</h2>
-                  </CardTitle>
-                  {isAdmin ? (
-                    <CardAction>
-                      <Button variant="outline" onClick={() => setEditing(true)}>
-                        <Pencil />
-                        {t("suppliers.editDetails")}
-                      </Button>
-                    </CardAction>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="px-6">
-                  <dl className="grid grid-cols-[max-content_1fr] gap-x-8 gap-y-4 text-sm">
-                    <dt className="text-muted-foreground">{t("suppliers.street")}</dt>
-                    <dd>{supplier.street ?? "—"}</dd>
-                    <dt className="text-muted-foreground">{t("suppliers.city")}</dt>
-                    <dd>{supplier.city ?? "—"}</dd>
-                    <dt className="text-muted-foreground">{t("suppliers.stateRegion")}</dt>
-                    <dd>{supplier.stateRegion ?? "—"}</dd>
-                    <dt className="text-muted-foreground">{t("suppliers.postalCode")}</dt>
-                    <dd>{supplier.postalCode ?? "—"}</dd>
-                    <dt className="text-muted-foreground">{t("suppliers.country")}</dt>
-                    <dd>{supplier.country ?? "—"}</dd>
-                  </dl>
-                </CardContent>
-              </Card>
-            )}
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <ContactsPanel supplierId={supplier.id} isAdmin={isAdmin} />
+              {isAdmin && editing ? (
+                <SupplierForm
+                  supplier={supplier}
+                  onCancel={() => setEditing(false)}
+                  onSaved={(updated) => {
+                    updateSupplier(updated);
+                    setEditing(false);
+                  }}
+                />
+              ) : (
+                <Card className="gap-6 py-6">
+                  <CardHeader className="px-6">
+                    <CardTitle>
+                      <h2>{t("suppliers.address")}</h2>
+                    </CardTitle>
+                    {isAdmin ? (
+                      <CardAction>
+                        <Button variant="outline" onClick={() => setEditing(true)}>
+                          <Pencil />
+                          {t("suppliers.editDetails")}
+                        </Button>
+                      </CardAction>
+                    ) : null}
+                  </CardHeader>
+                  <CardContent className="px-6">
+                    <dl className="grid grid-cols-[max-content_1fr] gap-x-8 gap-y-4 text-sm">
+                      <dt className="text-muted-foreground">{t("suppliers.street")}</dt>
+                      <dd>{supplier.street ?? "—"}</dd>
+                      <dt className="text-muted-foreground">{t("suppliers.city")}</dt>
+                      <dd>{supplier.city ?? "—"}</dd>
+                      <dt className="text-muted-foreground">{t("suppliers.stateRegion")}</dt>
+                      <dd>{supplier.stateRegion ?? "—"}</dd>
+                      <dt className="text-muted-foreground">{t("suppliers.postalCode")}</dt>
+                      <dd>{supplier.postalCode ?? "—"}</dd>
+                      <dt className="text-muted-foreground">{t("suppliers.country")}</dt>
+                      <dd>{supplier.country ?? "—"}</dd>
+                    </dl>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="categories">

@@ -72,6 +72,18 @@ export interface Supplier {
   updatedAt: string;
 }
 
+export interface SupplierContact {
+  id: string;
+  supplierId: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phoneNumber: string | null;
+  weChatId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SupplierAsset {
   id: string;
   supplierId: string;
