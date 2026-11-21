@@ -52,6 +52,10 @@ const productBodySchema = z.object({
   attributeSetId: uuidSchema.nullish(),
   attributeValues: z.array(attributeValueSchema).max(200).optional(),
   directAttributeValues: z.array(attributeValueSchema).max(200).optional(),
+  catalogSource: z.object({
+    catalogId: uuidSchema,
+    pageNumbers: z.array(z.number().int().positive()).min(1).max(50),
+  }).optional(),
 });
 
 const productUpdateSchema = productBodySchema.extend({

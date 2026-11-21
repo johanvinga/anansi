@@ -159,17 +159,21 @@ model Product {
   cost           Decimal? @db.Decimal(12, 2)
   currency       String?  @db.Char(3)
   attributeSetId String?  @map("attribute_set_id") @db.Uuid
+  sourceCatalogId String?  @map("source_catalog_id") @db.Uuid
+  sourcePageNumbers Int[]  @default([]) @map("source_page_numbers")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   supplier     Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   attributeSet AttributeSet?           @relation(fields: [attributeSetId], references: [id], onDelete: Restrict)
+  sourceCatalog Catalog?                @relation(fields: [sourceCatalogId], references: [id], onDelete: SetNull)
   values       ProductAttributeValue[]
   categories   ProductCategory[]
   image        ProductImage?
 
   @@unique([supplierId, skuKey])
   @@index([supplierId])
+  @@index([sourceCatalogId])
   @@index([nameEn])
   @@map("products")
 }
@@ -306,6 +310,7 @@ model Catalog {
   uploadedBy User?    @relation("CatalogUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
   extractionJobs CatalogExtractionJob[]
   categories CatalogCategory[]
+  sourcedProducts Product[]
 
   @@index([supplierId])
   @@index([analysisStatus])

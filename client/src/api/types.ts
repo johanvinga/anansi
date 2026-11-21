@@ -207,6 +207,12 @@ export interface ProductSummary {
   currency: string | null;
   categories: CategoryRef[];
   attributeSet: { id: string; name: Translated } | null;
+  catalogSource: {
+    id: string;
+    name: string;
+    version: string | null;
+    pageNumbers: number[];
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

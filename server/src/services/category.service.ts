@@ -8,6 +8,9 @@ import { AuditAction, diffFields, recordAudit, type AuditRequestContext } from "
 
 type Tx = Prisma.TransactionClient;
 export type CategoryInput = { id: string } | { name: string; parentId?: string | null };
+export interface CategoryPathInput {
+  path: { name: Translated }[];
+}
 export interface CategoryDto {
   id: string;
   name: Translated;
@@ -215,6 +218,35 @@ export async function resolveCategoryIds(tx: Tx, request: AuditRequestContext, i
     const created = await tx.category.create({ data: { nameEn: input.name.trim(), nameFr: input.name.trim(), nameKey } });
     await recordAudit(tx, request, { action: AuditAction.CATEGORY_CREATE, outcome: "success", entityType: "Category", entityId: created.id, changes: diffFields({}, snapshot(created)) });
     ids.add(created.id);
+  }
+  return [...ids];
+}
+
+/** Resolves Gemini's root-to-leaf paths, reusing existing siblings before adding missing nodes. */
+export async function resolveCategoryPaths(
+  tx: Tx,
+  request: AuditRequestContext,
+  inputs: CategoryPathInput[],
+): Promise<string[]> {
+  if (inputs.length) await lockCategoryTree(tx);
+  const ids = new Set<string>();
+  for (const input of inputs) {
+    if (!input.path.length) continue;
+    let parentId: string | null = null;
+    for (const node of input.path) {
+      const nameKey = nameKeyOf(node.name.en);
+      const existing: { id: string } | null = await tx.category.findFirst({
+        where: { parentId, nameKey },
+        select: { id: true },
+      });
+      if (existing) {
+        parentId = existing.id;
+        continue;
+      }
+      const created = await createCategoryInTransaction(tx, request, node.name, parentId);
+      parentId = created.id;
+    }
+    if (parentId) ids.add(parentId);
   }
   return [...ids];
 }

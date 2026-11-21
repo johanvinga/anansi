@@ -316,6 +316,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
           defaultSupplierId={assignedSupplierId ?? undefined}
           defaultAttributeSetId={attributeSetId}
           initialProduct={creatingProduct}
+          sourceCatalog={{ catalogId: catalog.id, pageNumbers: creatingProduct.source.pageNumbers }}
           onClose={() => setCreatingProduct(null)}
           onSaved={onProductCreated}
         />

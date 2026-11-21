@@ -5,12 +5,12 @@ import { categoryInputSchema } from "../lib/category-input.js";
 import { attachmentDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
-import type { AssetDeps } from "../services/asset.service.js";
 import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
 import { previewCatalogImport } from "../services/catalog-import-preview.js";
 import { importCatalogProducts } from "../services/catalog-import.service.js";
 import { isCurrencyCode } from "../lib/currency.js";
 import {
+  type CatalogDeps,
   deleteCatalog,
   getCatalogExtraction,
   listAllCatalogs,
@@ -33,7 +33,7 @@ const versionSchema = z.string().trim().max(50).nullish();
 const categoriesSchema = z.array(categoryInputSchema).max(50);
 
 const createCatalogSchema = z.object({
-  name: nameSchema,
+  name: z.string().trim().max(200).optional().transform((value) => value || undefined),
   version: versionSchema.transform((v) => v || null),
   supplierId: uuidSchema.nullish().transform((v) => v || null),
   categories: z.string().optional().transform((value, ctx) => {
@@ -116,7 +116,7 @@ const globalListQuerySchema = paginationSchema.extend({
     .default([]),
 });
 
-interface CatalogRouteDeps extends AssetDeps {
+interface CatalogRouteDeps extends CatalogDeps {
   extractionQueue: CatalogExtractionQueue | undefined;
 }
 

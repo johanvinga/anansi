@@ -40,6 +40,27 @@ describe("Gemini whole-catalog analysis", () => {
     expect(() => parseGeminiCatalogResponse('{"products":[{}]}', "STOP", 2)).toThrow(/invalid catalog response/);
   });
 
+  it("validates catalog name and all bilingual category path metadata", () => {
+    const catalog = {
+      name: "Structural Fasteners",
+      categoryPaths: [
+        [
+          { en: "Building materials", fr: "Matériaux de construction" },
+          { en: "Fasteners", fr: "Fixations" },
+        ],
+        [
+          { en: "Building materials", fr: "Matériaux de construction" },
+          { en: "Brackets", fr: "Équerres" },
+        ],
+      ],
+    };
+    expect(parseGeminiCatalogResponse(
+      JSON.stringify({ catalog, products: [] }),
+      "STOP",
+      2,
+    ).catalog).toEqual(catalog);
+  });
+
   it("uploads the complete PDF and sends one structured request, then deletes the remote file", async () => {
     mocks.generate.mockResolvedValue({ text: JSON.stringify({ products: [candidate] }), candidates: [{ finishReason: "STOP" }] });
     const pdf = Buffer.from("%PDF-1.4 test");
@@ -56,6 +77,9 @@ describe("Gemini whole-catalog analysis", () => {
         { text: expect.stringContaining("swatches, image captions, and small labels") },
         { text: expect.stringContaining("when the catalog clearly indicates they apply to that variant") },
         { text: expect.stringContaining("a brand or manufacturer alone is not proof") },
+        { text: expect.stringContaining("Determine the catalog's clear descriptive title") },
+        { text: expect.stringContaining("every distinct product category") },
+        { text: expect.stringContaining("catalog.categoryPaths") },
         { fileData: { fileUri: "https://example.test/file", mimeType: "application/pdf" } },
       ]) })],
     }));

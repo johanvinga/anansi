@@ -13,12 +13,18 @@ import {
   type AuditRequestContext,
 } from "./audit.service.js";
 import { removeStoredFiles, type AssetDeps, type UploadedFile } from "./asset.service.js";
-import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import {
+  expandCategoryIds,
+  resolveCategoryIds,
+  type CategoryInput,
+} from "./category.service.js";
 import { queueStoredFileRemoval } from "./stored-file-cleanup.js";
 import { readPrivateImage } from "../lib/read-private-image.js";
+export interface CatalogDeps extends AssetDeps {
+}
 
 export interface CatalogMetadata {
-  name: string;
+  name?: string | undefined;
   /** Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08). */
   version: string | null;
   categories?: CategoryInput[] | undefined;
@@ -72,6 +78,16 @@ export interface CatalogDownload {
   fileName: string;
   sizeBytes: number;
   stream: Readable;
+}
+
+export function catalogNameFromFileName(fileName: string): string {
+  const stem = sanitizeFileName(fileName).replace(/\.pdf$/i, "").trim();
+  let name = "";
+  for (const character of stem) {
+    if (name.length + character.length > 200) break;
+    name += character;
+  }
+  return name.trim() || "Catalog";
 }
 
 export interface CatalogExtractionJobDto {
@@ -254,7 +270,7 @@ export async function listCatalogs(db: Database, request: AuditRequestContext, s
 }
 
 export async function uploadCatalog(
-  deps: AssetDeps,
+  deps: CatalogDeps,
   request: AuditRequestContext,
   supplierId: string | null,
   file: UploadedFile,
@@ -265,6 +281,9 @@ export async function uploadCatalog(
   }
   if (supplierId) await assertSupplierExists(deps.db, supplierId);
 
+  let name = metadata.name?.trim();
+  name ??= catalogNameFromFileName(file.originalFileName);
+
   // Store the file first, then write metadata in a transaction. If the transaction fails,
   // the file is removed so no orphaned data is left behind (NFR-11).
   const storageKey = `catalogs/${randomUUID()}.pdf`;
@@ -272,7 +291,14 @@ export async function uploadCatalog(
 
   let saved: Awaited<ReturnType<typeof createCatalogWithExtractionJob>>;
   try {
-    saved = await createCatalogWithExtractionJob(deps.db, request, supplierId, file, metadata, storageKey);
+    saved = await createCatalogWithExtractionJob(
+      deps.db,
+      request,
+      supplierId,
+      file,
+      { ...metadata, name },
+      storageKey,
+    );
   } catch (error) {
     await removeStoredFiles(deps.storage, [storageKey], deps.log);
     throw error;
@@ -286,7 +312,9 @@ async function createCatalogWithExtractionJob(
   request: AuditRequestContext,
   supplierId: string | null,
   file: UploadedFile,
-  metadata: CatalogMetadata,
+  metadata: CatalogMetadata & {
+    name: string;
+  },
   storageKey: string,
 ) {
   return db.$transaction(async (tx) => {

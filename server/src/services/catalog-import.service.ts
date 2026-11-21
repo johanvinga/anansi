@@ -241,6 +241,9 @@ export async function importCatalogProducts(
           supplierSku: selection.sku, cost: selection.cost ?? null, currency: selection.currency ?? null,
           minQuantity: selection.minQuantity ?? null, categories: (categoryIdsByProduct.get(selection.index) ?? []).map((id) => ({ id })),
           directAttributeValues: productValues.get(selection.index)!,
+          ...(candidate.source?.pageNumbers.length
+            ? { catalogSource: { catalogId, pageNumbers: candidate.source.pageNumbers } }
+            : {}),
         });
         const image = staged.get(selection.index);
         if (image) {

@@ -2,13 +2,13 @@ import { TextDecoder } from "node:util";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
-import { sanitizeFileName } from "../lib/pdf.js";
 import { emailSchema, parseInput } from "../lib/validation.js";
-import type { AssetDeps, UploadedFile } from "../services/asset.service.js";
+import type { UploadedFile } from "../services/asset.service.js";
 import { authenticateCatalogUpload, type AuthDeps } from "../services/auth.service.js";
 import { uploadCatalog } from "../services/catalog.service.js";
+import type { CatalogDeps } from "../services/catalog.service.js";
 
-const nameSchema = z.string().trim().min(1, "Name is required.").max(200);
+const nameSchema = z.string().trim().max(200).transform((value) => value || undefined);
 const uploadSchema = z.object({ name: nameSchema.optional() }).strict();
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -33,17 +33,7 @@ function credentials(header: string | undefined): { email: string | null; passwo
   return { email: email.data, password };
 }
 
-function nameFromFileName(fileName: string): string {
-  const stem = sanitizeFileName(fileName).replace(/\.pdf$/i, "").trim();
-  let name = "";
-  for (const character of stem) {
-    if (name.length + character.length > 200) break;
-    name += character;
-  }
-  return name.trim() || "Catalog";
-}
-
-export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps, assets: AssetDeps): void {
+export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps, assets: CatalogDeps): void {
   app.post("/public/catalogs", async (request, reply) => {
     const { email, password } = credentials(request.headers.authorization);
     const info = { requestId: request.id, ipAddress: request.ip };
@@ -107,7 +97,7 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps
       { ...info, actor: { userId: user.id, email: user.email } },
       null,
       file,
-      { name: metadata.name ?? nameFromFileName(file.originalFileName), version: null },
+      { name: metadata.name, version: null },
     );
     return reply.status(201).send({ catalog });
   });

@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderInput, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, FolderInput, Pencil, Plus, Trash2 } from "lucide-react";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,8 +28,18 @@ import { SelectField } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 
 export function CategoriesPage() {
+  const { categoryId } = useParams<{ categoryId: string }>();
+  return <CategoryDirectory key={categoryId ?? "root"} categoryId={categoryId} />;
+}
+
+interface CategoryDirectoryProps {
+  categoryId?: string;
+}
+
+function CategoryDirectory({ categoryId }: CategoryDirectoryProps) {
   const { user } = useAuth();
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -39,14 +50,19 @@ export function CategoriesPage() {
 
   const queryClient = useQueryClient();
   const categoriesQuery = useQuery({
-    queryKey: ["categories", { search }],
-    queryFn: async () => {
-      const params = search ? `?q=${encodeURIComponent(search)}` : "";
-      return (await apiRequest<{ items: Category[] }>("GET", `/categories${params}`)).items;
-    },
+    queryKey: ["categories"],
+    queryFn: async () => (await apiRequest<{ items: Category[] }>("GET", "/categories")).items,
   });
-  const categories = categoriesQuery.data ?? [];
+  const allCategories = categoriesQuery.data ?? [];
   const loaded = categoriesQuery.isSuccess;
+  const currentCategory = allCategories.find((category) => category.id === categoryId);
+  const needle = search.toLocaleLowerCase();
+  const categories = needle
+    ? allCategories.filter((category) =>
+        category.name.en.toLocaleLowerCase().includes(needle)
+        || category.name.fr.toLocaleLowerCase().includes(needle)
+      )
+    : allCategories.filter((category) => category.parentId === (categoryId ?? null));
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["categories"] });
 
   async function handleCategoryCreated() {
@@ -64,12 +80,24 @@ export function CategoriesPage() {
     void queryClient.invalidateQueries({ queryKey: ["products"] });
   };
   const columns = isAdmin ? 4 : 3;
+  const title = currentCategory ? localize(currentCategory.name) : t("categories.title");
+  const breadcrumbs = [
+    { label: t("categories.title"), to: categoryId ? "/categories" : undefined },
+    ...(currentCategory?.path.map((part, index, path) => ({
+      label: localize(part.name),
+      to: index < path.length - 1 ? `/categories/${part.id}` : undefined,
+    })) ?? []),
+  ];
+
+  if (loaded && categoryId && !currentCategory) {
+    return <Navigate to="/categories" replace />;
+  }
 
   return (
     <>
       <PageLayout
-        title={t("categories.title")}
-        breadcrumbs={[{ label: t("categories.title") }]}
+        title={title}
+        breadcrumbs={breadcrumbs}
         toolbar={
           <>
             <SearchForm
@@ -80,10 +108,24 @@ export function CategoriesPage() {
               onSearch={() => setSearch(query.trim())}
             />
             {isAdmin ? (
-              <Button className="ml-auto" size="lg" onClick={() => setCreateOpen(true)}>
-                <Plus />
-                {t("categories.addCategory")}
-              </Button>
+              <div className="ml-auto flex items-center gap-1">
+                {currentCategory ? (
+                  <>
+                    <IconAction label={t("categories.renameAria", { name: localize(currentCategory.name) })} icon={Pencil} onClick={() => setRenaming(currentCategory)} />
+                    <IconAction label={t("categories.moveAria", { name: localize(currentCategory.name) })} icon={FolderInput} onClick={() => setMoving(currentCategory)} />
+                    <IconAction
+                      label={t("suppliers.deleteAria", { name: localize(currentCategory.name) })}
+                      icon={Trash2}
+                      destructive
+                      onClick={() => setDeleting(currentCategory)}
+                    />
+                  </>
+                ) : null}
+                <Button size="lg" onClick={() => setCreateOpen(true)}>
+                  <Plus />
+                  {t("categories.addCategory")}
+                </Button>
+              </div>
             ) : null}
           </>
         }
@@ -104,10 +146,20 @@ export function CategoriesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loaded && categories.length === 0 ? <TableEmptyRow colSpan={columns} message={t("categories.noCategories")} /> : null}
+            {loaded && categories.length === 0 ? (
+              <TableEmptyRow
+                colSpan={columns}
+                message={t(currentCategory && !search ? "categories.noChildCategories" : "categories.noCategories")}
+              />
+            ) : null}
             {categories.map((category) => (
               <TableRow key={category.id}>
-                <TableCell className="pl-4 font-medium">{category.path.map((part) => localize(part.name)).join(" / ")}</TableCell>
+                <TableCell className="pl-4 font-medium">
+                  <Link className="inline-flex items-center gap-1 hover:underline" to={`/categories/${category.id}`}>
+                    {localize(category.name)}
+                    <ChevronRight className="size-4 text-muted-foreground" aria-hidden="true" />
+                  </Link>
+                </TableCell>
                 <TableCell>{category.path.length > 1 ? category.path.slice(0, -1).map((part) => localize(part.name)).join(" / ") : t("categories.root")}</TableCell>
                 <TableCell>{new Date(category.createdAt).toLocaleDateString()}</TableCell>
                 {isAdmin ? (
@@ -132,6 +184,7 @@ export function CategoriesPage() {
 
       {createOpen ? (
         <CreateCategoryDialog
+          parentId={categoryId ?? null}
           onClose={() => setCreateOpen(false)}
           onCreated={() => void handleCategoryCreated()}
         />
@@ -149,24 +202,37 @@ export function CategoriesPage() {
       ) : null}
 
       {moving ? <MoveCategoryDialog category={moving} onClose={() => setMoving(null)} onSaved={() => { setMoving(null); refreshRelated(); }} /> : null}
-      {deleting ? <DeleteCategoryDialog category={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); refreshRelated(); }} /> : null}
+      {deleting ? (
+        <DeleteCategoryDialog
+          category={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            const deletedCurrent = deleting.id === categoryId;
+            const parentId = deleting.parentId;
+            setDeleting(null);
+            refreshRelated();
+            if (deletedCurrent) navigate(parentId ? `/categories/${parentId}` : "/categories", { replace: true });
+          }}
+        />
+      ) : null}
     </>
   );
 }
 
 interface CreateCategoryDialogProps {
+  parentId: string | null;
   onClose: () => void;
   onCreated: () => void;
 }
 
-function CreateCategoryDialog({ onClose, onCreated }: CreateCategoryDialogProps) {
+function CreateCategoryDialog({ parentId, onClose, onCreated }: CreateCategoryDialogProps) {
   const { t } = useTranslation();
   const [nameEn, setNameEn] = useState("");
   const [nameFr, setNameFr] = useState("");
   const [nameFrEdited, setNameFrEdited] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [parent, setParent] = useState<string | null>(null);
+  const [parent, setParent] = useState<string | null>(parentId ?? "__root__");
   const categories = useAllCategories();
 
   function changeEnglishName(value: string) {

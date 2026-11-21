@@ -56,10 +56,6 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
       setError(t("suppliers.choosePdf"));
       return;
     }
-    if (!name.trim()) {
-      setError(t("catalogs.catalogNameRequired"));
-      return;
-    }
     if (addNewSupplier) {
       if (!newSupplierName.trim()) {
         setError(t("suppliers.nameRequired"));
@@ -79,7 +75,7 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
       }
       const form = new FormData();
       form.append("file", file);
-      form.append("name", name.trim());
+      if (name.trim()) form.append("name", name.trim());
       if (version.trim()) form.append("version", version.trim());
       if (targetId) form.append("supplierId", targetId);
       form.append("categories", JSON.stringify(toCategoryInputs(catalogCategories)));
@@ -150,7 +146,7 @@ export function UploadCatalogDialog({ onClose, onUploaded }: UploadCatalogDialog
 
               <PdfFileField file={file} onChange={setFile} />
               <div className="grid gap-4 md:grid-cols-2">
-                <FormField label={t("catalogs.catalogName")} name="name" value={name} onChange={setName} required />
+                <FormField label={t("catalogs.catalogNameOptional")} name="name" value={name} onChange={setName} />
                 <FormField label={t("catalogs.versionOptional")} name="version" value={version} onChange={setVersion} />
               </div>
               <p>{t("catalogs.catalogCategories")}</p>

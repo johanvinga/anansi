@@ -34,7 +34,7 @@ describe("loadConfig (SPEC §11)", () => {
 
   it("requires a Gemini API key only when catalog analysis is enabled", () => {
     expect(() => loadConfig({ ...required, CATALOG_EXTRACTION_ENABLED: "true" })).toThrow(/GEMINI_API_KEY/);
-    expect(loadConfig(required).geminiModel).toBe("gemini-3.5-flash-lite");
+    expect(loadConfig(required).geminiModel).toBe("gemini-3.1-flash-lite");
   });
 
   it("requires SESSION_SECRET", () => {

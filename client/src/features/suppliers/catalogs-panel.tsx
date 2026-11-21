@@ -204,15 +204,11 @@ function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
       setError(t("suppliers.choosePdf"));
       return;
     }
-    if (!name.trim()) {
-      setError(t("catalogs.nameRequired"));
-      return;
-    }
     setError(null);
     setUploading(true);
     const form = new FormData();
     form.append("file", file);
-    form.append("name", name.trim());
+    if (name.trim()) form.append("name", name.trim());
     if (version.trim()) form.append("version", version.trim());
     form.append("categories", JSON.stringify(toCategoryInputs(categories)));
     try {
@@ -242,7 +238,7 @@ function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
           <FieldGroup>
             <ErrorAlert message={error} />
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required />
+              <FormField label={t("catalogs.catalogNameOptional")} name="name" value={name} onChange={setName} />
               <FormField label={t("catalogs.version")} name="version" value={version} onChange={setVersion} />
             </div>
             <PdfFileField file={file} onChange={setFile} resetKey={resetKey} />

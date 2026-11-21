@@ -279,6 +279,7 @@
     "suppliers": "Suppliers",
     "actions": "Actions",
     "noCategories": "No categories found.",
+    "noChildCategories": "No child categories found.",
     "confirmDelete": "Delete category?",
     "confirmDeleteDescription": "The category is removed from suppliers, products and catalogs. Those records are kept.",
     "noneAssigned": "No categories assigned.",
@@ -319,6 +320,7 @@
     "addCatalog": "Add catalog",
     "editCatalog": "Edit catalog",
     "catalogName": "Catalog name",
+    "catalogNameOptional": "Catalog name (optional)",
     "pdfFile": "PDF file",
     "uploadedAt": "Uploaded at",
     "searchLabel": "Search catalogs",
@@ -329,7 +331,6 @@
     "existingSupplier": "Use an existing supplier instead",
     "addNewSupplier": "Add a new supplier",
     "uploading": "Uploading…",
-    "catalogNameRequired": "Catalog name is required.",
     "selectSupplier": "Select a supplier or add a new one.",
     "analysis": "Analysis",
     "analysisStatus": {
@@ -580,7 +581,9 @@
     "deleteAria": "Delete {{name}}",
     "confirmDeleteTitle": "Delete {{name}}?",
     "chooseSupplier": "Choose a supplier.",
-    "archivedKept": "Archived fields kept on this product"
+    "archivedKept": "Archived fields kept on this product",
+    "catalogSource": "Catalog source",
+    "catalogPages": "pages"
   },
   "pagination": {
     "summary_one": "Page {{page}} of {{totalPages}} · {{count}} item",
