@@ -92,6 +92,25 @@ The script securely prompts for the password. It defaults to the local API; use 
 with the full HTTPS endpoint URL for a deployed server. Add `-Name "Catalog
 name"` to supply a name. The public API's configured size limit still applies.
 
+To upload multiple catalogs sequentially, pass a CSV file with a `FilePath`
+column and an optional `Name` column:
+
+```csv
+FilePath,Name
+C:\path\to\spring.pdf,Spring catalog
+relative\summer.pdf,
+```
+
+Relative PDF paths are resolved from the CSV file's directory. The script
+prompts for the password once and continues after invalid or failed uploads.
+Each failure is written to a timestamped `upload-catalog-failures-*.log` file
+beside the CSV. Set `-LogPath` to choose another log file. After attempting
+all files, the script exits with an error if any uploads failed.
+
+```powershell
+.\tools\upload-catalog.ps1 -CsvPath "C:\path\to\catalogs.csv" -Email "admin@example.com"
+```
+
 In PowerShell, set `API_EMAIL` in the environment first. `curl.exe` prompts for
 the password when `--user` is supplied with an email but no password.
 
