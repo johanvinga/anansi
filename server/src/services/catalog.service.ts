@@ -244,6 +244,22 @@ function toCatalogDto(row: CatalogRow): CatalogDto {
   };
 }
 
+export async function getCatalog(
+  db: Database,
+  request: AuditRequestContext,
+  catalogId: string,
+): Promise<CatalogDto> {
+  const row = await db.catalog.findUnique({ where: { id: catalogId }, include: catalogInclude });
+  if (!row) throw errors.notFound("Catalog");
+  await recordAudit(db, request, {
+    action: AuditAction.CATALOG_VIEW,
+    outcome: "success",
+    entityType: "Catalog",
+    entityId: catalogId,
+  });
+  return toCatalogDto(row);
+}
+
 function catalogSnapshot(row: CatalogRow): Record<string, unknown> {
   return { name: row.name, version: row.version, supplierId: row.supplierId, categories: row.categories.map((link) => link.categoryId).sort() };
 }
@@ -560,6 +576,29 @@ export async function prepareCatalogDownload(
 
   await recordAudit(deps.db, request, {
     action: AuditAction.CATALOG_DOWNLOAD,
+    outcome: "success",
+    entityType: "Catalog",
+    entityId: catalogId,
+  });
+  return {
+    fileName: row.originalFileName,
+    sizeBytes: Number(row.sizeBytes),
+    stream: deps.storage.openRead(row.storageKey),
+  };
+}
+
+/** Audits an inline browser view before returning the private catalog stream. */
+export async function prepareCatalogView(
+  deps: AssetDeps,
+  request: AuditRequestContext,
+  catalogId: string,
+): Promise<CatalogDownload> {
+  const row = await deps.db.catalog.findUnique({ where: { id: catalogId } });
+  if (!row) throw errors.notFound("Catalog");
+  if (!(await deps.storage.exists(row.storageKey))) throw errors.notFound("Catalog file");
+
+  await recordAudit(deps.db, request, {
+    action: AuditAction.CATALOG_PDF_VIEW,
     outcome: "success",
     entityType: "Catalog",
     entityId: catalogId,

@@ -310,6 +310,15 @@
     "renameCategory": "Rename category"
   },
   "catalogs": {
+    "workspaceTitle": "Catalog workspace",
+    "openWorkspace": "Open workspace",
+    "openPdfInNewTab": "Open PDF in new tab",
+    "browserPdfHint": "Use your browser PDF controls to navigate the catalog.",
+    "sourcePage": "Source page",
+    "pdfViewerTitle": "PDF catalog {{name}}",
+    "workspaceReadOnly": "Catalog viewing is available to your role. Only admins can create products.",
+    "productCreatedInWorkspace": "{{name}} was created. Add another product without leaving the catalog.",
+    "resetProductForm": "Create another product",
     "supplierUploadDescription": "Upload a PDF catalog for this supplier and optionally assign catalog categories.",
     "unassigned": "Unassigned",
     "catalogCategories": "Catalog categories",

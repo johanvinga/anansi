@@ -1,7 +1,8 @@
 ﻿import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Download, Eye, Pencil, Trash2 } from "lucide-react";
+import { BookOpen, Download, Eye, Pencil, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -159,6 +160,12 @@ export function CatalogsPage() {
                   </Badge>
                 </TableCell> : null}
                 <TableCell className="pr-4 text-right">
+                  <Button asChild type="button" variant="outline" size="sm">
+                    <Link to={`/catalogs/${catalog.id}/workspace`}>
+                      <BookOpen />
+                      {t("catalogs.openWorkspace")}
+                    </Link>
+                  </Button>
                   {isAdmin ? <IconAction label={t("suppliers.editAria", { name: catalog.name })} icon={Pencil} onClick={() => setEditing(catalog)} /> : null}
                   {isAdmin ? <IconAction label={t("suppliers.deleteAria", { name: catalog.name })} icon={Trash2} destructive onClick={() => setDeleting(catalog)} /> : null}
                   {analysisEnabled ? <Button type="button" variant="outline" size="sm" onClick={() => setReviewing(catalog)}>

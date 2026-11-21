@@ -310,6 +310,15 @@
     "renameCategory": "Renommer la catégorie"
   },
   "catalogs": {
+    "workspaceTitle": "Espace de travail du catalogue",
+    "openWorkspace": "Ouvrir l’espace de travail",
+    "openPdfInNewTab": "Ouvrir le PDF dans un nouvel onglet",
+    "browserPdfHint": "Utilisez les contrôles PDF du navigateur pour parcourir le catalogue.",
+    "sourcePage": "Page source",
+    "pdfViewerTitle": "Catalogue PDF {{name}}",
+    "workspaceReadOnly": "La consultation du catalogue est disponible pour votre rôle. Seuls les administrateurs peuvent créer des produits.",
+    "productCreatedInWorkspace": "{{name}} a été créé. Ajoutez un autre produit sans quitter le catalogue.",
+    "resetProductForm": "Créer un autre produit",
     "supplierUploadDescription": "Téléversez un catalogue PDF pour ce fournisseur et assignez éventuellement des catégories.",
     "unassigned": "Non attribué",
     "catalogCategories": "Catégories du catalogue",

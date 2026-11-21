@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
 import { categoryInputSchema } from "../lib/category-input.js";
-import { attachmentDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
+import { attachmentDisposition, inlineDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
@@ -12,11 +12,13 @@ import { isCurrencyCode } from "../lib/currency.js";
 import {
   type CatalogDeps,
   deleteCatalog,
+  getCatalog,
   getCatalogExtraction,
   listAllCatalogs,
   listCatalogs,
   prepareCatalogDownload,
   prepareCatalogImage,
+  prepareCatalogView,
   startCatalogExtraction,
   updateCatalog,
   uploadCatalog,
@@ -142,6 +144,11 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     return listCatalogs(deps.db, context(request), id);
   });
 
+  app.get("/catalogs/:catalogId", { preHandler: guards.requireUser }, async (request) => {
+    const { catalogId } = parseInput(catalogParamsSchema, request.params);
+    return { catalog: await getCatalog(deps.db, context(request), catalogId) };
+  });
+
   const handleUpload = async (request: FastifyRequest, reply: FastifyReply, supplierId?: string) => {
 
     // Read all parts in one pass so text fields are available regardless of their order.
@@ -223,6 +230,19 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     reply.header("Content-Disposition", attachmentDisposition(download.fileName));
     reply.header("Cache-Control", "private, no-store");
     return reply.send(download.stream);
+  });
+
+  app.get("/catalogs/:catalogId/view", { preHandler: guards.requireUser }, async (request, reply) => {
+    const { catalogId } = parseInput(catalogParamsSchema, request.params);
+    const view = await prepareCatalogView(deps, context(request), catalogId);
+
+    reply.header("Content-Type", PDF_MIME_TYPE);
+    reply.header("Content-Length", String(view.sizeBytes));
+    reply.header("Content-Disposition", inlineDisposition(view.fileName));
+    reply.header("Content-Security-Policy", "default-src 'none'");
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Cache-Control", "private, no-store");
+    return reply.send(view.stream);
   });
 
   app.patch("/catalogs/:catalogId", { preHandler: guards.requireAdmin }, async (request) => {

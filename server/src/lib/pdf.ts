@@ -20,6 +20,15 @@ export function sanitizeFileName(raw: string, fallback = "document.pdf"): string
 
 /** Builds a Content-Disposition header that is safe for ASCII and UTF-8 file names. */
 export function attachmentDisposition(fileName: string): string {
+  return contentDisposition("attachment", fileName);
+}
+
+/** Builds a safe inline disposition header for browser PDF viewers. */
+export function inlineDisposition(fileName: string): string {
+  return contentDisposition("inline", fileName);
+}
+
+function contentDisposition(type: "attachment" | "inline", fileName: string): string {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "_");
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
