@@ -160,7 +160,24 @@ function CategoryDirectory({ categoryId }: CategoryDirectoryProps) {
                     <ChevronRight className="size-4 text-muted-foreground" aria-hidden="true" />
                   </Link>
                 </TableCell>
-                <TableCell>{category.path.length > 1 ? category.path.slice(0, -1).map((part) => localize(part.name)).join(" / ") : t("categories.root")}</TableCell>
+                <TableCell>
+                  {category.path.length > 1 ? (
+                    <span className="inline-flex flex-wrap items-center">
+                      {category.path.slice(0, -1).map((part, index) => (
+                        <span key={part.id} className="inline-flex items-center">
+                          {index > 0 ? <span className="px-1 text-muted-foreground" aria-hidden="true">/</span> : null}
+                          <Link className="hover:underline" to={`/categories/${part.id}`}>
+                            {localize(part.name)}
+                          </Link>
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <Link className="hover:underline" to="/categories">
+                      {t("categories.root")}
+                    </Link>
+                  )}
+                </TableCell>
                 <TableCell>{new Date(category.createdAt).toLocaleDateString()}</TableCell>
                 {isAdmin ? (
                   <TableCell className="pr-4">
