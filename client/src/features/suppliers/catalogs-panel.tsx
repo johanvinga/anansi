@@ -1,10 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Eye, Pencil, Trash2 } from "lucide-react";
+import { Download, Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FieldGroup } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, apiUpload, errorMessage, ApiError } from "../../api/client";
@@ -34,6 +43,7 @@ interface CatalogsPanelProps {
 export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<Catalog | null>(null);
   const [deleting, setDeleting] = useState<Catalog | null>(null);
   const [reviewing, setReviewing] = useState<Catalog | null>(null);
@@ -77,7 +87,14 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {isAdmin ? <CatalogUploadForm supplierId={supplierId} onUploaded={refresh} /> : null}
+      {isAdmin ? (
+        <div className="flex justify-end">
+          <Button onClick={() => setUploading(true)}>
+            <Plus />
+            {t("catalogs.addCatalog")}
+          </Button>
+        </div>
+      ) : null}
 
       <ErrorAlert message={error ?? (catalogsQuery.error ? errorMessage(catalogsQuery.error) : settingsQuery.error ? errorMessage(settingsQuery.error) : null)} />
 
@@ -160,6 +177,17 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
         />
       ) : null}
 
+      {uploading ? (
+        <CatalogUploadDialog
+          supplierId={supplierId}
+          onClose={() => setUploading(false)}
+          onUploaded={() => {
+            setUploading(false);
+            refresh();
+          }}
+        />
+      ) : null}
+
       {analysisEnabled && reviewing ? (
         <CatalogExtractionDialog
           catalog={reviewing}
@@ -183,12 +211,13 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
   );
 }
 
-interface CatalogUploadFormProps {
+interface CatalogUploadDialogProps {
   supplierId: string;
+  onClose: () => void;
   onUploaded: () => void;
 }
 
-function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
+function CatalogUploadDialog({ supplierId, onClose, onUploaded }: CatalogUploadDialogProps) {
   const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [resetKey, setResetKey] = useState(0);
@@ -227,14 +256,13 @@ function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
   }
 
   return (
-    <Card className="gap-6 py-6">
-      <form onSubmit={handleUpload} noValidate className="flex flex-col gap-6">
-        <CardHeader className="px-6">
-          <CardTitle>
-            <h2>{t("catalogs.addCatalog")}</h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-6">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={handleUpload} noValidate className="flex flex-col gap-6">
+          <DialogHeader>
+            <DialogTitle>{t("catalogs.addCatalog")}</DialogTitle>
+            <DialogDescription>{t("catalogs.supplierUploadDescription")}</DialogDescription>
+          </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error} />
             <div className="grid gap-4 md:grid-cols-2">
@@ -245,13 +273,18 @@ function CatalogUploadForm({ supplierId, onUploaded }: CatalogUploadFormProps) {
             <p>{t("catalogs.catalogCategories")}</p>
             <CategoryEditor value={categories} onChange={setCategories} />
           </FieldGroup>
-        </CardContent>
-        <CardFooter className="justify-end border-t px-6 py-4">
-          <Button type="submit" size="lg" disabled={uploading}>
-            {uploading ? t("suppliers.uploading") : t("suppliers.upload")}
-          </Button>
-        </CardFooter>
-      </form>
-    </Card>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={uploading}>
+                {t("common.cancel")}
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={uploading}>
+              {uploading ? t("suppliers.uploading") : t("suppliers.upload")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

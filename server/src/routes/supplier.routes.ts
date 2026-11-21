@@ -7,6 +7,12 @@ import { categoryInputSchema } from "../lib/category-input.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import {
+  createSupplierContact,
+  deleteSupplierContact,
+  listSupplierContacts,
+  updateSupplierContact,
+} from "../services/supplier-contact.service.js";
+import {
   createSupplier,
   deleteSupplier,
   getSupplier,
@@ -43,6 +49,24 @@ const listQuerySchema = paginationSchema.extend({
 });
 
 const idParamsSchema = z.object({ id: uuidSchema });
+const contactParamsSchema = z.object({ id: uuidSchema, contactId: uuidSchema });
+const contactText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((value) => (value === "" ? null : value))
+    .nullish();
+const contactBodySchema = z.object({
+  firstName: contactText(100),
+  lastName: contactText(100),
+  email: z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() || null : value),
+    z.string().max(254).email("Invalid email address.").nullable().optional(),
+  ),
+  phoneNumber: contactText(50),
+  weChatId: contactText(100),
+});
 
 export function registerSupplierRoutes(
   app: FastifyInstance,
@@ -87,4 +111,39 @@ export function registerSupplierRoutes(
     await deleteSupplier(deps.db, deps.storage, deps.log, context(request), id);
     return reply.status(204).send();
   });
+
+  app.get("/suppliers/:id/contacts", { preHandler: guards.requireUser }, async (request) => {
+    const { id } = parseInput(idParamsSchema, request.params);
+    const contacts = await listSupplierContacts(deps.db, context(request), id);
+    return { contacts };
+  });
+
+  app.post("/suppliers/:id/contacts", { preHandler: guards.requireAdmin }, async (request, reply) => {
+    const { id } = parseInput(idParamsSchema, request.params);
+    const body = parseInput(contactBodySchema, request.body);
+    const contact = await createSupplierContact(deps.db, context(request), id, body);
+    return reply.status(201).send({ contact });
+  });
+
+  app.put(
+    "/suppliers/:id/contacts/:contactId",
+    { preHandler: guards.requireAdmin },
+    async (request) => {
+      const { id, contactId } = parseInput(contactParamsSchema, request.params);
+      const body = parseInput(contactBodySchema, request.body);
+      return {
+        contact: await updateSupplierContact(deps.db, context(request), id, contactId, body),
+      };
+    },
+  );
+
+  app.delete(
+    "/suppliers/:id/contacts/:contactId",
+    { preHandler: guards.requireAdmin },
+    async (request, reply) => {
+      const { id, contactId } = parseInput(contactParamsSchema, request.params);
+      await deleteSupplierContact(deps.db, context(request), id, contactId);
+      return reply.status(204).send();
+    },
+  );
 }

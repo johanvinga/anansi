@@ -1,13 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Pencil, Trash2 } from "lucide-react";
+import { Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -34,6 +35,7 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
   const { t } = useTranslation();
 
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<SupplierAsset | null>(null);
   const [deleting, setDeleting] = useState<SupplierAsset | null>(null);
   const queryClient = useQueryClient();
@@ -62,7 +64,14 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {isAdmin ? <UploadForm supplierId={supplierId} onUploaded={refresh} /> : null}
+      {isAdmin ? (
+        <div className="flex justify-end">
+          <Button onClick={() => setUploading(true)}>
+            <Plus />
+            {t("suppliers.uploadAsset")}
+          </Button>
+        </div>
+      ) : null}
 
       <ErrorAlert message={error ?? (assetsQuery.error ? errorMessage(assetsQuery.error) : null)} />
 
@@ -134,6 +143,17 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
         />
       ) : null}
 
+      {uploading ? (
+        <AssetUploadDialog
+          supplierId={supplierId}
+          onClose={() => setUploading(false)}
+          onUploaded={() => {
+            setUploading(false);
+            refresh();
+          }}
+        />
+      ) : null}
+
       <ConfirmDialog
         open={deleting !== null}
         title={t("suppliers.confirmDeleteFileTitle", { name: deleting?.originalFileName ?? t("catalogs.file") })}
@@ -146,12 +166,13 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
   );
 }
 
-interface UploadFormProps {
+interface AssetUploadDialogProps {
   supplierId: string;
+  onClose: () => void;
   onUploaded: () => void;
 }
 
-function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
+function AssetUploadDialog({ supplierId, onClose, onUploaded }: AssetUploadDialogProps) {
   const { t } = useTranslation();
 
   const [file, setFile] = useState<File | null>(null);
@@ -188,14 +209,13 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
   }
 
   return (
-    <Card className="gap-6 py-6">
-      <form onSubmit={handleUpload} noValidate className="flex flex-col gap-6">
-        <CardHeader className="px-6">
-          <CardTitle>
-            <h2>{t("suppliers.uploadAsset")}</h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-6">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={handleUpload} noValidate className="flex flex-col gap-6">
+          <DialogHeader>
+            <DialogTitle>{t("suppliers.uploadAsset")}</DialogTitle>
+            <DialogDescription>{t("suppliers.assetUploadDescription")}</DialogDescription>
+          </DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error} />
             <AssetFileField file={file} onChange={setFile} resetKey={resetKey} />
@@ -204,14 +224,19 @@ function UploadForm({ supplierId, onUploaded }: UploadFormProps) {
               <FormField label={t("suppliers.descriptionOptional")} name="description" value={description} onChange={setDescription} />
             </div>
           </FieldGroup>
-        </CardContent>
-        <CardFooter className="justify-end border-t px-6 py-4">
-          <Button type="submit" size="lg" disabled={uploading}>
-            {uploading ? t("suppliers.uploading") : t("suppliers.upload")}
-          </Button>
-        </CardFooter>
-      </form>
-    </Card>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={uploading}>
+                {t("common.cancel")}
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={uploading}>
+              {uploading ? t("suppliers.uploading") : t("suppliers.upload")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
