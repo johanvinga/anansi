@@ -2,9 +2,9 @@
 
 | Field | Value |
 |---|---|
-| Version | 0.2 |
+| Version | 0.3 |
 | Status | Confirmed – ready for implementation |
-| Date | 2026-10-31 |
+| Date | 2026-11-21 |
 
 ---
 
@@ -15,7 +15,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 ### 1.1 Goals
 
 - Secure login for users.
-- Create and maintain suppliers with a name, an address, and directly assigned categories; supplier category summaries also include product categories.
+- Create and maintain suppliers with a name, an address, contacts, and directly assigned categories; supplier category summaries also include product categories.
 - Attach supporting files of any type to each supplier.
 - Link products to suppliers with a name and supplier SKU, and optional cost, currency and minimum quantity for catalog imports.
 - Define reusable **attribute sets** (for example, "MDF Panel" or "Paint") containing custom fields, and apply them to products.
@@ -33,6 +33,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | Term | Definition |
 |---|---|
 | Supplier | An organization that provides products. Previously referred to as "vendor". |
+| Supplier Contact | A person or contact channel associated with a supplier. |
 | Category | A node in a shared hierarchy, directly assignable to suppliers, products or catalogs. Ancestor membership is derived; supplier summaries also include product-inherited categories. |
 | Asset | A file of any type attached to a supplier. |
 | Catalog | A named, versioned PDF price or product catalog attached to a supplier. A catalog is a separate entity from an asset. |
@@ -59,6 +60,7 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | D9 | Audit log | Every action is logged (see §4.10). Viewable by admins only, retained indefinitely. |
 | D10 | Locales | English (`en`) and French (`fr`) are the supported locales for translatable data. Each translatable field is stored as one column per locale (see section 5). |
 | D11 | Creation UX | Creating a category, attribute set, product, or supplier opens a modal dialog, the same pattern as creating a catalog. List pages do not use inline text inputs for creation. |
+| D12 | Supplier contacts | Contacts are independent supplier child records. All contact fields are optional, duplicate details are allowed, and contacts are managed after supplier creation from the supplier Details tab. |
 
 ---
 
@@ -104,6 +106,21 @@ A web application that lets authenticated users manage **suppliers**, the **asse
 | FR-SUP-10 | After a supplier is created from the dialog, the app shall navigate to the supplier detail page. |
 | FR-SUP-11 | Supplier category summaries and category filters shall include the union of directly assigned categories and categories assigned to the supplier's products. Editing a supplier changes only its directly assigned categories. |
 
+### 4.2A Supplier Contacts (FR-SCT)
+
+| ID | Requirement |
+|---|---|
+| FR-SCT-01 | Each supplier may have zero or more contacts. A contact is an independent child record with a stable ID and belongs to exactly one supplier. |
+| FR-SCT-02 | A contact has optional **first name**, **last name**, **email**, **phone number**, and **WeChat ID** fields. Every field may be omitted, null, or whitespace-only, including all fields on the same contact. |
+| FR-SCT-03 | All string inputs are trimmed. Empty or whitespace-only values are stored as null. The system shall allow contacts with identical or duplicate field values. |
+| FR-SCT-04 | Field limits are: first name 100 chars, last name 100 chars, email 254 chars, phone number 50 chars, and WeChat ID 100 chars. A non-empty email shall be syntactically valid. Phone numbers remain free-form text and are not normalized. |
+| FR-SCT-05 | Standard users and admins may list the contacts for a supplier. Only admins may create, edit, or delete a contact. Authorization shall be enforced by the server. |
+| FR-SCT-06 | The contact list endpoint shall return every contact belonging to the selected supplier, ordered by `created_at` descending (newest first), then by ID descending for deterministic ties. The list is not paginated. |
+| FR-SCT-07 | Contacts shall be added after supplier creation. The create-supplier dialog shall not manage contacts. |
+| FR-SCT-08 | A successful contact create, update, or delete shall be audited in the same transaction as the data change, using `SUPPLIER_CONTACT_CREATE`, `SUPPLIER_CONTACT_UPDATE`, or `SUPPLIER_CONTACT_DELETE`; create and update changes record before/after values, and delete records the deleted values. Listing is audited as `SUPPLIER_CONTACT_LIST`. |
+| FR-SCT-09 | A contact is deleted automatically when its supplier is deleted. The supplier delete audit entry shall identify the deleted supplier and include the number of cascaded contact records. |
+| FR-SCT-10 | The contact labels and UI text shall be localized through the supported application locales. Contact values themselves are not translated. |
+
 ### 4.3 Categories (FR-CAT)
 
 | ID | Requirement |
@@ -138,6 +155,7 @@ or create a root, but reject ambiguous names.
 | FR-AST-08 | Files shall be stored outside the publicly served directory. |
 | FR-AST-09 | Storage shall be accessed through an interface so the backing store (local disk or S3) can be swapped. New assets and catalogs use separate `assets/` and `catalogs/` prefixes; legacy keys remain accessible. |
 | FR-AST-10 | Optional: the user may give an asset a display title and a short description. |
+| FR-AST-11 | On a supplier's Assets tab, admins shall see one upload button. Selecting it opens a shadcn dialog containing the file, optional title, and optional description inputs; the upload form shall not remain inline on the tab. |
 
 ### 4.4A Supplier Catalogs (FR-CLG)
 
@@ -158,6 +176,7 @@ or create a root, but reject ambiguous names.
 | FR-CLG-13 | For an unassigned catalog, an admin may review a suggested supplier, select an existing supplier, or create one. Supplier creation and catalog assignment require separate confirmation; a suggested name is not proof of identity. |
 | FR-CLG-14 | Catalog imports list extracted fields without an exact compatible independent attribute before product information. An admin may select which new text attributes to create, map fields to existing independent attributes, or skip them. Exact compatible independent attributes are reused unless changed or skipped. Selected attributes receive each product's extracted value. For typed or unit-bearing attributes, an admin must explicitly review each product value in the selected type and unit; the system validates it and never assumes or converts units. |
 | FR-CLG-15 | An external client may upload a PDF to the machine-to-machine catalog endpoint using an active admin's email and password over HTTPS. The caller may omit the name; the server immediately applies the same sanitized filename fallback as browser-session uploads without calling Gemini. Uploads are unassigned, remain `not_processed`, and follow the same storage, validation, authorization and audit rules as other catalog uploads. |
+| FR-CLG-16 | On a supplier's Catalogs tab, admins shall see one upload button. Selecting it opens a shadcn dialog containing the supplier-scoped catalog upload fields; the upload form shall not remain inline on the tab. |
 
 ### 4.5 Attribute Sets (FR-ATS)
 
@@ -214,9 +233,13 @@ or create a root, but reject ambiguous names.
 | FR-UI-01 | The supplier detail page shall have tabs: **Details**, **Categories**, **Assets**, **Catalogs**, **Products**. |
 | FR-UI-02 | The attribute set builder shall support drag-and-drop reordering of fields. |
 | FR-UI-03 | Forms shall display inline validation errors. |
-| FR-UI-04 | Destructive actions (delete supplier, delete product, delete asset, change attribute set) shall require confirmation. |
+| FR-UI-04 | Destructive actions (delete supplier, delete supplier contact, delete product, delete asset, change attribute set) shall require confirmation. |
 | FR-UI-05 | All UI components in the React app shall come from shadcn/ui (https://ui.shadcn.com). |
 | FR-UI-06 | Admins may select individual rows or a whole page of suppliers, products or catalogs for deletion. Paginated lists offer selection of all records matching the current filters across pages. A confirmation warns about the scope and consequences. Each deletion follows existing authorization, audit and dependency rules; failures are reported individually while remaining selections are processed. |
+| FR-UI-07 | The Details tab shall display a Contacts card to the left of the Address card at wide breakpoints and stack the cards on smaller screens. The Contacts card remains visible while the supplier address form is open. The existing supplier address edit remains responsible only for supplier identity, address, and categories. |
+| FR-UI-08 | The Contacts card shall list all contacts newest first. Each contact shall show labeled first/last-name, email, phone, and WeChat ID values, using an em dash for null values. Non-empty email values shall render as `mailto:` links; phone and WeChat values shall be plain text. A fully empty contact remains a visible list item. |
+| FR-UI-09 | The Contacts card shall show an Add Contact button to admins. Add and edit shall open a shadcn `Dialog` with all five inputs, Cancel, and Save. Inline field and request errors follow FR-MODAL-03 and the dialog remains open after validation failure. |
+| FR-UI-10 | Each contact row shall show admin-only edit and delete actions. Delete shall open a confirmation dialog and only remove that contact after confirmation. Standard users see no contact mutation controls. |
 
 ---
 
@@ -225,7 +248,7 @@ or create a root, but reject ambiguous names.
 | ID | Requirement |
 |---|---|
 | FR-ROL-01 | Every user shall have exactly one role: `admin` or `standard`. |
-| FR-ROL-02 | Standard users shall be able to view all suppliers, categories, assets (including download), products, and attribute sets. |
+| FR-ROL-02 | Standard users shall be able to view all suppliers, supplier contacts, categories, assets (including download), products, and attribute sets. |
 | FR-ROL-03 | Standard users shall not be able to create, edit, or delete any data. |
 | FR-ROL-04 | Admins shall have full create, edit, and delete access to all data, and shall manage user accounts. |
 | FR-ROL-05 | Role checks shall be enforced on the server for every endpoint, not only in the UI. |
@@ -237,10 +260,10 @@ Where other requirements say "the user", they apply to admins only. Standard use
 
 | Capability | Standard | Admin |
 |---|---|---|
-| View suppliers, categories, products, attribute sets, assets, catalogs | Yes | Yes |
+| View suppliers, supplier contacts, categories, products, attribute sets, assets, catalogs | Yes | Yes |
 | Download assets and catalogs | Yes | Yes |
-| Create or edit suppliers, categories, assets, catalogs, products, attribute sets | No | Yes |
-| Delete suppliers, categories, assets, catalogs, products, attribute sets | No | Yes |
+| Create or edit suppliers, supplier contacts, categories, assets, catalogs, products, attribute sets | No | Yes |
+| Delete suppliers, supplier contacts, categories, assets, catalogs, products, attribute sets | No | Yes |
 | Manage user accounts and reset passwords | No | Yes |
 | View audit log | No | Yes |
 
@@ -288,13 +311,13 @@ Where other requirements say "the user", they apply to admins only. Standard use
 | FR-I18N-06 | Search matches text in either locale, case-insensitively. |
 | FR-I18N-07 | Name uniqueness (case-insensitive) applies to the `en` value: within a parent for categories, globally for attribute sets, and within a set for attribute fields. |
 | FR-I18N-08 | Audit entries for renames record before and after values for both `en` and `fr`. |
-| FR-I18N-09 | Attribute option labels follow the same rules as attribute field names. Supplier name and address are not translated. |
+| FR-I18N-09 | Attribute option labels follow the same rules as attribute field names. Supplier name, address, and supplier contact values are not translated. |
 
 ### 4.12 Creation Dialogs (FR-MODAL)
 
 | ID | Requirement |
 |---|---|
-| FR-MODAL-01 | Creating a category, attribute set, product, or supplier shall open a shadcn `Dialog` with a title, a description, a form body, and a footer with Cancel and Save. This matches the catalog upload dialog. |
+| FR-MODAL-01 | Creating a category, attribute set, product, supplier, or supplier contact, and editing a supplier contact, shall open a shadcn `Dialog` with a title, a description, a form body, and a footer with Cancel and Save. This matches the catalog upload dialog. |
 | FR-MODAL-02 | List page headers keep a single primary button that opens the dialog. Inline text inputs for creation are removed from the category and attribute set pages. |
 | FR-MODAL-03 | Validation errors are shown in an error alert inside the dialog, and field errors are shown under the field. The dialog stays open on error. |
 | FR-MODAL-04 | Save is disabled while the request is in flight. On success the dialog closes and the list reloads. |
@@ -311,6 +334,7 @@ erDiagram
   USER ||--o{ SESSION : has
   USER ||--o{ AUDIT_LOG : performs
   USER ||--o{ SUPPLIER : creates
+  SUPPLIER ||--o{ SUPPLIER_CONTACT : has
   SUPPLIER ||--o{ SUPPLIER_ASSET : has
   SUPPLIER ||--o{ CATALOG : has
   USER ||--o{ CATALOG : uploads
@@ -363,6 +387,23 @@ erDiagram
 | created_by | UUID | FK → User |
 | created_at | timestamptz | Not null |
 | updated_at | timestamptz | Not null |
+
+**SupplierContact**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| supplier_id | UUID | FK → Supplier, not null, on delete cascade |
+| first_name | varchar(100) | Nullable |
+| last_name | varchar(100) | Nullable |
+| email | varchar(254) | Nullable |
+| phone_number | varchar(50) | Nullable |
+| wechat_id | varchar(100) | Nullable |
+| created_at | timestamptz | Not null |
+| updated_at | timestamptz | Not null |
+
+There is no uniqueness constraint on contact fields. A row with all nullable
+fields set to null is valid.
 
 **Category**
 
@@ -534,6 +575,21 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | PUT | `/suppliers/{id}` | Update name, address, and directly assigned categories. |
 | DELETE | `/suppliers/{id}` | Delete (see §8.3). |
 
+### 6.2A Supplier Contacts
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/suppliers/{id}/contacts` | Authenticated list for a supplier. Returns `{ contacts: [...] }`, all records newest first. Audited as `SUPPLIER_CONTACT_LIST` against the supplier entity ID. |
+| POST | `/suppliers/{id}/contacts` | Admin-only create. Body contains optional nullable `firstName`, `lastName`, `email`, `phoneNumber`, and `weChatId`. Returns `201` with `{ contact }`. |
+| PUT | `/suppliers/{id}/contacts/{contactId}` | Admin-only full update. All five fields are optional and omitted fields are stored as null. Returns `{ contact }`; rejects a contact that does not belong to the supplier. |
+| DELETE | `/suppliers/{id}/contacts/{contactId}` | Admin-only delete. Returns `204`; rejects a contact that does not belong to the supplier. |
+
+A contact DTO contains `id`, `supplierId`, `firstName`, `lastName`, `email`,
+`phoneNumber`, `weChatId`, `createdAt`, and `updatedAt`. Unknown supplier IDs and
+unknown or mismatched contact IDs return `404 NOT_FOUND`, without revealing
+whether a different supplier owns the contact. Mutating routes require the
+normal authenticated `Origin` check.
+
 ### 6.3 Categories
 
 | Method | Path | Description |
@@ -631,6 +687,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Entity | Rule |
 |---|---|
 | Supplier.name | Required; trimmed; 1–200 chars; unique case-insensitive. |
+| SupplierContact fields | Optional and nullable. Trimmed; first name ≤ 100 chars, last name ≤ 100, email ≤ 254, phone number ≤ 50, WeChat ID ≤ 100. A fully null record is valid. Duplicate field values are valid. |
+| SupplierContact.email | Empty values become null; otherwise a syntactically valid email address. |
 | Category.name | Required; trimmed; 1–100 chars; unique case-insensitive among siblings. |
 | Product.name | Required; trimmed; 1–200 chars. |
 | Product.supplier_sku | Required; trimmed; 1–100 chars; unique per supplier. |
@@ -667,7 +725,8 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Action | Behavior |
 |---|---|
-| Delete supplier | Blocked if the supplier has products. Assets and their files are deleted. Catalogs and their files are retained and become unassigned. |
+| Delete supplier | Blocked if the supplier has products. Contacts, assets and their files are deleted. Catalogs and their files are retained and become unassigned. |
+| Delete supplier contact | Deletes only the selected contact. |
 | Delete category | Removes direct supplier, product and catalog links and promotes immediate children, subject to sibling-name conflicts. |
 | Delete attribute set | Blocked if any product references it. |
 | Delete attribute field | Archived if any product has a value for it; otherwise deleted. |
@@ -723,6 +782,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 | Product | `(supplier_id, lower(supplier_sku))` unique | SKU uniqueness. |
 | Product | `lower(name)` | Name search. |
 | SupplierAsset | `supplier_id` | Asset list. |
+| SupplierContact | `(supplier_id, created_at desc, id desc)` | Supplier contact list in deterministic newest-first order. |
 | Catalog | `supplier_id` | Catalog list. |
 | AttributeField | `(attribute_set_id, sort_order)` | Ordered fields. |
 | Session | `expires_at` | Cleanup of expired sessions. |
@@ -783,6 +843,22 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 Acceptance tests must cover every requirement ID in §4.
 
+Supplier contact tests shall additionally cover:
+
+- API list, create, update, and delete for authenticated admins; standard users
+  can list but receive `403 FORBIDDEN` on every mutation.
+- Anonymous requests, invalid supplier/contact UUIDs, unknown suppliers,
+  mismatched supplier/contact ownership, and the `404 NOT_FOUND` response that
+  does not reveal ownership.
+- Trimming and null normalization, a fully blank record, duplicate records,
+  every length boundary, invalid email, and free-form international phone text.
+- Newest-first deterministic ordering and an unpaginated response.
+- Contact audit entries and before/after values, including an all-null contact.
+- Database cascade behavior when a supplier is deleted, its ordered query
+  index, and the transaction boundary for each write.
+- Dialog validation, admin-only controls, responsive card placement, em-dash
+  placeholders, and `mailto:` links for only non-empty email values.
+
 ---
 
 ## 14. Delivery Milestones
@@ -790,7 +866,7 @@ Acceptance tests must cover every requirement ID in §4.
 | Milestone | Scope | Exit criteria |
 |---|---|---|
 | M1 | Project setup, database, authentication, roles, user management, audit logging (FR-AUTH, FR-ROL, FR-USR, FR-AUD) | Users can log in and out; roles enforced; every action is audited. |
-| M2 | Suppliers, categories, supplier assets, supplier catalogs (FR-SUP, FR-CAT, FR-AST, FR-CLG) | CRUD works; PDF upload and download verified. |
+| M2 | Suppliers, supplier contacts, categories, supplier assets, supplier catalogs (FR-SUP, FR-SCT, FR-CAT, FR-AST, FR-CLG) | Supplier/contact CRUD works; PDF upload and download verified. |
 | M3 | Attribute sets, products, dynamic attribute forms (FR-ATS, FR-PRD) | Products created with attribute values per set. |
 | M4 | UI polish, tests, security review, Docker Compose (FR-UI, NFR) | All tests green; security checklist complete. |
 

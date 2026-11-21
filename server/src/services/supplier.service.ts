@@ -281,6 +281,7 @@ export async function deleteSupplier(
     const existing = await tx.supplier.findUnique({
       where: { id },
       include: {
+        _count: { select: { contacts: true } },
         assets: { select: { storageKey: true } },
         catalogs: { select: { id: true } },
       },
@@ -309,7 +310,10 @@ export async function deleteSupplier(
       outcome: "success",
       entityType: "Supplier",
       entityId: id,
-      changes: diffFields({ name: existing.name }, { name: null }),
+      changes: diffFields(
+        { name: existing.name, contactCount: existing._count.contacts },
+        { name: null, contactCount: 0 },
+      ),
     });
     return existing.assets.map((file) => file.storageKey);
   });
