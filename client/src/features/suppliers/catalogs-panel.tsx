@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import { BookOpen, Download, Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -134,6 +135,12 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
                 </TableCell> : null}
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
+                    <Button asChild type="button" variant="outline" size="sm">
+                      <Link to={`/catalogs/${catalog.id}/workspace`}>
+                        <BookOpen />
+                        {t("catalogs.openWorkspace")}
+                      </Link>
+                    </Button>
                     {analysisEnabled ? <Button type="button" variant="outline" size="sm" onClick={() => setReviewing(catalog)}>
                       <Eye />
                       {t("catalogs.reviewButton")}

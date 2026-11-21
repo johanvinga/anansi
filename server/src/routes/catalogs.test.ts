@@ -1074,6 +1074,39 @@ describe("supplier catalogs", () => {
   });
 
   describe("FR-CLG-05 download catalog", () => {
+    it("returns catalog metadata for a workspace and audits the view", async () => {
+      const catalog = await uploadAsAdmin();
+      const res = await request(app.server)
+        .get(`/api/v1/catalogs/${catalog.id}`)
+        .set("Cookie", readerCookie);
+
+      expect(res.status).toBe(200);
+      expect(res.body.catalog).toMatchObject({
+        id: catalog.id,
+        supplierId,
+        name: "Spring Price List",
+      });
+      expect(
+        await db.auditLog.count({ where: { action: "CATALOG_VIEW", entityId: catalog.id } }),
+      ).toBe(1);
+    });
+
+    it("opens the PDF inline and audits the browser view", async () => {
+      const catalog = await uploadAsAdmin();
+      const res = await request(app.server)
+        .get(`/api/v1/catalogs/${catalog.id}/view`)
+        .set("Cookie", readerCookie);
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toBe("application/pdf");
+      expect(res.headers["content-disposition"]).toContain("inline");
+      expect(res.headers["cache-control"]).toBe("private, no-store");
+      expect(Buffer.from(res.body).equals(PDF_BYTES)).toBe(true);
+      expect(
+        await db.auditLog.count({ where: { action: "CATALOG_PDF_VIEW", entityId: catalog.id } }),
+      ).toBe(1);
+    });
+
     it("downloads the PDF as an attachment and audits the download", async () => {
       const catalog = await uploadAsAdmin();
 

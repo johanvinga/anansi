@@ -44,6 +44,7 @@ interface ProductFormProps {
   defaultAttributeSetId?: string;
   initialProduct?: Pick<CatalogProductCandidate, "name" | "sku" | "description" | "attributes" | "categories">;
   sourceCatalog?: { catalogId: string; pageNumbers: number[] };
+  embedded?: boolean;
   onClose: () => void;
   onSaved: (product: ProductDetail) => void;
 }
@@ -125,6 +126,7 @@ export function ProductForm({
   defaultAttributeSetId,
   initialProduct,
   sourceCatalog,
+  embedded = false,
   onClose,
   onSaved,
 }: ProductFormProps) {
@@ -248,16 +250,21 @@ export function ProductForm({
   const unmatchedErrors = error?.details.filter((d) => !d.field) ?? [];
   const displayedError = error ?? dataError;
 
-  return (
-    <>
-      <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
-        <DialogContent className="flex max-h-[95dvh] flex-col overflow-hidden sm:max-w-5xl">
-          <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
-            <DialogHeader className="shrink-0 flex-col pr-12">
-              <span className="text-xs font-semibold uppercase tracking-wider text-primary">{t("products.inventory")}</span>
-              <DialogTitle>{product ? t("products.editAria", { name: localize(product.name) }) : t("products.createProduct")}</DialogTitle>
-              <DialogDescription>{t(product ? "products.editFormDescription" : "products.createFormDescription")}</DialogDescription>
-            </DialogHeader>
+  const form = (
+    <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
+      {embedded ? (
+        <div className="shrink-0 border-b px-6 py-5">
+          <span className="text-xs font-semibold uppercase tracking-wider text-primary">{t("products.inventory")}</span>
+          <h2 className="mt-1 text-lg font-semibold">{product ? t("products.editAria", { name: localize(product.name) }) : t("products.createProduct")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t(product ? "products.editFormDescription" : "products.createFormDescription")}</p>
+        </div>
+      ) : (
+        <DialogHeader className="shrink-0 flex-col pr-12">
+          <span className="text-xs font-semibold uppercase tracking-wider text-primary">{t("products.inventory")}</span>
+          <DialogTitle>{product ? t("products.editAria", { name: localize(product.name) }) : t("products.createProduct")}</DialogTitle>
+          <DialogDescription>{t(product ? "products.editFormDescription" : "products.createFormDescription")}</DialogDescription>
+        </DialogHeader>
+      )}
             <div className="min-h-0 flex-1 overflow-y-auto">
               <FieldGroup className="gap-0 px-1">
               {displayedError && (displayedError.details.length === 0 || unmatchedErrors.length > 0) ? (
@@ -352,7 +359,18 @@ export function ProductForm({
               </ProductFormSection>
               </FieldGroup>
             </div>
-            <DialogFooter className="mt-0 shrink-0 flex-row flex-wrap items-center">
+      {embedded ? (
+        <div className="mt-0 flex shrink-0 flex-row flex-wrap items-center justify-end gap-2 border-t px-6 py-4">
+          <p className="mr-auto basis-full text-xs text-muted-foreground sm:basis-auto"><span className="text-destructive">*</span> {t("products.requiredFields")}</p>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button type="submit" disabled={submitting || !fieldsReady || independentAttributes.isLoading || Boolean(independentAttributes.error)}>
+            {submitting ? t("common.saving") : product ? t("products.saveProduct") : t("products.createProduct")}
+          </Button>
+        </div>
+      ) : (
+        <DialogFooter className="mt-0 shrink-0 flex-row flex-wrap items-center">
               <p className="mr-auto basis-full text-xs text-muted-foreground sm:basis-auto"><span className="text-destructive">*</span> {t("products.requiredFields")}</p>
               <DialogClose asChild>
                 <Button type="button" variant="outline">
@@ -362,10 +380,20 @@ export function ProductForm({
               <Button type="submit" disabled={submitting || !fieldsReady || independentAttributes.isLoading || Boolean(independentAttributes.error)}>
                 {submitting ? t("common.saving") : product ? t("products.saveProduct") : t("products.createProduct")}
               </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+        </DialogFooter>
+      )}
+    </form>
+  );
+
+  if (embedded) {
+    return <section className="flex min-h-0 flex-1 flex-col">{form}</section>;
+  }
+
+  return (
+    <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="flex max-h-[95dvh] flex-col overflow-hidden sm:max-w-5xl">
+        {form}
+      </DialogContent>
+    </Dialog>
   );
 }

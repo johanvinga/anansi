@@ -8,6 +8,7 @@ import { apiRequest } from "./api/client";
 import type { CurrentUser } from "./api/types";
 import { useAuth } from "./auth/auth-state";
 import { CatalogsPage } from "./features/catalogs/catalogs-page";
+import { CatalogWorkspace } from "./features/catalogs/catalog-workspace";
 import { AccountPage } from "./features/account/account-page";
 import { ChangePasswordForm } from "./features/account/change-password-form";
 import { AttributeSetsPage, AttributeSetBuilderPage } from "./features/attribute-sets/attribute-sets-page";
@@ -83,6 +84,7 @@ export function App() {
         <Route path="suppliers/:supplierId/:tab" element={<SupplierDetailPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route path="catalogs" element={<CatalogsPage />} />
+        <Route path="catalogs/:catalogId/workspace" element={<CatalogWorkspace />} />
         <Route path="attribute-sets" element={<AttributeSetsPage />} />
         <Route path="attribute-sets/:attributeSetId" element={<AttributeSetBuilderPage />} />
         <Route path="categories" element={<CategoriesPage />} />
