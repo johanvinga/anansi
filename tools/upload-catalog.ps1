@@ -77,6 +77,26 @@ function Get-CatalogUpload {
     }
 }
 
+function Get-CatalogIdempotencyKey {
+    param(
+        [psobject] $Upload
+    )
+
+    $fileHash = (Get-FileHash -LiteralPath $Upload.File.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $name = if ($Upload.HasName) { $Upload.Name.Trim() } else { "" }
+    $identityBytes = [System.Text.Encoding]::UTF8.GetBytes(
+        "v1`n$fileHash`n$($Upload.File.Name)`n$name"
+    )
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $identityHash = $sha256.ComputeHash($identityBytes)
+    } finally {
+        $sha256.Dispose()
+        [Array]::Clear($identityBytes, 0, $identityBytes.Length)
+    }
+    "v1-$([System.BitConverter]::ToString($identityHash).Replace('-', '').ToLowerInvariant())"
+}
+
 $uploads = @()
 if ($PSCmdlet.ParameterSetName -eq "Single") {
     $uploads += Get-CatalogUpload -Path $FilePath -CatalogName $Name
@@ -151,8 +171,10 @@ try {
         Write-Host "Uploading $($index + 1) of $($uploads.Count): $($upload.File.FullName)"
 
         $form = [System.Net.Http.MultipartFormDataContent]::new()
+        $request = $null
         $stream = $null
         try {
+            $idempotencyKey = Get-CatalogIdempotencyKey -Upload $upload
             $stream = [System.IO.File]::OpenRead($upload.File.FullName)
             $fileContent = [System.Net.Http.StreamContent]::new($stream)
             $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::new("application/pdf")
@@ -161,7 +183,13 @@ try {
                 $form.Add([System.Net.Http.StringContent]::new($upload.Name), "name")
             }
 
-            $response = $client.PostAsync($Url, $form).GetAwaiter().GetResult()
+            $request = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::Post,
+                $Url
+            )
+            $request.Headers.Add("Idempotency-Key", $idempotencyKey)
+            $request.Content = $form
+            $response = $client.SendAsync($request).GetAwaiter().GetResult()
             try {
                 $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
                 if (-not $response.IsSuccessStatusCode) {
@@ -177,6 +205,9 @@ try {
         } catch {
             Write-CatalogUploadFailure -Path $upload.File.FullName -Message $_.Exception.Message
         } finally {
+            if ($request) {
+                $request.Dispose()
+            }
             $form.Dispose()
             if ($stream) {
                 $stream.Dispose()

@@ -81,6 +81,45 @@ describe("public catalog upload", () => {
     expect(await readdir(path.join(uploadDir, "catalogs"))).toHaveLength(1);
   });
 
+  it("replays idempotent uploads and rejects reuse with different content", async () => {
+    const key = "v1-0123456789abcdef0123456789abcdef";
+    const first = await upload().set("Idempotency-Key", key);
+    const replay = await upload().set("Idempotency-Key", key);
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(200);
+    expect(replay.body.catalog.id).toBe(first.body.catalog.id);
+    expect(await db.catalog.count()).toBe(1);
+    expect(await db.auditLog.count({ where: { action: "CATALOG_UPLOAD" } })).toBe(1);
+    expect(await readdir(path.join(uploadDir, "catalogs"))).toHaveLength(1);
+
+    const conflict = await upload(ADMIN, "different.pdf", Buffer.from("%PDF-1.7\n%%EOF\n"))
+      .set("Idempotency-Key", key);
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe("CONFLICT");
+    expect(await db.catalog.count()).toBe(1);
+  });
+
+  it("serializes concurrent retries that use the same idempotency key", async () => {
+    const key = "v1-concurrent-upload-key";
+    const results = await Promise.all([
+      upload().set("Idempotency-Key", key),
+      upload().set("Idempotency-Key", key),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([200, 201]);
+    expect(results[0]!.body.catalog.id).toBe(results[1]!.body.catalog.id);
+    expect(await db.catalog.count()).toBe(1);
+    expect(await db.auditLog.count({ where: { action: "CATALOG_UPLOAD" } })).toBe(1);
+    expect(await readdir(path.join(uploadDir, "catalogs"))).toHaveLength(1);
+  });
+
+  it("validates idempotency keys before creating a catalog", async () => {
+    const short = await upload().set("Idempotency-Key", "short");
+    const invalid = await upload().set("Idempotency-Key", "invalid key containing spaces");
+    expect(short.status).toBe(400);
+    expect(invalid.status).toBe(400);
+    expect(await db.catalog.count()).toBe(0);
+  });
+
   it("handles provided names and safe generated filename fallbacks", async () => {
     const named = await upload().field("name", "  My catalog  ");
     expect(named.status).toBe(201);
