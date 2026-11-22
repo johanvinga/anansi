@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+﻿import { createHash, randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import type { CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
@@ -28,6 +28,15 @@ export interface CatalogMetadata {
   /** Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08). */
   version: string | null;
   categories?: CategoryInput[] | undefined;
+}
+
+export interface CatalogUploadOptions {
+  idempotencyKey?: string | undefined;
+}
+
+export interface CatalogUploadResult {
+  catalog: CatalogDto;
+  replayed: boolean;
 }
 
 export interface CatalogUpdate {
@@ -291,7 +300,8 @@ export async function uploadCatalog(
   supplierId: string | null,
   file: UploadedFile,
   metadata: CatalogMetadata,
-): Promise<CatalogDto> {
+  options: CatalogUploadOptions = {},
+): Promise<CatalogUploadResult> {
   if (file.mimeType !== PDF_MIME_TYPE || !hasPdfSignature(file.buffer)) {
     throw new AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only PDF files can be uploaded.");
   }
@@ -300,10 +310,54 @@ export async function uploadCatalog(
   let name = metadata.name?.trim();
   name ??= catalogNameFromFileName(file.originalFileName);
 
+  const idempotencyKey = options.idempotencyKey;
+  const uploaderId = request.actor.userId;
+  if (idempotencyKey && !uploaderId) {
+    throw new Error("Idempotent catalog uploads require an authenticated uploader.");
+  }
+  let requestHash: string | null = null;
+  if (idempotencyKey) {
+    requestHash = createHash("sha256")
+      .update(JSON.stringify([
+        sanitizeFileName(file.originalFileName),
+        name,
+        createHash("sha256").update(file.buffer).digest("hex"),
+      ]))
+      .digest("hex");
+    const existing = await deps.db.catalog.findFirst({
+      where: {
+        uploadedById: uploaderId,
+        uploadIdempotencyKey: idempotencyKey,
+      },
+      include: catalogInclude,
+    });
+    if (existing) {
+      if (existing.uploadRequestHash !== requestHash) {
+        throw errors.conflict("This idempotency key was already used for a different upload.");
+      }
+      return { catalog: toCatalogDto(existing), replayed: true };
+    }
+  }
+
   // Store the file first, then write metadata in a transaction. If the transaction fails,
   // the file is removed so no orphaned data is left behind (NFR-11).
-  const storageKey = `catalogs/${randomUUID()}.pdf`;
-  await deps.storage.save(storageKey, file.buffer, PDF_MIME_TYPE);
+  const storageKey = idempotencyKey
+    ? `catalogs/${storageUuid(uploaderId!, idempotencyKey, requestHash!)}.pdf`
+    : `catalogs/${randomUUID()}.pdf`;
+  let fileMayBelongToConcurrentRequest = false;
+  try {
+    if (!idempotencyKey || !await deps.storage.exists(storageKey)) {
+      await deps.storage.save(storageKey, file.buffer, PDF_MIME_TYPE);
+    } else {
+      fileMayBelongToConcurrentRequest = true;
+    }
+  } catch (error) {
+    if (idempotencyKey && await deps.storage.exists(storageKey)) {
+      fileMayBelongToConcurrentRequest = true;
+    } else {
+      throw error;
+    }
+  }
 
   let saved: Awaited<ReturnType<typeof createCatalogWithExtractionJob>>;
   try {
@@ -314,13 +368,42 @@ export async function uploadCatalog(
       file,
       { ...metadata, name },
       storageKey,
+      idempotencyKey ? { idempotencyKey, requestHash: requestHash! } : undefined,
     );
   } catch (error) {
+    if (idempotencyKey && (error as { code?: string } | null)?.code === "P2002") {
+      const existing = await deps.db.catalog.findFirstOrThrow({
+        where: {
+          uploadedById: uploaderId,
+          uploadIdempotencyKey: idempotencyKey,
+        },
+        include: catalogInclude,
+      });
+      if (existing.uploadRequestHash !== requestHash) {
+        if (!fileMayBelongToConcurrentRequest) {
+          await removeStoredFiles(deps.storage, [storageKey], deps.log);
+        }
+        throw errors.conflict("This idempotency key was already used for a different upload.");
+      }
+      return { catalog: toCatalogDto(existing), replayed: true };
+    }
+    if (fileMayBelongToConcurrentRequest) throw error;
     await removeStoredFiles(deps.storage, [storageKey], deps.log);
     throw error;
   }
   const catalog = await deps.db.catalog.findUniqueOrThrow({ where: { id: saved.catalog.id }, include: catalogInclude });
-  return toCatalogDto(catalog);
+  return { catalog: toCatalogDto(catalog), replayed: false };
+}
+
+function storageUuid(userId: string, idempotencyKey: string, requestHash: string): string {
+  const bytes = Buffer.from(
+    createHash("sha256").update(`${userId}:${idempotencyKey}:${requestHash}`).digest("hex").slice(0, 32),
+    "hex",
+  );
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 async function createCatalogWithExtractionJob(
@@ -332,6 +415,10 @@ async function createCatalogWithExtractionJob(
     name: string;
   },
   storageKey: string,
+  idempotency?: {
+    idempotencyKey: string;
+    requestHash: string;
+  },
 ) {
   return db.$transaction(async (tx) => {
   if (supplierId) await assertSupplierExists(tx, supplierId);
@@ -346,6 +433,8 @@ async function createCatalogWithExtractionJob(
       mimeType: PDF_MIME_TYPE,
       sizeBytes: BigInt(file.buffer.byteLength),
       uploadedById: request.actor.userId,
+      uploadIdempotencyKey: idempotency?.idempotencyKey,
+      uploadRequestHash: idempotency?.requestHash,
       analysisStatus: "not_processed",
       categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
     },

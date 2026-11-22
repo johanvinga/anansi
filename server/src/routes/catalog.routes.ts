@@ -177,8 +177,8 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     if (supplierId && metadata.supplierId && supplierId !== metadata.supplierId) {
       throw errors.validation([{ field: "supplierId", message: "Supplier does not match the URL." }]);
     }
-    const catalog = await uploadCatalog(deps, context(request), supplierId ?? metadata.supplierId, file, metadata);
-    return reply.status(201).send({ catalog });
+    const result = await uploadCatalog(deps, context(request), supplierId ?? metadata.supplierId, file, metadata);
+    return reply.status(201).send({ catalog: result.catalog });
   };
   app.post("/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => handleUpload(request, reply));
   app.post("/suppliers/:id/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => {

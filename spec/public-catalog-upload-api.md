@@ -52,6 +52,10 @@ Request: `multipart/form-data`.
 | `file` | Yes | Exactly one PDF file part; declare `application/pdf`. |
 | `name` | No | If supplied, trim and validate as 1–200 characters. Omitted, empty, or whitespace-only values use vendor deduction and the filename fallback below. |
 
+The optional `Idempotency-Key` request header must contain 16–128 characters
+using letters, numbers, dots, underscores, colons, or hyphens. The PowerShell
+script always supplies a deterministic key.
+
 Reject duplicate fields, additional file parts, and unsupported fields with a
 validation error. The file part must have a multipart filename parameter so the
 server can recognize it as a file; a catalog name field is not required.
@@ -127,8 +131,9 @@ the command line, where process listings or shell history may expose them.
 ### Success response
 
 Return `201 Created` with `{ "catalog": ... }` using the existing catalog DTO.
-The response includes the new catalog ID; the existing UI can find and manage
-the catalog. No Basic-authenticated read endpoint is included in this scope.
+An idempotent replay returns `200 OK` with the original catalog. The response
+includes the catalog ID; the existing UI can find and manage the catalog. No
+Basic-authenticated read endpoint is included in this scope.
 
 ```json
 {
@@ -158,14 +163,21 @@ Use the existing `{ "error": { "code", "message", "details" } }` envelope.
 | 400 | `VALIDATION_ERROR` | Missing file, invalid name, unsupported or duplicate fields, malformed multipart. |
 | 401 | `UNAUTHENTICATED` | Missing, malformed, invalid, or inactive-account credentials; include `WWW-Authenticate: Basic realm="catalog-upload", charset="UTF-8"`. |
 | 403 | `FORBIDDEN` | Insufficient role, required password change, or rejected browser-origin request. |
+| 409 | `CONFLICT` | An idempotency key was already used with different upload content or metadata. |
 | 413 | `PAYLOAD_TOO_LARGE` | File exceeds the configured limit. |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | File MIME type or signature is not PDF. |
 | 429 | `RATE_LIMITED` | Authentication attempt throttled; return `Retry-After`. |
 | 500 | `INTERNAL_ERROR` | Unexpected storage, database, or server error. |
 
-No idempotency key or deduplication is included in this scope. A retry after a
-timeout may create a second catalog if the first request succeeded; clients
-must account for that possibility rather than blindly retrying.
+Clients may send `Idempotency-Key` with a stable 16–128 character value using
+letters, numbers, dots, underscores, colons, or hyphens. The key is scoped to
+the authenticated uploader. The first successful request returns `201`; a retry
+of the same key and identical upload returns `200` with the original catalog.
+Reusing a key for different filename, name, or PDF content returns `409`.
+Concurrent requests with the same key create only one catalog. The included
+PowerShell script derives a deterministic key from the file bytes and upload
+metadata, so rerunning a CSV safely replays completed uploads rather than
+creating duplicates. Omitting the header retains the non-idempotent behavior.
 
 ## Security and operations
 
@@ -248,6 +260,10 @@ catalog accepted for upload.
   malformed multipart fail with the specified status and no catalog or orphaned
   file. Simulated storage and transaction failures are surfaced and cleaned up
   according to existing storage semantics.
+- Repeating an `Idempotency-Key` returns the original catalog and creates no
+  additional file or catalog-upload audit entry. Authentication is audited on
+  every request. A changed payload with the same key returns `409`, and
+  concurrent retries still create only one catalog.
 - Verify IP and account throttling, `Retry-After`, shared-account protection
   with normal login, and that successful uploads do not exhaust the failed-login
   quota. Test untrusted forwarded headers and the deployed proxy configuration.

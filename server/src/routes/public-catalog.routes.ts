@@ -11,6 +11,7 @@ import type { CatalogDeps } from "../services/catalog.service.js";
 const nameSchema = z.string().trim().max(200).transform((value) => value || undefined);
 const uploadSchema = z.object({ name: nameSchema.optional() }).strict();
 const BYTES_PER_MB = 1024 * 1024;
+const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
 
 function credentials(header: string | undefined): { email: string | null; password: string } {
   const invalid = { email: null, password: "" };
@@ -50,6 +51,16 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps
         reply.header("Retry-After", String(Math.max(accountWait, ipWait, 1)));
       }
       throw error;
+    }
+
+    const rawIdempotencyKey = request.headers["idempotency-key"];
+    if (rawIdempotencyKey !== undefined && (
+      typeof rawIdempotencyKey !== "string" || !idempotencyKeyPattern.test(rawIdempotencyKey)
+    )) {
+      throw errors.validation([{
+        field: "Idempotency-Key",
+        message: "Idempotency-Key must be 16-128 characters using letters, numbers, dots, underscores, colons or hyphens.",
+      }]);
     }
 
     const fields: Record<string, string> = {};
@@ -92,13 +103,14 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps
     }
     if (!file) throw errors.validation([{ field: "file", message: "A PDF file is required." }]);
     const metadata = parseInput(uploadSchema, fields);
-    const catalog = await uploadCatalog(
+    const result = await uploadCatalog(
       assets,
       { ...info, actor: { userId: user.id, email: user.email } },
       null,
       file,
       { name: metadata.name, version: null },
+      rawIdempotencyKey ? { idempotencyKey: rawIdempotencyKey } : undefined,
     );
-    return reply.status(201).send({ catalog });
+    return reply.status(result.replayed ? 200 : 201).send({ catalog: result.catalog });
   });
 }

@@ -320,6 +320,8 @@ model Catalog {
   /// File size in bytes; read-only after upload.
   sizeBytes        BigInt   @map("size_bytes")
   uploadedById     String?  @map("uploaded_by_id") @db.Uuid
+  uploadIdempotencyKey String? @map("upload_idempotency_key") @db.VarChar(128)
+  uploadRequestHash String? @map("upload_request_hash") @db.Char(64)
   analysisStatus   CatalogAnalysisStatus @default(not_processed) @map("analysis_status")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -330,6 +332,7 @@ model Catalog {
   categories CatalogCategory[]
   sourcedProducts Product[]
 
+  @@unique([uploadedById, uploadIdempotencyKey])
   @@index([supplierId])
   @@index([analysisStatus])
   @@map("catalogs")
