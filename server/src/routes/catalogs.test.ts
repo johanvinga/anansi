@@ -459,6 +459,56 @@ describe("supplier catalogs", () => {
       expect(await db.supplierCategory.count({ where: { supplierId } })).toBe(2);
     });
 
+    it("merges all individual product categories into the catalog and supplier", async () => {
+      const uploaded = await upload(adminCookie, textPdf(["Fasteners and Paint"]), {
+        filename: "generic.pdf",
+        fields: {},
+      });
+      const catalogId = uploaded.body.catalog.id as string;
+      const started = await request(app.server)
+        .post(`/api/v1/catalogs/${catalogId}/extraction`)
+        .set(unsafeHeaders(adminCookie));
+
+      await processGeminiCatalogExtraction(
+        started.body.job.jobId,
+        { db, storage: createLocalAssetStorage(uploadDir), maxPages: 100 },
+        async () => ({
+          catalog: { name: null, categoryPaths: [] },
+          products: [
+            {
+              name: "Structural Bolt",
+              sku: "BOLT-1",
+              description: null,
+              categories: ["Fasteners"],
+              attributes: [],
+              pageNumbers: [1],
+              excerpt: "Structural bolt",
+            },
+            {
+              name: "Exterior Paint",
+              sku: "PAINT-1",
+              description: null,
+              categories: ["Paint"],
+              attributes: [],
+              pageNumbers: [1],
+              excerpt: "Exterior paint",
+            },
+          ],
+        }),
+      );
+
+      const catalog = await db.catalog.findUniqueOrThrow({
+        where: { id: catalogId },
+        include: { categories: { include: { category: true } } },
+      });
+      expect(catalog.categories.map((link) => link.category.nameEn).sort()).toEqual(["Fasteners", "Paint"]);
+      const supplierCategories = await db.supplierCategory.findMany({
+        where: { supplierId },
+        include: { category: true },
+      });
+      expect(supplierCategories.map((link) => link.category.nameEn).sort()).toEqual(["Fasteners", "Paint"]);
+    });
+
     it("reuses one queued job when admins start analysis concurrently", async () => {
       const catalog = await uploadAsAdmin();
       const start = () => request(app.server).post(`/api/v1/catalogs/${catalog.id}/extraction`).set(unsafeHeaders(adminCookie));

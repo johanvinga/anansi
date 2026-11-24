@@ -184,8 +184,13 @@ only the most common one, and exclude categories with no extracted product
 candidate. Do not duplicate equivalent paths. Use the broadest appropriate root
 and only evidence-supported intermediate nodes. Reuse the exact English and
 French names of an existing category when it represents the same concept at the
-same parent. Existing categories are supplied as JSON below. Return an empty
-array when no category is sufficiently certain.
+same parent. Existing categories are supplied as JSON below. Build
+catalog.categoryPaths as the union of every category named in every
+products[].categories entry: every individual product category must have a
+matching complete path, including categories used by only one candidate.
+Do not omit categories that occur in the product list but differ from the
+catalog-wide family names. Return an empty array when no category is
+sufficiently certain.
 
 Create a separate product candidate for each distinct supplier SKU, even when
 variants share a product family name, description, or specifications. Do not
@@ -401,7 +406,7 @@ export async function processGeminiCatalogExtraction(
           where: { id: job.id },
           data: { status: "processed", stage: "completed", progress: 100, currentPage: totalPages, totalPages, productsIdentified: products.length, results, processingError: null, completedAt: new Date() },
         });
-        await applyCatalogAnalysisMetadata(tx, job.catalog, analyzed.catalog ?? null);
+        await applyCatalogAnalysisMetadata(tx, job.catalog, analyzed.catalog ?? null, analyzed.products);
         await tx.catalog.update({ where: { id: job.catalogId }, data: { analysisStatus: "processed" } });
       }, { timeout: 120_000 });
     } catch (error) {

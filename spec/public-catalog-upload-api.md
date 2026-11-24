@@ -97,7 +97,8 @@ with the full HTTPS endpoint URL for a deployed server. Add `-Name "Catalog
 name"` to supply a name. The public API's configured size limit still applies.
 
 To upload multiple catalogs sequentially, pass a CSV file with a `FilePath`
-column and an optional `Name` column:
+column and an optional `Name` column. A ready-to-copy template is available at
+[`tools/catalogs-example.csv`](../tools/catalogs-example.csv):
 
 ```csv
 FilePath,Name

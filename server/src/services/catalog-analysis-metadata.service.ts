@@ -15,31 +15,83 @@ interface CatalogAnalysisMetadata {
   categoryPaths?: { en: string; fr: string }[][];
 }
 
+interface CatalogAnalysisProduct {
+  categories: string[];
+}
+
 const systemRequest = (): AuditRequestContext => ({
   requestId: randomUUID(),
   ipAddress: null,
   actor: { userId: null, email: "system:catalog-analysis" },
 });
 
+async function productCategoryPaths(
+  tx: Prisma.TransactionClient,
+  products: CatalogAnalysisProduct[],
+): Promise<{ en: string; fr: string }[][]> {
+  const names = [...new Set(
+    products.flatMap((product) => product.categories)
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  )];
+  if (names.length === 0) return [];
+
+  const categories = await tx.category.findMany({
+    select: { id: true, parentId: true, nameEn: true, nameFr: true },
+  });
+  const byId = new Map(categories.map((category) => [category.id, category]));
+
+  const paths: { en: string; fr: string }[][] = [];
+  for (const name of names) {
+    const needle = name.toLocaleLowerCase();
+    const matches = categories.filter((category) =>
+      category.nameEn.trim().toLocaleLowerCase() === needle ||
+      category.nameFr.trim().toLocaleLowerCase() === needle
+    );
+
+    if (matches.length === 1) {
+      const path: { en: string; fr: string }[] = [];
+      const visited = new Set<string>();
+      let category: typeof categories[number] | undefined = matches[0];
+      while (category) {
+        if (visited.has(category.id)) break;
+        visited.add(category.id);
+        path.unshift({ en: category.nameEn, fr: category.nameFr });
+        category = category.parentId ? byId.get(category.parentId) : undefined;
+      }
+      paths.push(path);
+    } else if (matches.length === 0) {
+      paths.push([{ en: name, fr: name }]);
+    }
+  }
+  return paths;
+}
+
 export async function applyCatalogAnalysisMetadata(
   tx: Prisma.TransactionClient,
   catalog: Catalog,
   metadata: CatalogAnalysisMetadata | null,
+  products: CatalogAnalysisProduct[] = [],
 ): Promise<void> {
-  if (!metadata) return;
+  if (!metadata && products.length === 0) return;
   const request = systemRequest();
   const existing = await tx.catalog.findUniqueOrThrow({
     where: { id: catalog.id },
     include: { categories: true },
   });
-  const inferredName = metadata.name?.trim() || null;
+  const inferredName = metadata?.name?.trim() || null;
   const shouldApplyName =
     inferredName !== null &&
     existing.name === catalogNameFromFileName(existing.originalFileName);
-  const inferredPaths = metadata.categoryPaths ??
-    (metadata.categoryPath?.length ? [metadata.categoryPath] : []);
-  const inferredCategoryIds = inferredPaths.length
-    ? await resolveCategoryPaths(tx, request, inferredPaths.map((path) => ({
+  const inferredPaths = metadata?.categoryPaths ??
+    (metadata?.categoryPath?.length ? [metadata.categoryPath] : []);
+  const individualProductPaths = await productCategoryPaths(tx, products);
+  const allInferredPaths = [
+    ...inferredPaths,
+    ...individualProductPaths,
+  ];
+  const inferredCategoryIds = allInferredPaths.length
+    ? await resolveCategoryPaths(tx, request, allInferredPaths.map((path) => ({
         path: path.map((name) => ({ name })),
       })))
     : [];
