@@ -80,6 +80,8 @@ describe("Gemini whole-catalog analysis", () => {
         { text: expect.stringContaining("Determine the catalog's clear descriptive title") },
         { text: expect.stringContaining("every distinct product category") },
         { text: expect.stringContaining("catalog.categoryPaths") },
+        { text: expect.stringContaining("union of every category named in every") },
+        { text: expect.stringContaining("every individual product category") },
         { fileData: { fileUri: "https://example.test/file", mimeType: "application/pdf" } },
       ]) })],
     }));

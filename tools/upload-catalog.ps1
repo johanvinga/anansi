@@ -12,7 +12,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string] $Email,
 
-    [uri] $Url = "http://localhost:3000/api/v1/public/catalogs",
+    [uri] $Url = "https://winwintrading.live/api/v1/public/catalogs",
 
     [Parameter(ParameterSetName = "Single")]
     [string] $Name,
