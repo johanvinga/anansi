@@ -1,7 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,21 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FieldGroup } from "@/components/ui/field";
 import { apiRequest, errorMessage } from "../../api/client";
 import type {
   Catalog,
   CatalogAnalysisStatus,
   CatalogExtraction,
-  CatalogProductCandidate,
-  ProductDetail,
+  CatalogSupplierReview,
+  CatalogTagReview,
 } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
-import { FormField } from "../../components/form-field";
-import { ProductForm } from "../products/product-form";
-import { SupplierForm } from "../suppliers/supplier-form";
-import { CatalogEditDialog } from "./catalog-edit-dialog";
-import { CatalogImportPreviewDialog } from "./catalog-import-preview-dialog";
 
 interface CatalogExtractionDialogProps {
   catalog: Catalog;
@@ -43,15 +36,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
-  const [creatingProduct, setCreatingProduct] = useState<CatalogProductCandidate | null>(null);
-  const [creatingAttributeSet, setCreatingAttributeSet] = useState(false);
-  const [attributeSetId, setAttributeSetId] = useState<string | undefined>();
-  const [createdProductName, setCreatedProductName] = useState<string | null>(null);
-  const [editingCatalog, setEditingCatalog] = useState(false);
-  const [creatingSupplier, setCreatingSupplier] = useState(false);
-  const [newSupplierId, setNewSupplierId] = useState<string | undefined>();
-  const [assignedSupplierId, setAssignedSupplierId] = useState(catalog.supplierId);
-  const [previewIndexes, setPreviewIndexes] = useState<number[] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const extractionQuery = useQuery({
     queryKey: ["catalog-extraction", catalog.id],
     queryFn: () => apiRequest<CatalogExtraction>("GET", `/catalogs/${catalog.id}/extraction`),
@@ -62,10 +47,16 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
   });
   const extraction = extractionQuery.data;
   const job = extraction?.job;
-  const results = job?.results;
-  const candidateCategories = [...new Set(results?.products.flatMap((product) => product.categories ?? []) ?? [])];
-  const suggestedAttributeSetName =
-    candidateCategories.length === 1 ? candidateCategories[0]! : `${catalog.name} attributes`.slice(0, 100);
+  const supplierReviewQuery = useQuery({
+    queryKey: ["catalog-supplier-review", catalog.id, job?.jobId],
+    queryFn: () => apiRequest<CatalogSupplierReview>("GET", `/catalogs/${catalog.id}/extraction/${job!.jobId}/supplier-review`),
+    enabled: Boolean(job?.status === "processed" && job.prompt === "supplier"),
+  });
+  const tagReviewQuery = useQuery({
+    queryKey: ["catalog-tag-review", catalog.id, job?.jobId],
+    queryFn: () => apiRequest<CatalogTagReview>("GET", `/catalogs/${catalog.id}/extraction/${job!.jobId}/tag-review`),
+    enabled: Boolean(job?.status === "processed" && job.prompt === "tags"),
+  });
   const canRetry =
     isAdmin &&
     extraction !== undefined &&
@@ -74,11 +65,11 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
       extraction.analysisStatus === "processed" ||
       extraction.analysisStatus === "queued");
 
-  async function retryAnalysis() {
+  async function runPrompt(prompt: "supplier" | "tags") {
     setError(null);
     setRetrying(true);
     try {
-      await apiRequest("POST", `/catalogs/${catalog.id}/extraction`);
+      await apiRequest("POST", `/catalogs/${catalog.id}/extraction`, { prompt });
       await extractionQuery.refetch();
     } catch (err) {
       setError(errorMessage(err));
@@ -87,14 +78,82 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
     }
   }
 
-  function onProductCreated(product: ProductDetail) {
-    setCreatingProduct(null);
-    setCreatedProductName(product.name.en);
-    void queryClient.invalidateQueries({ queryKey: ["products"] });
-    void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
-    void queryClient.invalidateQueries({ queryKey: ["supplier", assignedSupplierId] });
-    void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+  async function applySupplierReview(review: CatalogSupplierReview) {
+    if (!review.supplier?.name) {
+      setError("No supplier name was found by the analysis.");
+      return;
+    }
+    setError(null);
+    try {
+      await apiRequest("POST", `/catalogs/${catalog.id}/extraction/supplier-review`, {
+        jobId: review.jobId,
+        action: review.exactMatch ? "reuse" : "create",
+        supplierId: review.exactMatch?.id,
+        name: review.supplier.name.value,
+        address: {
+          street: review.supplier.address.street?.value ?? null,
+          city: review.supplier.address.city?.value ?? null,
+          stateRegion: review.supplier.address.stateRegion?.value ?? null,
+          postalCode: review.supplier.address.postalCode?.value ?? null,
+          country: review.supplier.address.country?.value ?? null,
+        },
+        website: review.supplier.website?.value ?? null,
+        contacts: (review.supplier.contacts ?? []).map((contact) => ({
+          name: contact.name.value,
+          role: contact.role?.value ?? null,
+        })),
+      });
+      await Promise.all([
+        extractionQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["catalogs"] }),
+        queryClient.invalidateQueries({ queryKey: ["suppliers"] }),
+      ]);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   }
+
+  async function applyTagReview(review: CatalogTagReview) {
+    setError(null);
+    setNotice(null);
+    // Catalog tags are the union of catalog-level tags and every product tag, deduplicated by English name.
+    const catalogTagMap = new Map<string, (typeof review.catalogTags)[number]>();
+    for (const tag of [...(review.catalogTags ?? []), ...(review.products ?? []).flatMap((product) => product.tags ?? [])]) {
+      if (tag?.name?.en) catalogTagMap.set(tag.name.en.trim().toLowerCase(), tag);
+    }
+    const catalogTags = [...catalogTagMap.values()];
+    if (catalogTags.length === 0) {
+      setError("The analysis found no tags to apply. Run Deduct product tags again.");
+      return;
+    }
+    try {
+      await apiRequest("POST", `/catalogs/${catalog.id}/extraction/tag-review`, {
+        jobId: review.jobId,
+        catalogTagIds: catalogTags.flatMap((tag) => tag.existing ? [tag.existing.id] : []),
+        newCatalogTags: catalogTags.flatMap((tag) => tag.existing ? [] : [{ en: tag.name.en, fr: tag.name.fr }]),
+        productTagIds: review.products.flatMap((product) =>
+          product.existingProduct
+            ? [{
+                productId: product.existingProduct.id,
+                tagIds: product.tags.flatMap((tag) => tag.existing ? [tag.existing.id] : []),
+                newTags: product.tags.flatMap((tag) => tag.existing ? [] : [{ en: tag.name.en, fr: tag.name.fr }]),
+              }]
+            : [],
+        ),
+      });
+      await Promise.all([
+        extractionQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["catalogs"] }),
+        queryClient.invalidateQueries({ queryKey: ["suppliers"] }),
+        queryClient.invalidateQueries({ queryKey: ["products"] }),
+        tagReviewQuery.refetch(),
+      ]);
+      setNotice(`Applied ${catalogTags.length} tag(s) to this catalog.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
 
   return (
     <>
@@ -106,12 +165,17 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
           </DialogHeader>
 
           <div className="flex flex-col gap-5">
+            {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
             <ErrorAlert
               message={
                 error ??
                 (extractionQuery.error
                   ? errorMessage(extractionQuery.error)
-                  : job?.error ?? null)
+                  : supplierReviewQuery.error
+                    ? errorMessage(supplierReviewQuery.error)
+                    : tagReviewQuery.error
+                      ? errorMessage(tagReviewQuery.error)
+                      : job?.error ?? null)
               }
             />
 
@@ -131,163 +195,102 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
                       })}
                     </span>
                   ) : null}
+
+                  {supplierReviewQuery.data?.supplier ? (
+                    <section className="flex flex-col gap-3 rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h3 className="font-semibold">Supplier metadata review</h3>
+                        {isAdmin ? (
+                          <Button type="button" onClick={() => void applySupplierReview(supplierReviewQuery.data!)}>
+                            {supplierReviewQuery.data!.exactMatch ? "Reuse exact supplier" : "Create confirmed supplier"}
+                          </Button>
+                        ) : null}
+                      </div>
+                      <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                        {[
+                          ["Name", supplierReviewQuery.data.supplier.name],
+                          ["Street", supplierReviewQuery.data.supplier.address.street],
+                          ["City", supplierReviewQuery.data.supplier.address.city],
+                          ["State/region", supplierReviewQuery.data.supplier.address.stateRegion],
+                          ["Postal code", supplierReviewQuery.data.supplier.address.postalCode],
+                          ["Country", supplierReviewQuery.data.supplier.address.country],
+                          ["Website", supplierReviewQuery.data.supplier.website],
+                          ["Email", supplierReviewQuery.data.supplier.email],
+                          ["Phone", supplierReviewQuery.data.supplier.phone],
+                        ].map(([label, evidence]) => evidence && typeof evidence === "object" && "value" in evidence ? (
+                          <div key={label as string}>
+                            <dt className="font-medium">{label as string}</dt>
+                            <dd>{(evidence as { value: string; pageNumber: number; excerpt: string }).value}</dd>
+                            <dd className="text-xs text-muted-foreground">
+                              Page {(evidence as { value: string; pageNumber: number; excerpt: string }).pageNumber}: {(evidence as { value: string; pageNumber: number; excerpt: string }).excerpt}
+                            </dd>
+                          </div>
+                        ) : null)}
+                      </dl>
+                    </section>
+                  ) : null}
+
+                  {job?.prompt === "supplier" && job.results ? (
+                    <details className="rounded-lg border p-4 text-sm">
+                      <summary className="cursor-pointer font-medium">Gemini Prompt A response</summary>
+                      <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
+                        {JSON.stringify(job.results, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
+
+                  {tagReviewQuery.data ? (
+                    <section className="flex flex-col gap-3 rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h3 className="font-semibold">Catalog tag review</h3>
+                        {isAdmin ? (
+                          <Button type="button" onClick={() => void applyTagReview(tagReviewQuery.data!)}>
+                            Apply confirmed tags
+                          </Button>
+                        ) : null}
+                      </div>
+                      {(tagReviewQuery.data.catalogTags ?? []).filter((tag) => tag?.name).map((tag) => (
+                        <div key={`${tag.name.en}-${tag.name.fr}`} className="rounded border p-3 text-sm">
+                          <p className="font-medium">{tag.name.en} / {tag.name.fr}</p>
+                          <p className="text-muted-foreground">
+                            {tag.existing ? "Existing tag: reuse" : "New tag: create"} · confidence {Math.round(tag.confidence * 100)}%
+                          </p>
+                          {(tag.evidence ?? []).map((item) => (
+                            <p key={`${item.pageNumber}-${item.excerpt}`} className="text-xs text-muted-foreground">
+                              Page {item.pageNumber}: {item.excerpt}
+                            </p>
+                          ))}
+                        </div>
+                      ))}
+                      {(tagReviewQuery.data.products ?? []).map((product) => (
+                        <div key={product.name} className="rounded border p-3 text-sm">
+                          <p className="font-medium">{product.name}</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(product.tags ?? []).filter((tag) => tag?.name).map((tag) => (
+                              <Badge key={`${tag.name.en}-${tag.name.fr}`} variant="outline">
+                                {tag.name.en}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  ) : null}
                 </div>
                 {canRetry ? (
-                  <Button type="button" variant="outline" onClick={() => void retryAnalysis()} disabled={retrying}>
-                    {retrying ? t("catalogs.retryingAnalysis") : t("catalogs.retryAnalysis")}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" onClick={() => void runPrompt("supplier")} disabled={retrying}>
+                      {retrying ? t("catalogs.retryingAnalysis") : "Extract supplier metadata"}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => void runPrompt("tags")} disabled={retrying}>
+                      {retrying ? t("catalogs.retryingAnalysis") : "Deduct product tags"}
+                    </Button>
+                  </div>
                 ) : null}
               </section>
             ) : null}
 
-            {results ? (
-              <>
-                {!assignedSupplierId ? (
-                  <section className="flex flex-col gap-2 rounded-lg border p-4 text-sm">
-                    {results.supplier ? (
-                      <>
-                        <h3 className="font-semibold">{t("catalogs.suggestedSupplier")}</h3>
-                        <p>{results.supplier.name} · {t("catalogs.sourcePages")}: {results.supplier.sourcePage}</p>
-                        <p className="text-muted-foreground">{results.supplier.excerpt}</p>
-                        {extraction?.matchingSupplier ? (
-                          <p>
-                            {t("catalogs.matchingSupplier")}:{" "}
-                            <Link className="underline" to={`/suppliers/${extraction.matchingSupplier.id}`}>
-                              {extraction.matchingSupplier.name}
-                            </Link>
-                          </p>
-                        ) : (
-                          <p>{t("catalogs.noExactSupplierMatch")}</p>
-                        )}
-                      </>
-                    ) : <p>{t("catalogs.noSupplierSuggestion")}</p>}
-                    <p className="text-muted-foreground">{t("catalogs.suggestedSupplierReview")}</p>
-                    {isAdmin ? (
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" onClick={() => { setNewSupplierId(undefined); setEditingCatalog(true); }}>
-                          {t("catalogs.selectSupplier")}
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => setCreatingSupplier(true)}>
-                          {t("suppliers.createSupplier")}
-                        </Button>
-                      </div>
-                    ) : null}
-                  </section>
-                ) : null}
-                <section className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="font-semibold">{t("catalogs.productCandidates", { count: results.products.length })}</h3>
-                    <span className="text-sm text-muted-foreground">
-                      {t("catalogs.reviewBeforeImport")}
-                    </span>
-                    {isAdmin && results.products.length > 0 ? (
-                      <Button type="button" variant="outline" onClick={() => setPreviewIndexes(results.products.map((_, index) => index))}>
-                        {t("catalogs.previewAll")}
-                      </Button>
-                    ) : null}
-                  </div>
-                  {results.products.length === 0 ? (
-                    <p className="rounded-lg border p-4 text-sm text-muted-foreground">
-                      {t("catalogs.noProductCandidates")}
-                    </p>
-                  ) : (
-                    <ul className="flex flex-col gap-3">
-                      {results.products.map((candidate, index) => (
-                        <li key={`${candidate.sku ?? candidate.name}-${index}`} className="flex flex-col gap-3 rounded-lg border p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <h4 className="font-medium">{candidate.name}</h4>
-                              <p className="text-sm text-muted-foreground">
-                                {t("catalogs.candidateSku")}: {candidate.sku ?? "—"} · {t("catalogs.sourcePages")}: {candidate.source.pageNumbers.join(", ")}
-                              </p>
-                              {(candidate.categories ?? []).length > 0 ? (
-                                <div className="mt-2 flex flex-wrap gap-1">
-                                  {(candidate.categories ?? []).map((category) => (
-                                    <Badge key={category} variant="outline">{category}</Badge>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                            {isAdmin ? (
-                              <div className="flex flex-wrap gap-2">
-                                <Button type="button" size="sm" onClick={() => setPreviewIndexes([index])}>
-                                  {t("catalogs.previewOne")}
-                                </Button>
-                                {candidate.attributes.length === 0 ? (
-                                  <Button type="button" size="sm" variant="outline" onClick={() => setCreatingProduct(candidate)}>
-                                    {t("catalogs.createProductFromCandidate")}
-                                  </Button>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                          {candidate.description ? (
-                            <p className="text-sm">{candidate.description}</p>
-                          ) : null}
-                          {candidate.attributes.length > 0 ? (
-                            <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
-                              {candidate.attributes.map((attribute, attributeIndex) => (
-                                <div key={`${attribute.name}-${attributeIndex}`} className="flex gap-2">
-                                  <dt className="font-medium">{attribute.name}:</dt>
-                                  <dd>{attribute.value}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                          ) : null}
-                          <div className="text-sm">
-                            <p className="mb-2 text-muted-foreground">{t("catalogs.sourceExcerpt")}</p>
-                            <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 font-sans">
-                              {candidate.source.excerpt}
-                            </pre>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
 
-                {results.suggestedAttributeFields.length > 0 ? (
-                  <section className="flex flex-col gap-3 rounded-lg border p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="font-semibold">{t("catalogs.suggestedAttributes")}</h3>
-                        <p className="text-sm text-muted-foreground">{t("catalogs.suggestedAttributesDescription")}</p>
-                      </div>
-                      {isAdmin ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setCreatingAttributeSet(true)}
-                          disabled={attributeSetId !== undefined}
-                        >
-                          {attributeSetId ? t("catalogs.attributeSetCreated") : t("catalogs.createAttributeSet")}
-                        </Button>
-                      ) : null}
-                    </div>
-                    <ul className="flex flex-wrap gap-2">
-                      {results.suggestedAttributeFields.map((field) => (
-                        <li key={field.name}>
-                          <Badge variant="outline">{field.name}</Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-
-                {results.pages.length > 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("catalogs.pageSources")}:{" "}
-                    {results.pages.map((page) => `${page.pageNumber} (${page.textSource === "ocr" ? t("catalogs.ocr") : t("catalogs.selectableText")})`).join(", ")}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-
-            {createdProductName ? (
-              <p role="status" className="text-sm text-muted-foreground">
-                {t("catalogs.productCreated", { name: createdProductName })}
-              </p>
-            ) : null}
           </div>
 
           <DialogFooter>
@@ -298,147 +301,8 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
         </DialogContent>
       </Dialog>
 
-      {creatingAttributeSet && results ? (
-        <CreateSuggestedAttributeSetDialog
-          defaultName={suggestedAttributeSetName}
-          fieldNames={results.suggestedAttributeFields.map((field) => field.name)}
-          onClose={() => setCreatingAttributeSet(false)}
-          onCreated={(id) => {
-            setAttributeSetId(id);
-            setCreatingAttributeSet(false);
-            void queryClient.invalidateQueries({ queryKey: ["attribute-sets"] });
-          }}
-        />
-      ) : null}
 
-      {creatingProduct ? (
-        <ProductForm
-          defaultSupplierId={assignedSupplierId ?? undefined}
-          defaultAttributeSetId={attributeSetId}
-          initialProduct={creatingProduct}
-          sourceCatalog={{ catalogId: catalog.id, pageNumbers: creatingProduct.source.pageNumbers }}
-          onClose={() => setCreatingProduct(null)}
-          onSaved={onProductCreated}
-        />
-      ) : null}
-
-      {editingCatalog ? (
-        <CatalogEditDialog
-          catalog={{ ...catalog, supplierId: assignedSupplierId }}
-          initialSupplierId={newSupplierId}
-          onClose={() => setEditingCatalog(false)}
-          onSaved={() => {
-            setEditingCatalog(false);
-            void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
-            void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
-            void queryClient.invalidateQueries({ queryKey: ["supplier"] });
-            onClose();
-          }}
-        />
-      ) : null}
-      {creatingSupplier ? (
-        <Dialog open onOpenChange={(open) => !open && setCreatingSupplier(false)}>
-          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{t("suppliers.createSupplier")}</DialogTitle>
-              <DialogDescription>{t("catalogs.createSupplierForImportDescription")}</DialogDescription>
-            </DialogHeader>
-            <SupplierForm
-              initialName={results?.supplier?.name}
-              onCancel={() => setCreatingSupplier(false)}
-              onSaved={(supplier) => {
-                setCreatingSupplier(false);
-                setNewSupplierId(supplier.id);
-                setEditingCatalog(true);
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-      ) : null}
-      {previewIndexes && job ? (
-        <CatalogImportPreviewDialog
-          catalogId={catalog.id}
-          jobId={job.jobId}
-          indexes={previewIndexes}
-          onClose={() => setPreviewIndexes(null)}
-          onSupplierAssigned={setAssignedSupplierId}
-        />
-      ) : null}
     </>
   );
 }
 
-interface CreateSuggestedAttributeSetDialogProps {
-  defaultName: string;
-  fieldNames: string[];
-  onClose: () => void;
-  onCreated: (id: string) => void;
-}
-
-function CreateSuggestedAttributeSetDialog({
-  defaultName,
-  fieldNames,
-  onClose,
-  onCreated,
-}: CreateSuggestedAttributeSetDialogProps) {
-  const { t } = useTranslation();
-  const [name, setName] = useState(defaultName);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSaving(true);
-    try {
-      const result = await apiRequest<{ attributeSet: { id: string } }>("POST", "/attribute-sets", {
-        name: { en: name.trim(), fr: name.trim() },
-        fields: fieldNames.map((fieldName) => ({
-          name: { en: fieldName, fr: fieldName },
-          dataType: "text",
-          unit: null,
-          isRequired: false,
-        })),
-      });
-      onCreated(result.attributeSet.id);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-          <DialogHeader>
-            <DialogTitle>{t("catalogs.createAttributeSet")}</DialogTitle>
-            <DialogDescription>{t("catalogs.createAttributeSetDescription")}</DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
-            <ErrorAlert message={error} />
-            <FormField
-              label={t("attributeSets.name")}
-              value={name}
-              onChange={setName}
-              maxLength={100}
-              required
-            />
-            <p className="text-sm text-muted-foreground">
-              {t("catalogs.fieldsToCreate", { fields: fieldNames.join(", ") })}
-            </p>
-          </FieldGroup>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="submit" disabled={saving || !name.trim()}>
-              {saving ? t("common.saving") : t("catalogs.createAttributeSet")}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}

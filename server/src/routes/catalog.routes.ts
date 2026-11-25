@@ -1,14 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
-import { categoryInputSchema } from "../lib/category-input.js";
 import { attachmentDisposition, inlineDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
-import { previewCatalogImport } from "../services/catalog-import-preview.js";
-import { importCatalogProducts } from "../services/catalog-import.service.js";
-import { isCurrencyCode } from "../lib/currency.js";
 import {
   type CatalogDeps,
   deleteCatalog,
@@ -23,6 +19,12 @@ import {
   updateCatalog,
   uploadCatalog,
 } from "../services/catalog.service.js";
+import {
+  applyCatalogSupplierReview,
+  applyCatalogTagReview,
+  reviewCatalogSupplierAnalysis,
+  reviewCatalogTagAnalysis,
+} from "../services/catalog-tag-review.service.js";
 
 interface Guards {
   requireUser: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -32,21 +34,21 @@ interface Guards {
 const nameSchema = z.string().trim().min(1, "Name is required.").max(200);
 // Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08).
 const versionSchema = z.string().trim().max(50).nullish();
-const categoriesSchema = z.array(categoryInputSchema).max(50);
+const tagsSchema = z.array(uuidSchema).max(50);
 
 const createCatalogSchema = z.object({
   name: z.string().trim().max(200).optional().transform((value) => value || undefined),
   version: versionSchema.transform((v) => v || null),
   supplierId: uuidSchema.nullish().transform((v) => v || null),
-  categories: z.string().optional().transform((value, ctx) => {
+  tags: z.string().optional().transform((value, ctx) => {
     if (value === undefined) return [];
     try {
-      const result = categoriesSchema.safeParse(JSON.parse(value));
+      const result = tagsSchema.safeParse(JSON.parse(value));
       if (result.success) return result.data;
     } catch {
       // Report malformed JSON as a validation error.
     }
-    ctx.addIssue({ code: "custom", message: "Invalid categories." });
+    ctx.addIssue({ code: "custom", message: "Invalid tags." });
     return z.NEVER;
   }),
 });
@@ -63,54 +65,50 @@ const updateCatalogSchema = z
       .nullish()
       .transform((v) => (v === undefined ? undefined : v || null)),
     supplierId: uuidSchema.nullable().optional(),
-    categories: categoriesSchema.optional(),
+    tags: tagsSchema.optional(),
   })
-  .refine((value) => value.name !== undefined || value.version !== undefined || value.supplierId !== undefined || value.categories !== undefined, {
+  .refine((value) => value.name !== undefined || value.version !== undefined || value.supplierId !== undefined || value.tags !== undefined, {
     message: "At least one field must be provided.",
   });
 
 const idParamsSchema = z.object({ id: uuidSchema });
 const catalogParamsSchema = z.object({ catalogId: uuidSchema });
 const catalogImageParamsSchema = z.object({ catalogId: uuidSchema, jobId: uuidSchema, imageId: uuidSchema });
-const previewSchema = z.object({
-  jobId: uuidSchema,
-  indexes: z.array(z.number().int().min(0).max(999)).min(1).max(1000),
+const startExtractionSchema = z.object({
+  prompt: z.enum(["supplier", "tags"]).default("supplier"),
 });
-const importSchema = z.object({
+
+const tagReviewSchema = z.object({
   jobId: uuidSchema,
-  supplierId: uuidSchema,
-  products: z.array(z.object({
-    index: z.number().int().min(0).max(999),
-    sku: z.string().trim().min(1).max(100),
-    imageId: uuidSchema.nullish(),
-    cost: z.string().trim().regex(/^\d{1,10}(\.\d{1,2})?$/).optional(),
-    currency: z.string().trim().toUpperCase().refine(isCurrencyCode).optional(),
-    minQuantity: z.number().int().min(0).max(2_147_483_647).optional(),
-    categoryDecisions: z.array(z.discriminatedUnion("action", [
-      z.object({ name: z.string().trim().min(1).max(100), action: z.literal("reuse"), categoryId: uuidSchema }),
-      z.object({ name: z.string().trim().min(1).max(100), action: z.literal("create"), parentId: uuidSchema.nullable() }),
-    ])).max(30).optional(),
-    additionalCategoryIds: z.array(uuidSchema).max(30).optional(),
-    attributeValues: z.array(z.object({
-      name: z.string().trim().min(1).max(100),
-      value: z.union([z.string().trim().min(1).max(2000), z.boolean()]),
-    })).max(100).optional(),
-  })).min(1).max(1000),
-  mappings: z.array(z.object({
-    name: z.string().trim().min(1).max(100),
-    attributeId: uuidSchema.nullable(),
-    skip: z.boolean().optional(),
-  }).refine((mapping) => !mapping.skip || mapping.attributeId === null, {
-    message: "A skipped attribute cannot be mapped to an existing attribute.",
-  })).max(10000).default([]),
-  categoryTreeVersion: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  catalogTagIds: z.array(uuidSchema).max(100).default([]),
+  newCatalogTags: z.array(z.object({ en: z.string().trim().min(1).max(100), fr: z.string().trim().min(1).max(100).optional() })).max(100).default([]),
+  productTagIds: z.array(z.object({
+    productId: uuidSchema,
+    tagIds: z.array(uuidSchema).max(100).default([]),
+    newTags: z.array(z.object({ en: z.string().trim().min(1).max(100), fr: z.string().trim().min(1).max(100).optional() })).max(100).default([]),
+  })).max(1000).default([]),
+});
+
+const supplierReviewSchema = z.object({
+  jobId: uuidSchema,
+  action: z.enum(["reuse", "create"]),
+  supplierId: uuidSchema.optional(),
+  name: z.string().trim().min(1).max(200),
+  address: z.object({
+    street: z.string().trim().max(200).nullable(),
+    city: z.string().trim().max(100).nullable(),
+    stateRegion: z.string().trim().max(100).nullable(),
+    postalCode: z.string().trim().max(20).nullable(),
+    country: z.string().trim().max(100).nullable(),
+  }),
+  website: z.string().trim().max(500).nullable().optional(),
+  contacts: z.array(z.object({ name: z.string().trim().min(1).max(200), role: z.string().trim().max(200).nullable() })).max(20).default([]),
 });
 
 /** Query for the global catalogs list (the catalogs page). */
 const globalListQuerySchema = paginationSchema.extend({
   q: z.string().trim().max(200).optional(),
-  // Accepts `category=<id>` once or repeated (`category=<id>&category=<id>`).
-  category: z
+  tag: z
     .preprocess(
       (value) => (value === undefined ? [] : Array.isArray(value) ? value : [value]),
       z.array(uuidSchema).max(20),
@@ -133,7 +131,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     const query = parseInput(globalListQuerySchema, request.query);
     return listAllCatalogs(deps.db, context(request), {
       q: query.q || undefined,
-      categoryIds: query.category,
+      tagIds: query.tag,
       page: query.page,
       pageSize: query.pageSize,
     });
@@ -195,15 +193,38 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
   app.post("/catalogs/:catalogId/extraction", { preHandler: guards.requireAdmin }, async (request, reply) => {
     if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
     const { catalogId } = parseInput(catalogParamsSchema, request.params);
-    const job = await startCatalogExtraction(deps, context(request), catalogId, deps.extractionQueue);
+    const body = parseInput(startExtractionSchema, request.body);
+    const job = await startCatalogExtraction(deps, context(request), catalogId, deps.extractionQueue, body.prompt);
     return reply.status(202).send({ job });
   });
 
-  app.post("/catalogs/:catalogId/extraction/preview", { preHandler: guards.requireAdmin }, async (request) => {
-    if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
+  app.get("/catalogs/:catalogId/extraction/:jobId/tag-review", { preHandler: guards.requireUser }, async (request) => {
+    const { catalogId, jobId } = parseInput(catalogImageParamsSchema.pick({ catalogId: true, jobId: true }), request.params);
+    return reviewCatalogTagAnalysis(deps.db, context(request), catalogId, jobId);
+  });
+
+  app.post("/catalogs/:catalogId/extraction/tag-review", { preHandler: guards.requireAdmin }, async (request) => {
     const { catalogId } = parseInput(catalogParamsSchema, request.params);
-    const body = parseInput(previewSchema, request.body);
-    return previewCatalogImport(deps.db, context(request), catalogId, body.jobId, body.indexes);
+    const body = parseInput(tagReviewSchema, request.body);
+    return applyCatalogTagReview(deps.db, context(request), catalogId, {
+      ...body,
+      newCatalogTags: body.newCatalogTags.map((tag) => ({ en: tag.en, fr: tag.fr ?? tag.en })),
+      productTagIds: body.productTagIds.map((assignment) => ({
+        ...assignment,
+        newTags: assignment.newTags.map((tag) => ({ en: tag.en, fr: tag.fr ?? tag.en })),
+      })),
+    });
+  });
+
+  app.get("/catalogs/:catalogId/extraction/:jobId/supplier-review", { preHandler: guards.requireUser }, async (request) => {
+    const { catalogId, jobId } = parseInput(catalogImageParamsSchema.pick({ catalogId: true, jobId: true }), request.params);
+    return reviewCatalogSupplierAnalysis(deps.db, context(request), catalogId, jobId);
+  });
+
+  app.post("/catalogs/:catalogId/extraction/supplier-review", { preHandler: guards.requireAdmin }, async (request) => {
+    const { catalogId } = parseInput(catalogParamsSchema, request.params);
+    const body = parseInput(supplierReviewSchema, request.body);
+    return applyCatalogSupplierReview(deps.db, context(request), catalogId, body);
   });
 
   app.get("/catalogs/:catalogId/extraction/:jobId/images/:imageId", { preHandler: guards.requireAdmin }, async (request, reply) => {
@@ -214,12 +235,6 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
       .send(image.buffer);
   });
 
-  app.post("/catalogs/:catalogId/extraction/import", { preHandler: guards.requireAdmin }, async (request) => {
-    if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
-    const { catalogId } = parseInput(catalogParamsSchema, request.params);
-    const body = parseInput(importSchema, request.body);
-    return importCatalogProducts(deps, context(request), catalogId, body.jobId, body.supplierId, body.products, body.mappings, body.categoryTreeVersion);
-  });
 
   app.get("/catalogs/:catalogId/download", { preHandler: guards.requireUser }, async (request, reply) => {
     const { catalogId } = parseInput(catalogParamsSchema, request.params);

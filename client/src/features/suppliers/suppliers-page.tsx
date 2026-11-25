@@ -13,7 +13,7 @@ import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
 import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
 import { useBulkDelete } from "../../hooks/use-bulk-delete";
-import { CategoryTreeFilter } from "../../components/category-tree-filter";
+import { TagFilter } from "../../components/tag-filter";
 import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { PageHeader } from "../../components/page-header";
@@ -40,13 +40,13 @@ export function SuppliersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
-  const categoryIds = useMemo(() => searchParams.getAll("category"), [searchParams]);
+  const categoryIds = useMemo(() => searchParams.getAll("tag"), [searchParams]);
   const [page, setPage] = useState(1);
   const queryClient = useQueryClient();
   async function loadSuppliers(targetPage: number, pageSize: number) {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
     if (search) params.set("q", search);
-    for (const id of categoryIds) params.append("category", id);
+    for (const id of categoryIds) params.append("tag", id);
     return apiRequest<Page<Supplier>>("GET", `/suppliers?${params.toString()}`);
   }
   const suppliersQuery = useQuery({
@@ -71,8 +71,8 @@ export function SuppliersPage() {
   function changeCategories(next: string[]) {
     setPage(1);
     const params = new URLSearchParams(searchParams);
-    params.delete("category");
-    for (const id of next) params.append("category", id);
+    params.delete("tag");
+    for (const id of next) params.append("tag", id);
     setSearchParams(params, { replace: true });
   }
 
@@ -102,7 +102,7 @@ export function SuppliersPage() {
           </>
         }
         filters={
-          <CategoryTreeFilter selected={categoryIds} onChange={changeCategories} />
+          <TagFilter selected={categoryIds} onChange={changeCategories} />
         }
       >
         {suppliersQuery.error ? (
@@ -136,13 +136,13 @@ export function SuppliersPage() {
                 <TableCell>{supplier.city ?? "—"}</TableCell>
                 <TableCell>{supplier.country ?? "—"}</TableCell>
                 <TableCell>
-                  {supplier.categories.length === 0 ? (
+                  {supplier.tags.length === 0 ? (
                     "—"
                   ) : (
                     <div className="flex flex-wrap gap-1">
-                      {supplier.categories.map((category) => (
-                        <Badge key={category.id} variant="secondary">
-                          {localize(category.name)}
+                      {supplier.tags.map((tag) => (
+                        <Badge key={tag.id} variant="secondary">
+                          {localize(tag.name)}
                         </Badge>
                       ))}
                     </div>

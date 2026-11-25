@@ -15,8 +15,7 @@ import { PageHeader } from "../../components/page-header";
 import { ProductsPanel } from "../products/products-panel";
 import { AssetsPanel } from "./assets-panel";
 import { CatalogsPanel } from "./catalogs-panel";
-import { CategoryEditor } from "./category-editor";
-import { chipsFrom, toCategoryInputs, type CategoryChip } from "./category-chips";
+import { chipsFrom, type CategoryChip } from "./category-chips";
 import { ContactsPanel } from "./contacts-panel";
 import { SupplierForm } from "./supplier-form";
 
@@ -172,6 +171,8 @@ export function SupplierDetail({
                       <dd>{supplier.postalCode ?? "—"}</dd>
                       <dt className="text-muted-foreground">{t("suppliers.country")}</dt>
                       <dd>{supplier.country ?? "—"}</dd>
+                      <dt className="text-muted-foreground">{t("suppliers.website")}</dt>
+                      <dd>{supplier.website ?? "—"}</dd>
                     </dl>
                   </CardContent>
                 </Card>
@@ -219,10 +220,10 @@ interface CategoriesTabProps {
 
 function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabProps) {
   const queryClient = useQueryClient();
-  const [chips, setChips] = useState<CategoryChip[]>(chipsFrom(supplier.assignedCategories));
+  const [chips, setChips] = useState<CategoryChip[]>(chipsFrom(supplier.tags));
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
-  const dirty = JSON.stringify(chips) !== JSON.stringify(chipsFrom(supplier.assignedCategories));
+  const dirty = JSON.stringify(chips) !== JSON.stringify(chipsFrom(supplier.tags));
 
   async function save() {
     setSaving(true);
@@ -234,11 +235,12 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
         stateRegion: supplier.stateRegion,
         postalCode: supplier.postalCode,
         country: supplier.country,
-        categories: toCategoryInputs(chips),
+        website: supplier.website,
+        tags: chips.flatMap((chip) => chip.id ? [chip.id] : []),
       });
-      await queryClient.invalidateQueries({ queryKey: ["categories"] });
+      await queryClient.invalidateQueries({ queryKey: ["tags"] });
       onSaved(result.supplier);
-      setChips(chipsFrom(result.supplier.assignedCategories));
+      setChips(chipsFrom(result.supplier.tags));
     } catch (err) {
       onError(errorMessage(err));
     } finally {
@@ -254,17 +256,16 @@ function CategoriesTab({ supplier, isAdmin, onSaved, onError }: CategoriesTabPro
         </CardTitle>
       </CardHeader>
       <CardContent className="px-6">
-        {supplier.inheritedCategories.length > 0 ? (
+        {supplier.tags.length > 0 ? (
           <div className="mb-4 flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">{t("suppliers.inheritedCategories")}</p>
             <div className="flex flex-wrap gap-2">
-              {supplier.inheritedCategories.map((category) => (
-                <Badge key={category.id} variant="secondary">{category.name.en}</Badge>
+              {supplier.tags.map((tag) => (
+                <Badge key={tag.id} variant="secondary">{tag.name.en}</Badge>
               ))}
             </div>
           </div>
         ) : null}
-        <CategoryEditor value={chips} onChange={setChips} disabled={!isAdmin} />
       </CardContent>
       {isAdmin ? (
         <CardFooter className="justify-end border-t px-6 py-4">

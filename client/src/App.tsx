@@ -14,12 +14,12 @@ import { ChangePasswordForm } from "./features/account/change-password-form";
 import { AttributeSetsPage, AttributeSetBuilderPage } from "./features/attribute-sets/attribute-sets-page";
 import { AuditLogPage } from "./features/audit/audit-log-page";
 import { LoginPage } from "./features/auth/login-page";
-import { CategoriesPage } from "./features/categories/categories-page";
 import { ProductsPage } from "./features/products/products-page";
 import { SupplierDetailPage, SupplierNewPage, SuppliersPage } from "./features/suppliers/suppliers-page";
 import { UsersPage } from "./features/users/users-page";
 import { AppShell } from "./layout/app-shell";
 import { DashboardPage } from "./features/dashboard/dashboard-page";
+import { TagsPage } from "./features/tags/tags-page";
 
 export function App() {
   const { t } = useTranslation();
@@ -88,10 +88,9 @@ export function App() {
         <Route path="products/:productId" element={<ProductsPage />} />
         <Route path="catalogs" element={<CatalogsPage />} />
         <Route path="catalogs/:catalogId/workspace" element={<CatalogWorkspace />} />
+        <Route path="tags" element={<TagsPage isAdmin={isAdmin} />} />
         <Route path="attribute-sets" element={<AttributeSetsPage />} />
         <Route path="attribute-sets/:attributeSetId" element={<AttributeSetBuilderPage />} />
-        <Route path="categories" element={<CategoriesPage />} />
-        <Route path="categories/:categoryId" element={<CategoriesPage />} />
         {isAdmin ? <Route path="users" element={<UsersPage />} /> : null}
         {isAdmin ? <Route path="audit" element={<AuditLogPage />} /> : null}
         <Route path="account" element={<AccountPage />} />

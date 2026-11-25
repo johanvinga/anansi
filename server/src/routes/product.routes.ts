@@ -4,7 +4,6 @@ import { AppError, errors } from "../errors.js";
 import { MAX_PRODUCT_IMAGE_BYTES } from "../lib/product-image.js";
 import type { AssetDeps } from "../services/asset.service.js";
 import { deleteProductImage, getProductImage, uploadProductImage } from "../services/product-image.service.js";
-import { categoryInputSchema } from "../lib/category-input.js";
 import { isCurrencyCode } from "../lib/currency.js";
 import { translatedNameInput, translatedNameUpdate, translatedTextInput } from "../lib/translations.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
@@ -39,6 +38,10 @@ const attributeValueSchema = z.object({
 
 const productBodySchema = z.object({
   name: translatedNameInput(200),
+  productType: z.object({
+    en: z.string().trim().min(1).max(100),
+    fr: z.string().trim().min(1).max(100).optional(),
+  }).nullish().transform((value) => value ? { en: value.en, fr: value.fr ?? value.en } : null),
   description: translatedTextInput,
   supplierSku: z.string().trim().min(1, "Supplier SKU is required.").max(100),
   minQuantity: z
@@ -48,7 +51,7 @@ const productBodySchema = z.object({
     .max(2_147_483_647),
   cost: costSchema,
   currency: currencySchema,
-  categories: z.array(categoryInputSchema).max(100).optional(),
+  tags: z.array(uuidSchema).max(100).optional(),
   attributeSetId: uuidSchema.nullish(),
   attributeValues: z.array(attributeValueSchema).max(200).optional(),
   directAttributeValues: z.array(attributeValueSchema).max(200).optional(),
@@ -69,7 +72,7 @@ const productUpdateSchema = productBodySchema.extend({
 const listQuerySchema = paginationSchema.extend({
   q: z.string().trim().max(200).optional(),
   supplierId: uuidSchema.optional(),
-  category: z.preprocess(
+  tag: z.preprocess(
     (value) => value === undefined ? [] : Array.isArray(value) ? value : [value],
     z.array(uuidSchema).max(20),
   ),

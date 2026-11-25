@@ -4,7 +4,7 @@ import { AppError, errors } from "../errors.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated, TranslatedText } from "../lib/translations.js";
 import { loadFieldDefinitions } from "./attribute-set.service.js";
-import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import { resolveTagIds, syncSupplierTags } from "./tag.service.js";
 import {
   fromValueColumns,
   toValueColumns,
@@ -24,6 +24,7 @@ type Tx = Prisma.TransactionClient;
 
 export interface ProductInput {
   name: Translated;
+  productType?: Translated | null | undefined;
   /** Optional in both locales; omitted or empty values are stored as null (FR-PRD-10). */
   description: TranslatedText;
   supplierSku: string;
@@ -31,8 +32,8 @@ export interface ProductInput {
   /** Decimal string with at most 2 decimal places; validated by the route schema. */
   cost: string | null;
   currency: string | null;
-  /** Replaces product categories when supplied on update. */
-  categories?: CategoryInput[] | undefined;
+  /** Replaces independent product tags when supplied on update. */
+  tags?: string[] | undefined;
   /** `undefined` keeps the current set on update; `null` removes it. */
   attributeSetId?: string | null | undefined;
   /** When omitted on update and the set is unchanged, existing values are kept. */
@@ -49,7 +50,7 @@ export interface ProductUpdateInput extends ProductInput {
 export interface ListProductsFilters {
   supplierId?: string | undefined;
   q?: string | undefined;
-  category?: string[] | undefined;
+  tag?: string[] | undefined;
   uncategorized?: boolean | undefined;
   page: number;
   pageSize: number;
@@ -58,7 +59,7 @@ export interface ListProductsFilters {
 const listInclude = {
   supplier: { select: { id: true, name: true } },
   attributeSet: { select: { id: true, nameEn: true, nameFr: true } },
-  categories: { include: { category: true } },
+  tags: { include: { tag: true } },
   image: true,
   sourceCatalog: { select: { id: true, name: true, version: true } },
 } satisfies Prisma.ProductInclude;
@@ -77,6 +78,9 @@ function toProductSummary(row: ListRow) {
     supplierId: row.supplierId,
     supplierName: row.supplier.name,
     name: { en: row.nameEn, fr: row.nameFr },
+    productType: row.productTypeEn || row.productTypeFr
+      ? { en: row.productTypeEn ?? row.productTypeFr ?? "", fr: row.productTypeFr ?? row.productTypeEn ?? "" }
+      : null,
     supplierSku: row.supplierSku,
     minQuantity: row.minQuantity,
     cost: row.cost?.toFixed(2) ?? null,
@@ -93,10 +97,10 @@ function toProductSummary(row: ListRow) {
     attributeSet: row.attributeSet
       ? { id: row.attributeSet.id, name: { en: row.attributeSet.nameEn, fr: row.attributeSet.nameFr } }
       : null,
-    categories: row.categories
+    tags: row.tags
       .map((link) => ({
-        id: link.category.id,
-        name: { en: link.category.nameEn, fr: link.category.nameFr },
+        id: link.tag.id,
+        name: { en: link.tag.nameEn, fr: link.tag.nameFr },
       }))
       .sort((a, b) => a.name.en.localeCompare(b.name.en)),
     createdAt: row.createdAt.toISOString(),
@@ -134,6 +138,8 @@ function snapshotOf(row: DetailRow): Record<string, unknown> {
     supplier: row.supplier.name,
     "name.en": row.nameEn,
     "name.fr": row.nameFr,
+    "productType.en": row.productTypeEn,
+    "productType.fr": row.productTypeFr,
     "description.en": row.descriptionEn,
     "description.fr": row.descriptionFr,
     supplierSku: row.supplierSku,
@@ -141,7 +147,7 @@ function snapshotOf(row: DetailRow): Record<string, unknown> {
     cost: row.cost?.toFixed(2) ?? null,
     currency: row.currency,
     attributeSet: row.attributeSet?.nameEn ?? null,
-    categories: row.categories.map((link) => link.category.nameEn).sort(),
+    tags: row.tags.map((link) => link.tag.nameEn).sort(),
     catalogSource: row.sourceCatalog?.name ?? null,
     catalogPages: row.sourcePageNumbers,
   };
@@ -158,6 +164,8 @@ function nameAndDescriptionColumns(input: ProductInput) {
   return {
     nameEn: input.name.en.trim(),
     nameFr: input.name.fr.trim(),
+    productTypeEn: input.productType?.en.trim() || null,
+    productTypeFr: input.productType?.fr.trim() || null,
     descriptionEn: input.description.en,
     descriptionFr: input.description.fr,
   };
@@ -264,10 +272,9 @@ async function assertCatalogSource(
 }
 
 export async function listProducts(db: Database, request: AuditRequestContext, filters: ListProductsFilters) {
-  const categoryIds = await expandCategoryIds(db, filters.category ?? []);
-  const categoryFilters: Prisma.ProductWhereInput[] = [];
-  if (categoryIds.length) categoryFilters.push({ categories: { some: { categoryId: { in: categoryIds } } } });
-  if (filters.uncategorized) categoryFilters.push({ categories: { none: {} } });
+  const tagFilters: Prisma.ProductWhereInput[] = [];
+  if (filters.tag?.length) tagFilters.push({ tags: { some: { tagId: { in: filters.tag } } } });
+  if (filters.uncategorized) tagFilters.push({ tags: { none: {} } });
   const where: Prisma.ProductWhereInput = {
     supplierId: filters.supplierId,
     OR: filters.q
@@ -277,7 +284,7 @@ export async function listProducts(db: Database, request: AuditRequestContext, f
           { supplierSku: { contains: filters.q, mode: "insensitive" } },
         ]
       : undefined,
-    AND: categoryFilters.length ? [{ OR: categoryFilters }] : undefined,
+    AND: tagFilters.length ? [{ OR: tagFilters }] : undefined,
   };
   const [total, rows] = await db.$transaction([
     db.product.count({ where }),
@@ -345,7 +352,7 @@ export async function createProductInTransaction(
   if ((input.directAttributeValues ?? []).some((value) => setFieldIds.includes(value.fieldId))) {
     throw errors.validation([{ field: "directAttributeValues", message: "An attribute cannot be submitted both directly and through the set." }]);
   }
-  const categoryIds = await resolveCategoryIds(tx, request, input.categories ?? []);
+  const tagIds = await resolveTagIds(tx, request, input.tags ?? []);
   const sourcePageNumbers = await assertCatalogSource(tx, supplierId, input.catalogSource);
   const created = await tx.product.create({
     data: {
@@ -354,10 +361,11 @@ export async function createProductInTransaction(
       currency: input.currency, attributeSetId, values: { create: [...values, ...directValues] },
       sourceCatalogId: input.catalogSource?.catalogId ?? null,
       sourcePageNumbers,
-      categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
+      tags: { create: tagIds.map((tagId) => ({ tagId })) },
     },
   });
   const row = await loadDetail(tx, created.id);
+  await syncSupplierTags(tx, supplierId);
   await recordAudit(tx, request, {
     action: AuditAction.PRODUCT_CREATE, outcome: "success", entityType: "Product",
     entityId: row.id, changes: diffFields({}, snapshotOf(row)),
@@ -391,12 +399,13 @@ export async function updateProduct(
       if (input.directAttributeValues?.some((value) => membershipIds.some((member) => member.attributeFieldId === value.fieldId))) {
         throw errors.validation([{ field: "directAttributeValues", message: "Set attributes must be submitted through attributeValues." }]);
       }
-      if (input.categories !== undefined) {
-        const categoryIds = await resolveCategoryIds(tx, request, input.categories);
-        await tx.productCategory.deleteMany({ where: { productId: id } });
-        await tx.productCategory.createMany({
-          data: categoryIds.map((categoryId) => ({ productId: id, categoryId })),
+      if (input.tags !== undefined) {
+        const tagIds = await resolveTagIds(tx, request, input.tags);
+        await tx.productTag.deleteMany({ where: { productId: id } });
+        await tx.productTag.createMany({
+          data: tagIds.map((tagId) => ({ productId: id, tagId })),
         });
+        await syncSupplierTags(tx, supplierId);
       }
 
       if (setChanged) {

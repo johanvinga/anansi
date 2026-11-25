@@ -93,7 +93,7 @@ describe("Gemini request limiter", () => {
     const send = vi.fn<typeof fetch>();
     const fetch = createLimitedGeminiFetch(async () => { throw new GeminiRateLimitError(); }, send);
     const analyzer = createGeminiCatalogAnalyzer("test", "test", fetch);
-    await expect(analyzer(Buffer.from("pdf"), 1)).rejects.toThrow("Gemini request limiter is unavailable");
+    await expect(analyzer(Buffer.from("pdf"), 1, [], "tags")).rejects.toThrow("Gemini request limiter is unavailable");
     expect(send).not.toHaveBeenCalled();
   });
 });

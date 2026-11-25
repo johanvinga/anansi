@@ -1,6 +1,6 @@
 ﻿import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, Share2, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,7 @@ import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
 import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
 import { useBulkDelete } from "../../hooks/use-bulk-delete";
-import { CategoryTreeFilter } from "../../components/category-tree-filter";
+import { TagFilter } from "../../components/tag-filter";
 import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
@@ -42,6 +42,7 @@ interface CatalogActionsProps {
   onEdit: (catalog: CatalogWithSupplier) => void;
   onDelete: (catalog: CatalogWithSupplier) => void;
   onReview: (catalog: CatalogWithSupplier) => void;
+  onPinChange: () => void;
 }
 
 function CatalogActions({
@@ -51,19 +52,14 @@ function CatalogActions({
   onEdit,
   onDelete,
   onReview,
+  onPinChange,
 }: CatalogActionsProps) {
   const { t } = useTranslation();
-  const [pinned, setPinned] = useState(false);
+  const [pinned, setPinned] = useState(catalog.pinned);
   const [pinBusy, setPinBusy] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
-  useEffect(() => {
-    void apiRequest<{ pinned: boolean }>("GET", `/pins/catalog/${catalog.id}/status`)
-      .then((result) => setPinned(result.pinned))
-      .catch(() => setPinned(false));
-  }, [catalog.id]);
-
-  async function togglePin() {
+async function togglePin() {
     if (pinBusy) return;
     const previous = pinned;
     setPinBusy(true);
@@ -75,6 +71,7 @@ function CatalogActions({
         { itemType: "catalog", itemId: catalog.id },
       );
       setPinned(result.pinned);
+      onPinChange();
     } catch {
       setPinned(previous);
     } finally {
@@ -173,7 +170,7 @@ export function CatalogsPage() {
   async function loadCatalogs(targetPage: number, pageSize: number) {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
     if (search) params.set("q", search);
-    for (const id of categoryIds) params.append("category", id);
+    for (const id of categoryIds) params.append("tag", id);
     return apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`);
   }
   const catalogsQuery = useQuery({
@@ -234,7 +231,7 @@ export function CatalogsPage() {
           </>
         }
         filters={
-          <CategoryTreeFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }} />
+          <TagFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }} />
         }
       >
 
@@ -265,14 +262,21 @@ export function CatalogsPage() {
             {result?.items.map((catalog) => (
               <TableRow key={catalog.id}>
                 {isAdmin ? <TableCell className="pl-4"><BulkSelectItem item={{ id: catalog.id, label: catalog.name }} selection={bulk} /></TableCell> : null}
-                <TableCell className="pl-4 font-medium">{catalog.name}</TableCell>
+                <TableCell className="pl-4 font-medium">
+                  <span className="inline-flex items-center gap-2">
+                    {catalog.name}
+                    {catalog.pinned ? (
+                      <Pin className="size-3.5 fill-current text-primary" aria-label={t("pins.pinned")} />
+                    ) : null}
+                  </span>
+                </TableCell>
                 <TableCell>{catalog.originalFileName}</TableCell>
                 <TableCell>{catalog.supplierName ?? t("catalogs.unassigned")}</TableCell>
                 <TableCell>
-                  {catalog.categories.length === 0 ? "—" : (
+                  {catalog.tags.length === 0 ? "—" : (
                     <div className="flex flex-wrap gap-1">
-                      {catalog.categories.map((category) => (
-                        <Badge key={category.id} variant="secondary">{localize(category.name)}</Badge>
+                      {catalog.tags.map((tag) => (
+                        <Badge key={tag.id} variant="secondary">{localize(tag.name)}</Badge>
                       ))}
                     </div>
                   )}
@@ -291,6 +295,7 @@ export function CatalogsPage() {
                     onEdit={setEditing}
                     onDelete={setDeleting}
                     onReview={setReviewing}
+                    onPinChange={() => void queryClient.invalidateQueries({ queryKey: ["catalogs"] })}
                   />
                 </TableCell>
               </TableRow>

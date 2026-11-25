@@ -13,13 +13,9 @@ import {
   type AuditRequestContext,
 } from "./audit.service.js";
 import { removeStoredFiles, type AssetDeps, type UploadedFile } from "./asset.service.js";
-import {
-  expandCategoryIds,
-  resolveCategoryIds,
-  type CategoryInput,
-} from "./category.service.js";
 import { queueStoredFileRemoval } from "./stored-file-cleanup.js";
 import { readPrivateImage } from "../lib/read-private-image.js";
+import { resolveTagIds } from "./tag.service.js";
 export interface CatalogDeps extends AssetDeps {
 }
 
@@ -27,7 +23,7 @@ export interface CatalogMetadata {
   name?: string | undefined;
   /** Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08). */
   version: string | null;
-  categories?: CategoryInput[] | undefined;
+  tags?: string[] | undefined;
 }
 
 export interface CatalogUploadOptions {
@@ -43,7 +39,7 @@ export interface CatalogUpdate {
   name?: string | undefined;
   version?: string | null | undefined;
   supplierId?: string | null | undefined;
-  categories?: CategoryInput[] | undefined;
+  tags?: string[] | undefined;
 }
 
 export interface CatalogDto {
@@ -58,23 +54,24 @@ export interface CatalogDto {
   analysisStatus: CatalogAnalysisStatus;
   createdAt: string;
   updatedAt: string;
-  categories: { id: string; name: { en: string; fr: string } }[];
+  tags: { id: string; name: { en: string; fr: string } }[];
 }
 
 export interface CatalogSummaryDto extends CatalogDto {
   supplierName: string | null;
-  supplierCategoryNames: string[];
+  supplierTagNames: string[];
+  pinned: boolean;
 }
 
 export interface ListCatalogsFilters {
   q?: string | undefined;
-  categoryIds?: string[] | undefined;
+  tagIds?: string[] | undefined;
   page: number;
   pageSize: number;
 }
 
 const catalogInclude = {
-  categories: { include: { category: true } },
+  tags: { include: { tag: true } },
 } satisfies Prisma.CatalogInclude;
 const summaryInclude = {
   ...catalogInclude,
@@ -101,6 +98,7 @@ export function catalogNameFromFileName(fileName: string): string {
 
 export interface CatalogExtractionJobDto {
   jobId: string;
+  prompt: "supplier" | "tags";
   status: CatalogAnalysisStatus;
   stage: string;
   progress: number;
@@ -118,6 +116,7 @@ export interface CatalogExtractionJobDto {
 function toExtractionJobDto(job: CatalogExtractionJob): CatalogExtractionJobDto {
   return {
     jobId: job.id,
+    prompt: job.prompt,
     status: job.status,
     stage: job.stage,
     progress: job.progress,
@@ -136,11 +135,11 @@ function toExtractionJobDto(job: CatalogExtractionJob): CatalogExtractionJobDto 
 async function enqueueExtraction(
   db: Database,
   queue: CatalogExtractionQueue,
-  job: { id: string; catalogId: string },
+  job: { id: string; catalogId: string; prompt: "supplier" | "tags" },
   log: AssetDeps["log"],
 ): Promise<void> {
   try {
-    await queue.enqueue(job.id);
+    await queue.enqueue(job.id, job.prompt);
   } catch (error) {
     await db.$transaction([
       db.catalogExtractionJob.update({
@@ -163,7 +162,7 @@ async function enqueueExtraction(
 
 /**
  * Lists catalogs across all suppliers (the catalogs page). Search matches catalog name,
- * version, or supplier name; categoryIds matches catalog or effective supplier categories.
+ * version, supplier name, or catalog tag name; tagIds matches catalog or effective supplier tags.
  * Sorted newest first, the last-added order the page defaults to.
  */
 export async function listAllCatalogs(
@@ -171,20 +170,31 @@ export async function listAllCatalogs(
   request: AuditRequestContext,
   filters: ListCatalogsFilters,
 ) {
-  const categoryIds = await expandCategoryIds(db, filters.categoryIds ?? []);
   const where: Prisma.CatalogWhereInput = {
     OR: filters.q
       ? [
           { name: { contains: filters.q, mode: "insensitive" } },
           { version: { contains: filters.q, mode: "insensitive" } },
           { supplier: { name: { contains: filters.q, mode: "insensitive" } } },
+          {
+            tags: {
+              some: {
+                tag: {
+                  OR: [
+                    { nameEn: { contains: filters.q, mode: "insensitive" } },
+                    { nameFr: { contains: filters.q, mode: "insensitive" } },
+                  ],
+                },
+              },
+            },
+          },
         ]
       : undefined,
-    AND: categoryIds.length > 0 ? [{
+    AND: (filters.tagIds ?? []).length > 0 ? [{
       OR: [
-        { categories: { some: { categoryId: { in: categoryIds } } } },
-        { supplier: { categories: { some: { categoryId: { in: categoryIds } } } } },
-        { supplier: { products: { some: { categories: { some: { categoryId: { in: categoryIds } } } } } } },
+        { tags: { some: { tagId: { in: filters.tagIds } } } },
+        { supplier: { tags: { some: { tagId: { in: filters.tagIds } } } } },
+        { supplier: { products: { some: { tags: { some: { tagId: { in: filters.tagIds } } } } } } },
       ],
     }] : undefined,
   };
@@ -200,11 +210,10 @@ export async function listAllCatalogs(
     }),
   ]);
 
-  // Category names are fetched once per distinct supplier, not once per catalog row.
-  const categoryNamesBySupplier = new Map<string, string[]>();
+  const tagNamesBySupplier = new Map<string, string[]>();
   await Promise.all(
     [...new Set(rows.flatMap((row) => row.supplierId ? [row.supplierId] : []))].map(async (supplierId) => {
-      const categories = await db.category.findMany({
+      const tags = await db.tag.findMany({
         where: {
           OR: [
             { suppliers: { some: { supplierId } } },
@@ -213,17 +222,26 @@ export async function listAllCatalogs(
         },
         select: { nameEn: true },
       });
-      categoryNamesBySupplier.set(
+      tagNamesBySupplier.set(
         supplierId,
-        categories.map((category) => category.nameEn).sort(),
+        tags.map((tag) => tag.nameEn).sort(),
       );
     }),
   );
 
+  const pinnedRows = request.actor.userId && rows.length > 0
+    ? await db.pinnedItem.findMany({
+        where: { userId: request.actor.userId, itemType: "catalog", itemId: { in: rows.map((row) => row.id) } },
+        select: { itemId: true },
+      })
+    : [];
+  const pinnedIds = new Set(pinnedRows.map((row) => row.itemId));
+
   const toSummaryDto = (row: CatalogSummaryRow): CatalogSummaryDto => ({
     ...toCatalogDto(row),
+    pinned: pinnedIds.has(row.id),
     supplierName: row.supplier?.name ?? null,
-    supplierCategoryNames: row.supplierId ? categoryNamesBySupplier.get(row.supplierId) ?? [] : [],
+    supplierTagNames: row.supplierId ? tagNamesBySupplier.get(row.supplierId) ?? [] : [],
   });
 
   await recordAudit(db, request, {
@@ -247,8 +265,8 @@ function toCatalogDto(row: CatalogRow): CatalogDto {
     analysisStatus: row.analysisStatus,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    categories: row.categories.map(({ category }) => ({
-      id: category.id, name: { en: category.nameEn, fr: category.nameFr },
+    tags: row.tags.map(({ tag }) => ({
+      id: tag.id, name: { en: tag.nameEn, fr: tag.nameFr },
     })).sort((a, b) => a.name.en.localeCompare(b.name.en)),
   };
 }
@@ -270,7 +288,7 @@ export async function getCatalog(
 }
 
 function catalogSnapshot(row: CatalogRow): Record<string, unknown> {
-  return { name: row.name, version: row.version, supplierId: row.supplierId, categories: row.categories.map((link) => link.categoryId).sort() };
+  return { name: row.name, version: row.version, supplierId: row.supplierId, tags: row.tags.map((link) => link.tagId).sort() };
 }
 
 async function assertSupplierExists(db: Database | Prisma.TransactionClient, supplierId: string): Promise<void> {
@@ -422,7 +440,7 @@ async function createCatalogWithExtractionJob(
 ) {
   return db.$transaction(async (tx) => {
   if (supplierId) await assertSupplierExists(tx, supplierId);
-  const categoryIds = await resolveCategoryIds(tx, request, metadata.categories ?? []);
+  const tagIds = await resolveTagIds(tx, request, metadata.tags ?? []);
   const row = await tx.catalog.create({
     data: {
       supplierId,
@@ -436,11 +454,10 @@ async function createCatalogWithExtractionJob(
       uploadIdempotencyKey: idempotency?.idempotencyKey,
       uploadRequestHash: idempotency?.requestHash,
       analysisStatus: "not_processed",
-      categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
+      tags: { create: tagIds.map((tagId) => ({ tagId })) },
     },
     include: catalogInclude,
   });
-  if (supplierId) await mergeSupplierCategories(tx, request, supplierId, categoryIds);
   await recordAudit(tx, request, {
     action: AuditAction.CATALOG_UPLOAD,
     outcome: "success",
@@ -454,7 +471,7 @@ async function createCatalogWithExtractionJob(
         originalFileName: row.originalFileName,
         sizeBytes: Number(row.sizeBytes),
         supplierId: row.supplierId,
-        categories: categoryIds.slice().sort(),
+        tags: tagIds.slice().sort(),
       },
     ),
   });
@@ -462,36 +479,6 @@ async function createCatalogWithExtractionJob(
   });
 }
 
-async function mergeSupplierCategories(
-  tx: Prisma.TransactionClient,
-  request: AuditRequestContext,
-  supplierId: string,
-  categoryIds: string[],
-): Promise<void> {
-  if (!categoryIds.length) return;
-  const before = await tx.supplierCategory.findMany({
-    where: { supplierId },
-    select: { categoryId: true },
-  });
-  const existing = new Set(before.map((link) => link.categoryId));
-  const additions = categoryIds.filter((id) => !existing.has(id));
-  if (!additions.length) return;
-  await tx.supplierCategory.createMany({
-    data: additions.map((categoryId) => ({ supplierId, categoryId })),
-    skipDuplicates: true,
-  });
-  const after = await tx.supplierCategory.findMany({ where: { supplierId }, select: { categoryId: true } });
-  await recordAudit(tx, request, {
-    action: AuditAction.SUPPLIER_UPDATE,
-    outcome: "success",
-    entityType: "Supplier",
-    entityId: supplierId,
-    changes: diffFields(
-      { categoryIds: [...existing].sort() },
-      { categoryIds: after.map((link) => link.categoryId).sort() },
-    ),
-  });
-}
 
 export async function getCatalogExtraction(
   db: Database,
@@ -556,6 +543,7 @@ export async function startCatalogExtraction(
   request: AuditRequestContext,
   catalogId: string,
   extractionQueue: CatalogExtractionQueue,
+  prompt: "supplier" | "tags" = "supplier",
 ): Promise<CatalogExtractionJobDto> {
   const job = await deps.db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
@@ -564,18 +552,21 @@ export async function startCatalogExtraction(
       include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!existing) throw errors.notFound("Catalog");
-    const latest = existing.extractionJobs[0];
-    if (latest?.status === "processing") throw errors.conflict("Catalog analysis is already running.");
-    if (latest?.status !== "queued") {
+    const promptJob = await tx.catalogExtractionJob.findFirst({
+      where: { catalogId, prompt, status: { in: ["queued", "processing"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (promptJob?.status === "processing") throw errors.conflict(`${prompt === "supplier" ? "Supplier" : "Tag"} analysis is already running.`);
+    if (!promptJob) {
       const previousImages = await tx.catalogImageCandidate.findMany({
         where: { job: { catalogId } }, select: { storageKey: true },
       });
       for (const image of previousImages) await queueStoredFileRemoval(tx, image.storageKey);
       await tx.catalogImageCandidate.deleteMany({ where: { job: { catalogId } } });
     }
-    const queued = latest?.status === "queued"
-      ? latest
-      : await tx.catalogExtractionJob.create({ data: { catalogId } });
+    const queued = promptJob?.status === "queued"
+      ? promptJob
+      : await tx.catalogExtractionJob.create({ data: { catalogId, prompt } });
     await tx.catalog.update({ where: { id: catalogId }, data: { analysisStatus: "queued" } });
     await recordAudit(tx, request, {
       action: AuditAction.CATALOG_ANALYSIS_START,
@@ -604,14 +595,13 @@ export async function updateCatalog(
     // Treated as absent when undefined so PATCH can leave an existing version untouched.
     const supplierId = update.supplierId === undefined ? existing.supplierId : update.supplierId;
     if (supplierId) await assertSupplierExists(tx, supplierId);
-    const categoryIds = update.categories === undefined
-      ? existing.categories.map((link) => link.categoryId)
-      : await resolveCategoryIds(tx, request, update.categories);
-    if (update.categories !== undefined) {
-      await tx.catalogCategory.deleteMany({ where: { catalogId } });
-      await tx.catalogCategory.createMany({ data: categoryIds.map((categoryId) => ({ catalogId, categoryId })) });
+    const tagIds = update.tags === undefined
+      ? existing.tags.map((link) => link.tagId)
+      : await resolveTagIds(tx, request, update.tags);
+    if (update.tags !== undefined) {
+      await tx.catalogTag.deleteMany({ where: { catalogId } });
+      await tx.catalogTag.createMany({ data: tagIds.map((tagId) => ({ catalogId, tagId })) });
     }
-    if (supplierId) await mergeSupplierCategories(tx, request, supplierId, categoryIds);
     const data: Prisma.CatalogUncheckedUpdateInput = { name: update.name, supplierId };
     if (update.version !== undefined) data.version = update.version;
     const row = await tx.catalog.update({ where: { id: catalogId }, data, include: catalogInclude });
