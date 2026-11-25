@@ -150,38 +150,43 @@ describe("products", () => {
       expect(res.body.product).toMatchObject({ cost: "0.00", currency: "USD", attributeSet: null, attributeValues: [] });
     });
 
-    it("assigns product categories and exposes them as inherited supplier categories", async () => {
-      const created = await createProduct(
-        mdfProduct({ categories: [{ name: "Furniture Hinges" }] }),
-      );
+    it("assigns product tags and exposes them as inherited supplier tags", async () => {
+      const tag = await db.tag.create({
+        data: { nameEn: "Furniture Hinges", nameFr: "Charnières de meuble", nameKey: "furniture hinges" },
+      });
+      const created = await createProduct(mdfProduct({ tags: [tag.id] }));
       expect(created.status).toBe(201);
-      expect(created.body.product.categories).toMatchObject([
-        { name: translated("Furniture Hinges") },
+      expect(created.body.product.tags).toMatchObject([
+        { name: { en: "Furniture Hinges", fr: "Charnières de meuble" } },
       ]);
 
       const supplier = await request(app.server)
         .get(`/api/v1/suppliers/${supplierId}`)
         .set("Cookie", readerCookie);
       expect(supplier.body.supplier).toMatchObject({
-        categories: [{ name: translated("Furniture Hinges") }],
-        assignedCategories: [],
-        inheritedCategories: [{ name: translated("Furniture Hinges") }],
+        tags: [{ name: { en: "Furniture Hinges", fr: "Charnières de meuble" } }],
       });
 
       const filtered = await request(app.server)
-        .get(`/api/v1/suppliers?category=${created.body.product.categories[0].id}`)
+        .get(`/api/v1/suppliers?tag=${tag.id}`)
         .set("Cookie", readerCookie);
       expect(filtered.body.items.map((item: { id: string }) => item.id)).toContain(supplierId);
     });
 
-    it("replaces product categories on update", async () => {
-      const created = await createProduct(mdfProduct({ categories: [{ name: "Furniture Hinges" }] }));
+    it("replaces product tags on update", async () => {
+      const hinges = await db.tag.create({
+        data: { nameEn: "Furniture Hinges", nameFr: "Charnières de meuble", nameKey: "furniture hinges" },
+      });
+      const hardware = await db.tag.create({
+        data: { nameEn: "Cabinet Hardware", nameFr: "Quincaillerie", nameKey: "cabinet hardware" },
+      });
+      const created = await createProduct(mdfProduct({ tags: [hinges.id] }));
       const updated = await admin("put", `/products/${created.body.product.id}`, {
-        ...mdfProduct({ categories: [{ name: "Cabinet Hardware" }] }),
+        ...mdfProduct({ tags: [hardware.id] }),
         supplierId,
       });
       expect(updated.status).toBe(200);
-      expect(updated.body.product.categories.map((category: { name: { en: string } }) => category.name.en))
+      expect(updated.body.product.tags.map((tag: { name: { en: string } }) => tag.name.en))
         .toEqual(["Cabinet Hardware"]);
     });
 

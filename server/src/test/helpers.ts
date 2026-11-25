@@ -18,7 +18,7 @@ export const READER = { email: "reader@test.local", password: "ReaderPassword123
 
 const SYSTEM_ACTOR = { userId: null, email: "system:test" };
 const testExtractionQueue: CatalogExtractionQueue = {
-  async enqueue() {},
+  async enqueue(_extractionJobId, _prompt) {},
   async close() {},
 };
 
@@ -55,11 +55,13 @@ export async function createTestApp(
 
 /** Clears all tables. The audit trigger is disabled only for this test database. */
 export async function resetDatabase(db: Database): Promise<void> {
-  await db.$executeRawUnsafe("ALTER TABLE audit_logs DISABLE TRIGGER USER");
-  await db.$executeRawUnsafe(
-    "TRUNCATE stored_file_cleanup, audit_logs, sessions, product_attribute_values, products, attribute_options, attribute_fields, attribute_sets, catalog_extraction_jobs, catalogs, supplier_assets, supplier_categories, suppliers, categories, users CASCADE",
-  );
-  await db.$executeRawUnsafe("ALTER TABLE audit_logs ENABLE TRIGGER USER");
+  await db.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("ALTER TABLE audit_logs DISABLE TRIGGER USER");
+    await tx.$executeRawUnsafe(
+      "TRUNCATE stored_file_cleanup, audit_logs, sessions, pinned_items, shared_items, supplier_contacts, product_attribute_values, product_tags, catalog_tags, supplier_tags, catalog_extraction_jobs, catalogs, supplier_assets, products, attribute_options, attribute_fields, attribute_sets, suppliers, tags, users CASCADE",
+    );
+    await tx.$executeRawUnsafe("ALTER TABLE audit_logs ENABLE TRIGGER USER");
+  });
 }
 
 export async function seedUser(

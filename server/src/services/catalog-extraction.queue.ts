@@ -4,12 +4,13 @@ import { Redis } from "ioredis";
 export const CATALOG_EXTRACTION_QUEUE = "catalog-extraction-gemini";
 
 export interface CatalogExtractionQueue {
-  enqueue(extractionJobId: string): Promise<void>;
+  enqueue(extractionJobId: string, prompt: "supplier" | "tags"): Promise<void>;
   close(): Promise<void>;
 }
 
 interface ExtractionPayload {
   extractionJobId: string;
+  prompt: "supplier" | "tags";
 }
 
 export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractionQueue {
@@ -18,13 +19,13 @@ export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractio
   });
 
   return {
-    async enqueue(extractionJobId) {
+    async enqueue(extractionJobId, prompt) {
       await queue.add(
         "analyze-catalog",
-        { extractionJobId },
+        { extractionJobId, prompt },
         {
           jobId: extractionJobId,
-          attempts: 1,
+          attempts: 3,
           backoff: { type: "exponential", delay: 5_000 },
           removeOnComplete: { count: 500 },
           removeOnFail: { count: 500 },

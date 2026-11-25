@@ -25,11 +25,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 interface CatalogItem {
+  pinned?: boolean;
   name: string;
+  tags: { id: string; name: { en: string; fr: string } }[];
   version: string | null;
   originalFileName: string;
   supplierName: string;
-  supplierCategoryNames: string[];
+  supplierTagNames: string[];
   createdAt: string;
 }
 
@@ -59,21 +61,18 @@ describe("global catalogs list", () => {
     readerCookie = await loginCookie(app, READER);
   });
 
-  async function makeCategory(name: string): Promise<{ id: string }> {
-    const res = await request(app.server)
-      .post("/api/v1/categories")
-      .set(unsafeHeaders(adminCookie))
-      .send({ name: translated(name) });
-    const { category } = res.body as { category: { id: string } };
-    if (res.status !== 201) throw new Error(`category create failed: ${res.status} ${JSON.stringify(res.body)}`);
-    return { id: category.id };
+  async function makeTag(name: string): Promise<{ id: string }> {
+    const tag = await db.tag.create({
+      data: { nameEn: name, nameFr: name, nameKey: name.toLocaleLowerCase("en").trim() },
+    });
+    return { id: tag.id };
   }
 
-  async function makeSupplier(name: string, categoryIds: string[] = []): Promise<{ id: string }> {
+  async function makeSupplier(name: string, tagIds: string[] = []): Promise<{ id: string }> {
     const res = await request(app.server)
       .post("/api/v1/suppliers")
       .set(unsafeHeaders(adminCookie))
-      .send({ name, categories: categoryIds.map((id) => ({ id })) });
+      .send({ name, tags: tagIds });
     const { supplier } = res.body as { supplier: { id: string } };
     if (res.status !== 201) throw new Error(`supplier create failed: ${res.status} ${JSON.stringify(res.body)}`);
     return { id: supplier.id };
@@ -103,9 +102,9 @@ describe("global catalogs list", () => {
     return res.body as { total: number; items: CatalogItem[] };
   }
 
-  it("lists catalogs across all suppliers with supplier and category tags", async () => {
-    const tools = await makeCategory("Tools");
-    const paint = await makeCategory("Paint");
+  it("lists catalogs across all suppliers with supplier and tag names", async () => {
+    const tools = await makeTag("Tools");
+    const paint = await makeTag("Paint");
     const acme = await makeSupplier("Acme", [tools.id]);
     const bolt = await makeSupplier("Bolt", [paint.id, tools.id]);
     await uploadCatalog(acme.id, "Acme catalog", { filename: "acme.pdf" });
@@ -116,8 +115,8 @@ describe("global catalogs list", () => {
     expect(items).toHaveLength(2);
     const acmeItem = items.find((i) => i.supplierName === "Acme");
     const boltItem = items.find((i) => i.supplierName === "Bolt");
-    expect(acmeItem?.supplierCategoryNames).toEqual(["Tools"]);
-    expect(boltItem?.supplierCategoryNames).toEqual(["Paint", "Tools"]);
+    expect(acmeItem?.supplierTagNames).toEqual(["Tools"]);
+    expect(boltItem?.supplierTagNames).toEqual(["Paint", "Tools"]);
     expect(acmeItem?.originalFileName).toBe("acme.pdf");
     // Version omitted on upload -> null (optional since FR-CLG-01 relaxation).
     expect(acmeItem?.version).toBeNull();
@@ -152,21 +151,46 @@ describe("global catalogs list", () => {
     expect(byVersion.items.map((i) => i.name)).toEqual(["another"]);
   });
 
-  it("filters by one or more categories, combining with q", async () => {
-    const tools = await makeCategory("Tools");
-    const paint = await makeCategory("Paint");
+  it("flags catalogs pinned by the current user", async () => {
+    const acme = await makeSupplier("Acme");
+    const pinnedCatalog = await uploadCatalog(acme.id, "pinned one");
+    await uploadCatalog(acme.id, "not pinned");
+    const pin = await request(app.server)
+      .post("/api/v1/pins")
+      .set(unsafeHeaders(readerCookie))
+      .send({ itemType: "catalog", itemId: pinnedCatalog.id });
+    expect(pin.status).toBe(200);
+
+    const { items } = await listCatalogs();
+    expect(items.map((i) => [i.name, i.pinned])).toEqual(expect.arrayContaining([["pinned one", true], ["not pinned", false]]));
+  });
+
+  it("searches by the catalog's own tag names via q", async () => {
+    const hinge = await makeTag("Furniture Hinge");
+    const acme = await makeSupplier("Acme");
+    const tagged = await uploadCatalog(acme.id, "plain one");
+    await uploadCatalog(acme.id, "plain two");
+    await db.catalogTag.create({ data: { catalogId: tagged.id, tagId: hinge.id } });
+
+    const byTag = await listCatalogs("?q=hinge");
+    expect(byTag.items.map((i) => i.name)).toEqual(["plain one"]);
+  });
+
+  it("filters by one or more tags, combining with q", async () => {
+    const tools = await makeTag("Tools");
+    const paint = await makeTag("Paint");
     const acme = await makeSupplier("Acme", [tools.id]);
     const bolt = await makeSupplier("Bolt", [paint.id]);
     await uploadCatalog(acme.id, "Acme prices");
     await uploadCatalog(bolt.id, "Bolt prices");
 
-    const byTools = await listCatalogs(`?category=${tools.id}`);
+    const byTools = await listCatalogs(`?tag=${tools.id}`);
     expect(byTools.items.map((i) => i.supplierName)).toEqual(["Acme"]);
 
-    const byBoth = await listCatalogs(`?category=${tools.id}&category=${paint.id}`);
+    const byBoth = await listCatalogs(`?tag=${tools.id}&tag=${paint.id}`);
     expect(new Set(byBoth.items.map((i) => i.supplierName))).toEqual(new Set(["Acme", "Bolt"]));
 
-    const combined = await listCatalogs(`?category=${tools.id}&category=${paint.id}&q=bolt`);
+    const combined = await listCatalogs(`?tag=${tools.id}&tag=${paint.id}&q=bolt`);
     expect(combined.items.map((i) => i.supplierName)).toEqual(["Bolt"]);
   });
 

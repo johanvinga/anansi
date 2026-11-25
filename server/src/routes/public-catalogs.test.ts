@@ -65,7 +65,7 @@ describe("public catalog upload", () => {
       originalFileName: "spring prices.PDF",
       supplierId: null,
       version: null,
-      categories: [],
+      tags: [],
       uploadedById: user.id,
       sizeBytes: PDF.length,
       analysisStatus: "not_processed",

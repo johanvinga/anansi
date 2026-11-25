@@ -65,7 +65,7 @@ const CATALOG_ITEMS: NavItem[] = [
   { to: "/products", labelKey: "nav.products", icon: Package },
   { to: "/catalogs", labelKey: "nav.catalogs", icon: BookOpen },
   { to: "/attribute-sets", labelKey: "nav.attributeSets", icon: ListTree },
-  { to: "/categories", labelKey: "nav.categories", icon: Tags },
+  { to: "/tags", labelKey: "nav.tags", icon: Tags },
 ];
 
 const ADMIN_ITEMS: NavItem[] = [

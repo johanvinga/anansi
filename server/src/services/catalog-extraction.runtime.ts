@@ -15,6 +15,7 @@ import {
 
 interface ExtractionPayload {
   extractionJobId: string;
+  prompt: "supplier" | "tags";
 }
 
 export interface CatalogExtractionRuntime {
@@ -77,6 +78,7 @@ export function createCatalogExtractionRuntime(
             maxPages: config.catalogExtractionMaxPages,
           },
           analyzeCatalog,
+          job.data.prompt,
         );
       } catch (error) {
         const failure = error instanceof Error ? error : new Error("Catalog extraction failed.");

@@ -3,13 +3,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import { FieldError, FieldGroup, FieldLegend, FieldSeparator, FieldSet } from "@/components/ui/field";
+import { FieldGroup, FieldLegend, FieldSeparator, FieldSet } from "@/components/ui/field";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import type { Supplier } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
-import { CategoryEditor } from "./category-editor";
-import { chipsFrom, toCategoryInputs, type CategoryChip } from "./category-chips";
+import { chipsFrom, type CategoryChip } from "./category-chips";
 
 interface SupplierFormProps {
   supplier?: Supplier;
@@ -18,7 +17,7 @@ interface SupplierFormProps {
   onCancel: () => void;
 }
 
-type AddressKey = "street" | "city" | "stateRegion" | "postalCode" | "country";
+type AddressKey = "street" | "city" | "stateRegion" | "postalCode" | "country" | "website";
 
 function useAddressFields(): { key: AddressKey; label: string }[] {
   const { t } = useTranslation();
@@ -43,9 +42,10 @@ export function SupplierForm({ supplier, initialName, onSaved, onCancel }: Suppl
     stateRegion: supplier?.stateRegion ?? "",
     postalCode: supplier?.postalCode ?? "",
     country: supplier?.country ?? "",
+    website: supplier?.website ?? "",
   });
-  const [categories, setCategories] = useState<CategoryChip[]>(
-    supplier ? chipsFrom(supplier.assignedCategories) : [],
+  const [categories] = useState<CategoryChip[]>(
+    supplier ? chipsFrom(supplier.tags) : [],
   );
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -54,13 +54,13 @@ export function SupplierForm({ supplier, initialName, onSaved, onCancel }: Suppl
     event.preventDefault();
     setError(null);
     setSubmitting(true);
-    const body = { name, ...address, categories: toCategoryInputs(categories) };
+    const body = { name, ...address, tags: categories.flatMap((chip) => chip.id ? [chip.id] : []) };
     try {
       const result = supplier
         ? await apiRequest<{ supplier: Supplier }>("PUT", `/suppliers/${supplier.id}`, body)
         : await apiRequest<{ supplier: Supplier }>("POST", "/suppliers", body);
       await queryClient.invalidateQueries({ queryKey: ["suppliers"] });
-      await queryClient.invalidateQueries({ queryKey: ["categories"] });
+      await queryClient.invalidateQueries({ queryKey: ["tags"] });
       onSaved(result.supplier);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(500, "INTERNAL_ERROR", errorMessage(err)));
@@ -93,9 +93,6 @@ export function SupplierForm({ supplier, initialName, onSaved, onCancel }: Suppl
             </FieldSet>
             <FieldSeparator />
             <FieldSet>
-              <FieldLegend>{t("suppliers.categoriesLabel")}</FieldLegend>
-              <CategoryEditor value={categories} onChange={setCategories} />
-              {error?.fieldError("categories") ? <FieldError>{error.fieldError("categories")}</FieldError> : null}
             </FieldSet>
           </FieldGroup>
         </CardContent>

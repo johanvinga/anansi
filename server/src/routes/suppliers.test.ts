@@ -16,7 +16,7 @@ import {
 const NIL_UUID = "9f1c2a4e-1111-4222-8333-444455556666";
 const translated = (value: string) => ({ en: value, fr: value });
 
-describe("suppliers and categories", () => {
+describe("suppliers and tags", () => {
   let db: Database;
   let app: FastifyInstance;
   let adminCookie: string;
@@ -25,6 +25,48 @@ describe("suppliers and categories", () => {
   beforeAll(async () => {
     db = createTestDatabase();
     app = await createTestApp(db);
+    describe("tag management", () => {
+      it("creates, lists, renames, and archives tags", async () => {
+        const created = await request(app.server)
+          .post("/api/v1/tags")
+          .set(unsafeHeaders(adminCookie))
+          .send({ name: { en: "Paint", fr: "Peinture" } });
+        expect(created.status).toBe(201);
+        const tagId = created.body.tag.id as string;
+
+        const duplicate = await request(app.server)
+          .post("/api/v1/tags")
+          .set(unsafeHeaders(adminCookie))
+          .send({ name: { en: "paint", fr: "Peinture" } });
+        expect(duplicate.status).toBe(409);
+
+        const renamed = await request(app.server)
+          .put(`/api/v1/tags/${tagId}`)
+          .set(unsafeHeaders(adminCookie))
+          .send({ name: { en: "Wall Paint", fr: "Peinture murale" } });
+        expect(renamed.status).toBe(200);
+
+        const archived = await request(app.server)
+          .put(`/api/v1/tags/${tagId}`)
+          .set(unsafeHeaders(adminCookie))
+          .send({ isArchived: true });
+        expect(archived.status).toBe(200);
+        expect(archived.body.tag.isArchived).toBe(true);
+
+        const list = await request(app.server).get("/api/v1/tags").set("Cookie", readerCookie);
+        expect(list.status).toBe(200);
+        expect(list.body.items).toEqual([]);
+      });
+
+      it("rejects tag writes for standard users", async () => {
+        const res = await request(app.server)
+          .post("/api/v1/tags")
+          .set(unsafeHeaders(readerCookie))
+          .send({ name: { en: "Nope", fr: "Non" } });
+        expect(res.status).toBe(403);
+      });
+    });
+
   });
 
   afterAll(async () => {
@@ -55,13 +97,12 @@ describe("suppliers and categories", () => {
         stateRegion: "IL",
         postalCode: "62701",
         country: "USA",
-        categories: [{ name: "Wood" }],
+        tags: [],
       });
 
       expect(res.status).toBe(201);
       expect(res.body.supplier.name).toBe("Acme Panels");
       expect(res.body.supplier.city).toBe("Springfield");
-      expect(res.body.supplier.categories).toEqual([expect.objectContaining({ name: translated("Wood") })]);
 
       const audit = await db.auditLog.findFirst({
         where: { action: "SUPPLIER_CREATE", entityId: res.body.supplier.id },
@@ -73,7 +114,7 @@ describe("suppliers and categories", () => {
     it("creates a supplier with only a name", async () => {
       const res = await createSupplier({ name: "Solo Supplies" });
       expect(res.status).toBe(201);
-      expect(res.body.supplier.categories).toEqual([]);
+      expect(res.body.supplier.tags).toEqual([]);
       expect(res.body.supplier.street).toBeNull();
     });
 
@@ -123,38 +164,6 @@ describe("suppliers and categories", () => {
     });
   });
 
-  describe("FR-CAT-05/06 categories on suppliers", () => {
-    it("reuses an existing category by name (case-insensitive) instead of duplicating it", async () => {
-      const first = await createSupplier({ name: "One", categories: [{ name: "Paint" }] });
-      const second = await createSupplier({ name: "Two", categories: [{ name: "paint" }] });
-
-      expect(first.body.supplier.categories[0].id).toBe(second.body.supplier.categories[0].id);
-      expect(await db.category.count()).toBe(1);
-    });
-
-    it("links an existing category by id", async () => {
-      const created = await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Glass") });
-      const res = await createSupplier({
-        name: "Glassworks",
-        categories: [{ id: created.body.category.id }],
-      });
-      expect(res.body.supplier.categories[0].name).toEqual(translated("Glass"));
-    });
-
-    it("returns 400 for an unknown category id", async () => {
-      const res = await createSupplier({ name: "Ghost", categories: [{ id: NIL_UUID }] });
-      expect(res.status).toBe(400);
-      expect(res.body.error.details[0].field).toBe("categories");
-    });
-
-    it("creates a category inline and audits it", async () => {
-      await createSupplier({ name: "Inline", categories: [{ name: "Hardware" }] });
-      expect(await db.auditLog.count({ where: { action: "CATEGORY_CREATE" } })).toBe(1);
-    });
-  });
 
   describe("FR-SUP-02/06/07 list with pagination, name filter, and category filter", () => {
     it("paginates and sorts by name", async () => {
@@ -184,30 +193,33 @@ describe("suppliers and categories", () => {
       expect(res.body.items.map((s: { name: string }) => s.name)).toEqual(["Oak Timber"]);
     });
 
-    it("filters by one category id", async () => {
-      const wood = await createSupplier({ name: "Woodco", categories: [{ name: "Wood" }] });
-      await createSupplier({ name: "Metalco", categories: [{ name: "Metal" }] });
+    it("filters by one tag id", async () => {
+      const woodTag = await db.tag.create({ data: { nameEn: "Wood", nameFr: "Bois", nameKey: "wood" } });
+      const metalTag = await db.tag.create({ data: { nameEn: "Metal", nameFr: "Métal", nameKey: "metal" } });
+      const wood = await createSupplier({ name: "Woodco", tags: [woodTag.id] });
+      await createSupplier({ name: "Metalco", tags: [metalTag.id] });
       const res = await request(app.server)
-        .get(`/api/v1/suppliers?category=${wood.body.supplier.categories[0].id}`)
+        .get(`/api/v1/suppliers?tag=${woodTag.id}`)
         .set("Cookie", readerCookie);
       expect(res.body.items.map((s: { name: string }) => s.name)).toEqual(["Woodco"]);
     });
 
-    it("matches suppliers having any of several category ids", async () => {
-      const a = await createSupplier({ name: "A", categories: [{ name: "Wood" }] });
-      const b = await createSupplier({ name: "B", categories: [{ name: "Metal" }] });
-      await createSupplier({ name: "C", categories: [{ name: "Glass" }] });
+    it("matches suppliers having any of several tag ids", async () => {
+      const woodTag = await db.tag.create({ data: { nameEn: "Wood", nameFr: "Bois", nameKey: "wood" } });
+      const metalTag = await db.tag.create({ data: { nameEn: "Metal", nameFr: "Métal", nameKey: "metal" } });
+      await db.tag.create({ data: { nameEn: "Glass", nameFr: "Verre", nameKey: "glass" } });
+      const a = await createSupplier({ name: "A", tags: [woodTag.id] });
+      const b = await createSupplier({ name: "B", tags: [metalTag.id] });
+      await createSupplier({ name: "C" });
       const res = await request(app.server)
-        .get(
-          `/api/v1/suppliers?category=${a.body.supplier.categories[0].id}&category=${b.body.supplier.categories[0].id}`,
-        )
+        .get(`/api/v1/suppliers?tag=${woodTag.id}&tag=${metalTag.id}`)
         .set("Cookie", readerCookie);
       expect(res.body.items.map((s: { name: string }) => s.name)).toEqual(["A", "B"]);
     });
 
-    it("returns 400 for a malformed category filter", async () => {
+    it("returns 400 for a malformed tag filter", async () => {
       const res = await request(app.server)
-        .get("/api/v1/suppliers?category=not-a-uuid")
+        .get("/api/v1/suppliers?tag=not-a-uuid")
         .set("Cookie", readerCookie);
       expect(res.status).toBe(400);
     });
@@ -219,15 +231,16 @@ describe("suppliers and categories", () => {
   });
 
   describe("FR-SUP-03 view supplier", () => {
-    it("returns details including categories and audits the view", async () => {
-      const created = await createSupplier({ name: "Detail", city: "Austin", categories: [{ name: "Tools" }] });
+    it("returns details including tags and audits the view", async () => {
+      const tag = await db.tag.create({ data: { nameEn: "Tools", nameFr: "Outils", nameKey: "tools" } });
+      const created = await createSupplier({ name: "Detail", city: "Austin", tags: [tag.id] });
       const res = await request(app.server)
         .get(`/api/v1/suppliers/${created.body.supplier.id}`)
         .set("Cookie", readerCookie);
 
       expect(res.status).toBe(200);
       expect(res.body.supplier.city).toBe("Austin");
-      expect(res.body.supplier.categories[0].name).toEqual(translated("Tools"));
+      expect(res.body.supplier.tags[0].name).toEqual({ en: "Tools", fr: "Outils" });
       expect(await db.auditLog.count({ where: { action: "SUPPLIER_VIEW" } })).toBe(1);
     });
 
@@ -243,34 +256,36 @@ describe("suppliers and categories", () => {
   });
 
   describe("FR-SUP-04 edit supplier", () => {
-    it("updates fields and replaces categories when provided, auditing before and after", async () => {
-      const created = await createSupplier({ name: "Old Name", city: "Boston", categories: [{ name: "A" }] });
+    it("updates fields and replaces tags when provided, auditing before and after", async () => {
+      const tagA = await db.tag.create({ data: { nameEn: "A", nameFr: "A", nameKey: "a" } });
+      const tagB = await db.tag.create({ data: { nameEn: "B", nameFr: "B", nameKey: "b" } });
+      const created = await createSupplier({ name: "Old Name", city: "Boston", tags: [tagA.id] });
       const id = created.body.supplier.id;
 
       const res = await request(app.server)
         .put(`/api/v1/suppliers/${id}`)
         .set(unsafeHeaders(adminCookie))
-        .send({ name: "New Name", city: "Denver", categories: [{ name: "B" }] });
+        .send({ name: "New Name", city: "Denver", tags: [tagB.id] });
 
       expect(res.status).toBe(200);
       expect(res.body.supplier.name).toBe("New Name");
-      expect(res.body.supplier.categories.map((c: { name: { en: string; fr: string } }) => c.name.en)).toEqual(["B"]);
+      expect(res.body.supplier.tags.map((tag: { name: { en: string } }) => tag.name.en)).toEqual(["B"]);
 
       const audit = await db.auditLog.findFirstOrThrow({ where: { action: "SUPPLIER_UPDATE", entityId: id } });
       expect(audit.changes).toMatchObject({
         name: { before: "Old Name", after: "New Name" },
         city: { before: "Boston", after: "Denver" },
-        categories: { before: ["A"], after: ["B"] },
       });
     });
 
-    it("keeps existing categories when the categories field is omitted", async () => {
-      const created = await createSupplier({ name: "Keeper", categories: [{ name: "Keep" }] });
+    it("keeps existing tags when the tags field is omitted", async () => {
+      const tag = await db.tag.create({ data: { nameEn: "Keep", nameFr: "Garder", nameKey: "keep" } });
+      const created = await createSupplier({ name: "Keeper", tags: [tag.id] });
       const res = await request(app.server)
         .put(`/api/v1/suppliers/${created.body.supplier.id}`)
         .set(unsafeHeaders(adminCookie))
         .send({ name: "Keeper Renamed" });
-      expect(res.body.supplier.categories.map((c: { name: { en: string; fr: string } }) => c.name.en)).toEqual(["Keep"]);
+      expect(res.body.supplier.tags.map((item: { name: { en: string } }) => item.name.en)).toEqual(["Keep"]);
     });
 
     it("writes no audit entry when nothing changed", async () => {
@@ -327,88 +342,4 @@ describe("suppliers and categories", () => {
     });
   });
 
-  describe("FR-CAT-01..04 category management", () => {
-    it("lists categories for any signed-in user, filtered by q", async () => {
-      await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Wood") });
-      await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Metal") });
-      const res = await request(app.server).get("/api/v1/categories?q=wo").set("Cookie", readerCookie);
-      expect(res.status).toBe(200);
-      expect(res.body.items.map((c: { name: { en: string; fr: string } }) => c.name.en)).toEqual(["Wood"]);
-    });
-
-    it("creates a category and rejects a case-insensitive duplicate", async () => {
-      const first = await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Paint") });
-      expect(first.status).toBe(201);
-
-      const dupe = await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("PAINT") });
-      expect(dupe.status).toBe(409);
-    });
-
-    it("renames a category and audits the change", async () => {
-      const created = await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Tile") });
-      const res = await request(app.server)
-        .put(`/api/v1/categories/${created.body.category.id}`)
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Ceramic Tile") });
-
-      expect(res.status).toBe(200);
-      const audit = await db.auditLog.findFirstOrThrow({ where: { action: "CATEGORY_UPDATE" } });
-      expect(audit.changes).toMatchObject({
-        "name.en": { before: "Tile", after: "Ceramic Tile" },
-        "name.fr": { before: "Tile", after: "Ceramic Tile" },
-      });
-    });
-
-    it("deletes a category, removes it from suppliers, and keeps the suppliers", async () => {
-      const supplier = await createSupplier({ name: "Keeps Suppliers", categories: [{ name: "Temp" }] });
-      const categoryId = supplier.body.supplier.categories[0].id;
-
-      const res = await request(app.server)
-        .delete(`/api/v1/categories/${categoryId}`)
-        .set(unsafeHeaders(adminCookie));
-      expect(res.status).toBe(204);
-
-      const after = await request(app.server)
-        .get(`/api/v1/suppliers/${supplier.body.supplier.id}`)
-        .set("Cookie", readerCookie);
-      expect(after.status).toBe(200);
-      expect(after.body.supplier.categories).toEqual([]);
-    });
-
-    it("forbids category writes for standard users", async () => {
-      const create = await request(app.server)
-        .post("/api/v1/categories")
-        .set(unsafeHeaders(readerCookie))
-        .send({ name: translated("Nope") });
-      expect(create.status).toBe(403);
-    });
-
-    it("returns 404 when renaming or deleting an unknown category", async () => {
-      const rename = await request(app.server)
-        .put(`/api/v1/categories/${NIL_UUID}`)
-        .set(unsafeHeaders(adminCookie))
-        .send({ name: translated("Ghost") });
-      expect(rename.status).toBe(404);
-
-      const remove = await request(app.server)
-        .delete(`/api/v1/categories/${NIL_UUID}`)
-        .set(unsafeHeaders(adminCookie));
-      expect(remove.status).toBe(404);
-    });
-  });
 });

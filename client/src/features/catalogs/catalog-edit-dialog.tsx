@@ -9,8 +9,6 @@ import type { Catalog } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { SelectField } from "../../components/select-field";
-import { CategoryEditor } from "../suppliers/category-editor";
-import { chipsFrom, toCategoryInputs } from "../suppliers/category-chips";
 import { loadCatalogSuppliers } from "./supplier-picker";
 
 interface CatalogEditDialogProps {
@@ -25,7 +23,6 @@ export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved
   const [name, setName] = useState(catalog.name);
   const [version, setVersion] = useState(catalog.version ?? "");
   const [supplierId, setSupplierId] = useState(catalog.supplierId ?? initialSupplierId ?? null);
-  const [categories, setCategories] = useState(() => chipsFrom(catalog.categories));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const suppliers = useQuery({
@@ -39,7 +36,7 @@ export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved
     setSubmitting(true);
     try {
       await apiRequest("PATCH", `/catalogs/${catalog.id}`, {
-        name: name.trim(), version: version.trim() || null, supplierId, categories: toCategoryInputs(categories),
+        name: name.trim(), version: version.trim() || null, supplierId,
       });
       onSaved();
     } catch (err) {
@@ -65,8 +62,6 @@ export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved
               disabled={!suppliers.data}
               options={[{ value: "", label: t("catalogs.unassigned") }, ...(suppliers.data ?? []).map((s) => ({ value: s.id, label: s.name }))]}
             />
-            <p>{t("catalogs.catalogCategories")}</p>
-            <CategoryEditor value={categories} onChange={setCategories} />
           </FieldGroup>
           <DialogFooter>
             <DialogClose asChild><Button type="button" variant="outline">{t("common.cancel")}</Button></DialogClose>

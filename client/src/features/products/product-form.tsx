@@ -32,8 +32,7 @@ import type {
 } from "../../api/types";
 import { FormField } from "../../components/form-field";
 import { SelectField } from "../../components/select-field";
-import { CategoryEditor } from "../suppliers/category-editor";
-import { chipsFrom, toCategoryInputs, type CategoryChip } from "../suppliers/category-chips";
+import { type CategoryChip } from "../suppliers/category-chips";
 import { AttributeInput } from "./attribute-input";
 import { useProductFormData } from "./use-product-form-data";
 
@@ -42,7 +41,7 @@ interface ProductFormProps {
   product?: ProductDetail;
   defaultSupplierId?: string;
   defaultAttributeSetId?: string;
-  initialProduct?: Pick<CatalogProductCandidate, "name" | "sku" | "description" | "attributes" | "categories">;
+  initialProduct?: Pick<CatalogProductCandidate, "name" | "sku" | "description" | "attributes" | "categories" | "productType">;
   sourceCatalog?: { catalogId: string; pageNumbers: number[] };
   embedded?: boolean;
   onClose: () => void;
@@ -136,6 +135,8 @@ export function ProductForm({
   const [nameEn, setNameEn] = useState(product?.name.en ?? initialProduct?.name ?? "");
   const [nameFr, setNameFr] = useState(product?.name.fr ?? initialProduct?.name ?? "");
   const nameFrEdited = Boolean(product);
+  const [productTypeEn, setProductTypeEn] = useState(product?.productType?.en ?? initialProduct?.productType?.en ?? "");
+  const [productTypeFr, setProductTypeFr] = useState(product?.productType?.fr ?? initialProduct?.productType?.fr ?? "");
   const [descriptionEn, setDescriptionEn] = useState(product?.description.en ?? initialProduct?.description ?? "");
   const descriptionFr = product?.description.fr ?? "";
   const [supplierSku, setSupplierSku] = useState(product?.supplierSku ?? initialProduct?.sku ?? "");
@@ -147,11 +148,7 @@ export function ProductForm({
   );
   const [values, setValues] = useState<Record<string, AttributeValue>>(() => initialValues(product));
   const [directValues, setDirectValues] = useState<Record<string, AttributeValue>>(() => initialValues(product));
-  const [categories, setCategories] = useState<CategoryChip[]>(
-    product
-      ? chipsFrom(product.categories)
-      : (initialProduct?.categories ?? []).map((name) => ({ name })),
-  );
+  const [categories] = useState<CategoryChip[]>([]);
   const candidateValuesApplied = useRef(
     !initialProduct || !defaultAttributeSetId || initialProduct.attributes.length === 0,
   );
@@ -214,6 +211,9 @@ export function ProductForm({
     }
     const body = {
       name: { en: nameEn, fr: nameFr },
+      productType: productTypeEn.trim()
+        ? { en: productTypeEn.trim(), fr: productTypeFr.trim() || productTypeEn.trim() }
+        : null,
       description: {
         en: descriptionEn.trim() || null,
         fr: descriptionFr.trim() || null,
@@ -222,7 +222,7 @@ export function ProductForm({
       minQuantity: minQuantity.trim() === "" ? null : Number(minQuantity),
       cost: product ? cost.trim() || null : cost.trim(),
       currency: product ? currency : currency ?? defaultCurrency,
-      categories: toCategoryInputs(categories),
+      tags: categories.flatMap((category) => category.id ? [category.id] : []),
       ...(sourceCatalog ? { catalogSource: sourceCatalog } : {}),
       attributeSetId,
       attributeValues: fields.map((field) => ({ fieldId: field.id, value: toSubmitValue(field, valueForSetField(field)) })),
@@ -284,6 +284,22 @@ export function ProductForm({
                   error={error?.fieldError("name.en")}
                 />
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <FormField
+                    label={t("products.productTypeEn")}
+                    value={productTypeEn}
+                    onChange={setProductTypeEn}
+                    maxLength={100}
+                    placeholder={t("products.productTypePlaceholder")}
+                    error={error?.fieldError("productType.en")}
+                  />
+                  <FormField
+                    label={t("products.productTypeFr")}
+                    value={productTypeFr}
+                    onChange={setProductTypeFr}
+                    maxLength={100}
+                    placeholder={t("products.productTypePlaceholder")}
+                    error={error?.fieldError("productType.fr")}
+                  />
                   <SelectField
                     label={t("products.supplier")}
                     options={supplierOptions}
@@ -303,11 +319,6 @@ export function ProductForm({
                   placeholder={t("products.descriptionPlaceholder")}
                   error={error?.fieldError("description.en")}
                 />
-                <FieldSet>
-                  <FieldLegend>{t("categories.title")}</FieldLegend>
-                  <CategoryEditor value={categories} onChange={setCategories} maxCategories={100} />
-                  {error?.fieldError("categories") ? <FieldError>{error.fieldError("categories")}</FieldError> : null}
-                </FieldSet>
               </ProductFormSection>
               <ProductFormSection number={2} title={t("products.purchasingTitle")} description={t("products.purchasingDescription")}>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

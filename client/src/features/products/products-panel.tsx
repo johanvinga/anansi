@@ -21,7 +21,7 @@ import { ConfirmDialog } from "../../components/confirm-dialog";
 import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
 import { useBulkDelete } from "../../hooks/use-bulk-delete";
 import { ErrorAlert, SuccessAlert } from "../../components/error-alert";
-import { CategoryTreeFilter } from "../../components/category-tree-filter";
+import { TagFilter } from "../../components/tag-filter";
 import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
@@ -68,7 +68,7 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
     if (search) params.set("q", search);
     if (effectiveSupplier) params.set("supplierId", effectiveSupplier);
-    for (const id of categoryIds) params.append("category", id);
+    for (const id of categoryIds) params.append("tag", id);
     if (uncategorized) params.set("uncategorized", "true");
     return apiRequest<Page<ProductSummary>>("GET", `/products?${params.toString()}`);
   }
@@ -171,7 +171,7 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
         }
         filters={
           <>
-            <CategoryTreeFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }}
+            <TagFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }}
               uncategorized={uncategorized} onUncategorizedChange={(value) => { setPage(1); setUncategorized(value); }} />
             {supplierId ? null : (
               <div className="w-56">
@@ -309,11 +309,11 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
                     <dd className="font-mono text-sm">{viewing.supplierSku}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">{t("categories.title")}</dt>
+                    <dt className="text-muted-foreground">Tags</dt>
                     <dd className="mt-1 flex flex-wrap gap-1">
-                      {viewing.categories.length > 0
-                        ? viewing.categories.map((category) => (
-                            <Badge key={category.id} variant="secondary">{localize(category.name)}</Badge>
+                      {viewing.tags.length > 0
+                        ? viewing.tags.map((tag) => (
+                            <Badge key={tag.id} variant="secondary">{localize(tag.name)}</Badge>
                           ))
                         : "—"}
                     </dd>

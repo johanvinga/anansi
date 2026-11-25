@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
-import { categoryInputSchema } from "../lib/category-input.js";
 import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import {
@@ -34,13 +33,13 @@ const supplierBodySchema = z.object({
   stateRegion: optionalText(100),
   postalCode: optionalText(20),
   country: optionalText(100),
-  categories: z.array(categoryInputSchema).max(50).optional(),
+  website: optionalText(500),
+  tags: z.array(uuidSchema).max(50).optional(),
 });
 
 const listQuerySchema = paginationSchema.extend({
   q: z.string().trim().max(200).optional(),
-  // Accepts `category=<id>` once or repeated (`category=<id>&category=<id>`).
-  category: z
+  tag: z
     .preprocess(
       (value) => (value === undefined ? [] : Array.isArray(value) ? value : [value]),
       z.array(uuidSchema).max(20),
@@ -83,7 +82,7 @@ export function registerSupplierRoutes(
     const query = parseInput(listQuerySchema, request.query);
     return listSuppliers(deps.db, context(request), {
       q: query.q || undefined,
-      categoryIds: query.category,
+      tagIds: query.tag,
       page: query.page,
       pageSize: query.pageSize,
     });

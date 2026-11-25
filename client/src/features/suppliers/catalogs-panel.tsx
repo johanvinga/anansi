@@ -127,7 +127,7 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
                 <TableCell>{catalog.originalFileName}</TableCell>
                 <TableCell>{formatSize(catalog.sizeBytes)}</TableCell>
                 <TableCell>{new Date(catalog.updatedAt).toLocaleDateString()}</TableCell>
-                <TableCell>{catalog.categories.map((category) => <Badge key={category.id} variant="secondary">{localize(category.name)}</Badge>)}</TableCell>
+                <TableCell>{catalog.tags.map((tag) => <Badge key={tag.id} variant="secondary">{localize(tag.name)}</Badge>)}</TableCell>
                 {analysisEnabled ? <TableCell>
                   <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
                     {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}

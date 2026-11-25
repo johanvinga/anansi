@@ -81,6 +81,14 @@ export interface Category extends CategoryRef {
   createdAt: string;
 }
 
+export interface Tag {
+  id: string;
+  name: Translated;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -89,12 +97,8 @@ export interface Supplier {
   stateRegion: string | null;
   postalCode: string | null;
   country: string | null;
-  /** Direct categories assigned to the supplier. */
-  assignedCategories: CategoryRef[];
-  /** Categories inherited from associated products, excluding duplicates of assigned ones. */
-  inheritedCategories: CategoryRef[];
-  /** Union of assigned and inherited categories. */
-  categories: CategoryRef[];
+  website: string | null;
+  tags: Tag[];
   createdAt: string;
   updatedAt: string;
 }
@@ -127,7 +131,7 @@ export interface SupplierAsset {
 export interface Catalog {
   id: string;
   supplierId: string | null;
-  categories: CategoryRef[];
+  tags: Tag[];
   name: string;
   version: string | null;
   originalFileName: string;
@@ -152,6 +156,13 @@ export interface CatalogProductCandidate {
   sku: string | null;
   name: string;
   description: string | null;
+  productType?: {
+    en: string;
+    fr: string;
+    sourcePageNumbers: number[];
+    excerpt: string;
+    confidence: number;
+  } | null;
   categories: string[];
   attributes: CatalogExtractionAttribute[];
   source: { pageNumbers: number[]; excerpt: string };
@@ -168,6 +179,7 @@ export interface CatalogExtractionResults {
 
 export interface CatalogExtractionJob {
   jobId: string;
+  prompt: "supplier" | "tags";
   status: CatalogAnalysisStatus;
   stage: string;
   progress: number;
@@ -188,10 +200,60 @@ export interface CatalogExtraction {
   matchingSupplier: { id: string; name: string } | null;
 }
 
+export interface AnalysisEvidence {
+  pageNumber: number;
+  excerpt: string;
+}
+
+export interface SupplierFieldEvidence {
+  value: string;
+  pageNumber: number;
+  excerpt: string;
+}
+
+export interface CatalogSupplierReview {
+  jobId: string;
+  supplier: {
+    name: SupplierFieldEvidence | null;
+    address: {
+      street: SupplierFieldEvidence | null;
+      city: SupplierFieldEvidence | null;
+      stateRegion: SupplierFieldEvidence | null;
+      postalCode: SupplierFieldEvidence | null;
+      country: SupplierFieldEvidence | null;
+    };
+    website: SupplierFieldEvidence | null;
+    email: SupplierFieldEvidence | null;
+    phone: SupplierFieldEvidence | null;
+    contacts: { name: SupplierFieldEvidence; role: SupplierFieldEvidence | null }[];
+  } | null;
+  exactMatch: { id: string; name: string } | null;
+}
+
+export interface CatalogTagReview {
+  jobId: string;
+  catalogTags: (Tag & {
+    confidence: number;
+    evidence: AnalysisEvidence[];
+    existing: { id: string; nameEn: string; nameFr: string; nameKey: string } | null;
+  })[];
+  products: {
+    name: string;
+    evidence: AnalysisEvidence[];
+    existingProduct: { id: string; nameEn: string; nameFr: string } | null;
+    tags: (Tag & {
+      confidence: number;
+      evidence: AnalysisEvidence[];
+      existing: { id: string; nameEn: string; nameFr: string; nameKey: string } | null;
+    })[];
+  }[];
+}
+
 /** A catalog joined with its supplier summary, as returned by the global catalogs list. */
 export interface CatalogWithSupplier extends Catalog {
   supplierName: string | null;
   supplierCategoryNames: string[];
+  pinned: boolean;
 }
 
 export type AttributeDataType = "text" | "number" | "decimal" | "boolean" | "date" | "select";
@@ -240,11 +302,12 @@ export interface ProductSummary {
   supplierId: string;
   supplierName: string;
   name: Translated;
+  productType: Translated | null;
   supplierSku: string;
   minQuantity: number | null;
   cost: string | null;
   currency: string | null;
-  categories: CategoryRef[];
+  tags: Tag[];
   attributeSet: { id: string; name: Translated } | null;
   catalogSource: {
     id: string;

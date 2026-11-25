@@ -11,7 +11,7 @@ import {
   type AuditRequestContext,
 } from "./audit.service.js";
 import { removeStoredFiles } from "./asset.service.js";
-import { expandCategoryIds, resolveCategoryIds, type CategoryInput } from "./category.service.js";
+import { resolveTagIds } from "./tag.service.js";
 
 export interface SupplierInput {
   name: string;
@@ -20,35 +20,33 @@ export interface SupplierInput {
   stateRegion?: string | null | undefined;
   postalCode?: string | null | undefined;
   country?: string | null | undefined;
-  /** When omitted on update, existing category links are kept. */
-  categories?: CategoryInput[] | undefined;
+  website?: string | null | undefined;
+  tags?: string[] | undefined;
 }
 
 export interface ListSuppliersFilters {
   q?: string | undefined;
-  categoryIds: string[];
+  tagIds: string[];
   page: number;
   pageSize: number;
 }
 
 const detailInclude = {
-  categories: { include: { category: true } },
+  tags: { include: { tag: true } },
 } satisfies Prisma.SupplierInclude;
 
 type SupplierRow = Prisma.SupplierGetPayload<{ include: typeof detailInclude }>;
-type CategoryRefDto = { id: string; name: { en: string; fr: string } };
+type TagRefDto = { id: string; name: { en: string; fr: string } };
 
 export type SupplierDto = ReturnType<typeof toSupplierDto>;
 
-function toCategoryRef(category: { id: string; nameEn: string; nameFr: string }): CategoryRefDto {
-  return { id: category.id, name: { en: category.nameEn, fr: category.nameFr } };
+function toTagRef(tag: { id: string; nameEn: string; nameFr: string }): TagRefDto {
+  return { id: tag.id, name: { en: tag.nameEn, fr: tag.nameFr } };
 }
 
-function toSupplierDto(row: SupplierRow, inheritedCategories: CategoryRefDto[] = []) {
-  const assignedCategories = row.categories.map((link) => toCategoryRef(link.category));
-  const effective = new Map(
-    [...assignedCategories, ...inheritedCategories].map((category) => [category.id, category]),
-  );
+function toSupplierDto(row: SupplierRow, derivedTags: TagRefDto[] = []) {
+  const assignedTags = row.tags.map((link) => toTagRef(link.tag));
+  const effective = new Map([...assignedTags, ...derivedTags].map((tag) => [tag.id, tag]));
   return {
     id: row.id,
     name: row.name,
@@ -57,41 +55,38 @@ function toSupplierDto(row: SupplierRow, inheritedCategories: CategoryRefDto[] =
     stateRegion: row.stateRegion,
     postalCode: row.postalCode,
     country: row.country,
-    categories: [...effective.values()].sort((a, b) => a.name.en.localeCompare(b.name.en)),
-    assignedCategories: assignedCategories.sort((a, b) => a.name.en.localeCompare(b.name.en)),
-    inheritedCategories: inheritedCategories
-      .filter((category) => !row.categories.some((link) => link.categoryId === category.id))
-      .sort((a, b) => a.name.en.localeCompare(b.name.en)),
+    website: row.website,
+    tags: [...effective.values()].sort((a, b) => a.name.en.localeCompare(b.name.en)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-async function inheritedCategoriesBySupplier(
+async function derivedTagsBySupplier(
   db: Database | Prisma.TransactionClient,
   supplierIds: string[],
-): Promise<Map<string, CategoryRefDto[]>> {
-  const categoriesBySupplier = new Map<string, Map<string, CategoryRefDto>>();
-  if (supplierIds.length === 0) return new Map<string, CategoryRefDto[]>();
-  const links = await db.productCategory.findMany({
+): Promise<Map<string, TagRefDto[]>> {
+  const tagsBySupplier = new Map<string, Map<string, TagRefDto>>();
+  if (supplierIds.length === 0) return new Map();
+  const links = await db.productTag.findMany({
     where: { product: { supplierId: { in: supplierIds } } },
     select: {
       product: { select: { supplierId: true } },
-      category: { select: { id: true, nameEn: true, nameFr: true } },
+      tag: { select: { id: true, nameEn: true, nameFr: true } },
     },
   });
   for (const link of links) {
-    let categories = categoriesBySupplier.get(link.product.supplierId);
-    if (!categories) {
-      categories = new Map();
-      categoriesBySupplier.set(link.product.supplierId, categories);
+    let tags = tagsBySupplier.get(link.product.supplierId);
+    if (!tags) {
+      tags = new Map();
+      tagsBySupplier.set(link.product.supplierId, tags);
     }
-    categories.set(link.category.id, toCategoryRef(link.category));
+    tags.set(link.tag.id, toTagRef(link.tag));
   }
   return new Map(
-    [...categoriesBySupplier].map(([supplierId, categories]) => [
+    [...tagsBySupplier].map(([supplierId, tags]) => [
       supplierId,
-      [...categories.values()].sort((a, b) => a.name.en.localeCompare(b.name.en)),
+      [...tags.values()].sort((a, b) => a.name.en.localeCompare(b.name.en)),
     ]),
   );
 }
@@ -105,7 +100,8 @@ function snapshotOf(row: SupplierRow): Record<string, unknown> {
     stateRegion: row.stateRegion,
     postalCode: row.postalCode,
     country: row.country,
-    categories: row.categories.map((link) => link.category.nameEn).sort(),
+    website: row.website,
+    tags: row.tags.map((link) => link.tag.nameEn).sort(),
   };
 }
 
@@ -123,15 +119,11 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export async function listSuppliers(db: Database, request: AuditRequestContext, filters: ListSuppliersFilters) {
-  const categoryIds = await expandCategoryIds(db, filters.categoryIds);
   const where: Prisma.SupplierWhereInput = {
     name: filters.q ? { contains: filters.q, mode: "insensitive" } : undefined,
     OR:
-      filters.categoryIds.length > 0
-        ? [
-            { categories: { some: { categoryId: { in: categoryIds } } } },
-            { products: { some: { categories: { some: { categoryId: { in: categoryIds } } } } } },
-          ]
+      filters.tagIds.length > 0
+        ? [{ tags: { some: { tagId: { in: filters.tagIds } } } }]
         : undefined,
   };
 
@@ -146,7 +138,7 @@ export async function listSuppliers(db: Database, request: AuditRequestContext, 
     }),
   ]);
 
-  const inherited = await inheritedCategoriesBySupplier(db, rows.map((row) => row.id));
+  const inherited = await derivedTagsBySupplier(db, rows.map((row) => row.id));
   await recordAudit(db, request, { action: AuditAction.SUPPLIER_LIST, outcome: "success" });
   return {
     items: rows.map((row) => toSupplierDto(row, inherited.get(row.id))),
@@ -159,7 +151,7 @@ export async function listSuppliers(db: Database, request: AuditRequestContext, 
 export async function getSupplier(db: Database, request: AuditRequestContext, id: string): Promise<SupplierDto> {
   const row = await db.supplier.findUnique({ where: { id }, include: detailInclude });
   if (!row) throw errors.notFound("Supplier");
-  const inherited = await inheritedCategoriesBySupplier(db, [id]);
+  const inherited = await derivedTagsBySupplier(db, [id]);
 
   await recordAudit(db, request, {
     action: AuditAction.SUPPLIER_VIEW,
@@ -178,7 +170,7 @@ export async function createSupplier(
   await assertNameAvailable(db, input.name);
   try {
     return await db.$transaction(async (tx) => {
-      const categoryIds = await resolveCategoryIds(tx, request, input.categories ?? []);
+      const tagIds = await resolveTagIds(tx, request, input.tags ?? []);
       const row = await tx.supplier.create({
         data: {
           name: input.name.trim(),
@@ -188,8 +180,9 @@ export async function createSupplier(
           stateRegion: input.stateRegion ?? null,
           postalCode: input.postalCode ?? null,
           country: input.country ?? null,
+          website: input.website ?? null,
           createdById: request.actor.userId,
-          categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
+          tags: { create: tagIds.map((tagId) => ({ tagId })) },
         },
         include: detailInclude,
       });
@@ -225,11 +218,11 @@ export async function updateSupplier(
       const existing = await tx.supplier.findUnique({ where: { id }, include: detailInclude });
       if (!existing) throw errors.notFound("Supplier");
 
-      if (input.categories !== undefined) {
-        const categoryIds = await resolveCategoryIds(tx, request, input.categories);
-        await tx.supplierCategory.deleteMany({ where: { supplierId: id } });
-        await tx.supplierCategory.createMany({
-          data: categoryIds.map((categoryId) => ({ supplierId: id, categoryId })),
+      if (input.tags !== undefined) {
+        const tagIds = await resolveTagIds(tx, request, input.tags);
+        await tx.supplierTag.deleteMany({ where: { supplierId: id } });
+        await tx.supplierTag.createMany({
+          data: tagIds.map((tagId) => ({ supplierId: id, tagId })),
         });
       }
 
@@ -243,6 +236,7 @@ export async function updateSupplier(
           stateRegion: input.stateRegion ?? null,
           postalCode: input.postalCode ?? null,
           country: input.country ?? null,
+          website: input.website ?? null,
         },
         include: detailInclude,
       });
@@ -257,7 +251,7 @@ export async function updateSupplier(
           changes,
         });
       }
-      const inherited = await inheritedCategoriesBySupplier(tx, [id]);
+      const inherited = await derivedTagsBySupplier(tx, [id]);
       return toSupplierDto(row, inherited.get(id));
     });
   } catch (error) {
