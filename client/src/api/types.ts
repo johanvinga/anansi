@@ -19,6 +19,33 @@ export interface Page<T> {
   pageSize: number;
 }
 
+export type PinnedItemType = "catalog" | "supplier" | "product";
+
+export interface ShareUserSummary {
+  id: string;
+  email: string;
+  displayName: string | null;
+}
+
+export interface DashboardSharedItem {
+  itemType: PinnedItemType;
+  itemId: string;
+  name: Translated;
+  shareId: string | null;
+  pinnedAt: string | null;
+  sharedAt: string | null;
+  sender: ShareUserSummary | null;
+  note: string | null;
+  hidden: boolean;
+  recipients: Array<ShareUserSummary & { shareId: string; hidden: boolean }>;
+}
+
+export interface PinDashboard {
+  pins: Page<DashboardSharedItem>;
+  received: Page<DashboardSharedItem>;
+  sent: Page<DashboardSharedItem>;
+}
+
 export interface AuditLogSummary {
   id: string;
   occurredAt: string;

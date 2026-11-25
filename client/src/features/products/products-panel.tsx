@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +29,8 @@ import { SearchForm } from "../../components/search-form";
 import { SelectField } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { ProductForm } from "./product-form";
+import { PinItemButton } from "../../components/pin-item-button";
+import { ShareItemButton } from "../../components/share-item-button";
 
 const PAGE_SIZE = 25;
 
@@ -39,11 +42,13 @@ interface ProductsPanelProps {
   /** When set, the panel lists only this supplier's products and creates new ones for it. */
   supplierId?: string;
   isAdmin: boolean;
+  initialProductId?: string;
 }
 
 /** Product list with search and pagination, plus create, edit, and delete for admins (FR-PRD-01..09). */
-export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
+export function ProductsPanel({ supplierId, isAdmin, initialProductId }: ProductsPanelProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
@@ -52,10 +57,11 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProductDetail | "new" | null>(null);
-  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(initialProductId ?? null);
   const [deleting, setDeleting] = useState<ProductSummary | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
 
   const effectiveSupplier = supplierId ?? supplierFilter ?? undefined;
   async function loadProducts(targetPage: number, pageSize: number) {
@@ -132,7 +138,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
   const localizedDescription = viewing
     ? localize({ en: viewing.description.en ?? "", fr: viewing.description.fr ?? "" })
     : "";
-  const columnCount = (supplierId ? 6 : 7) + (isAdmin ? 2 : 0);
+  const columnCount = (supplierId ? 7 : 8) + (isAdmin ? 1 : 0);
   const pageTitle = supplierId ? undefined : t("products.title");
 
   return (
@@ -204,7 +210,7 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
               <TableHead className="text-right">{t("products.cost")}</TableHead>
               <TableHead>{t("products.attributeSet")}</TableHead>
               <TableHead>{t("products.updated")}</TableHead>
-              {isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}
+              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -231,9 +237,12 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                   {product.attributeSet ? <Badge variant="info">{localize(product.attributeSet.name)}</Badge> : "—"}
                 </TableCell>
                 <TableCell>{formatDate(product.updatedAt)}</TableCell>
-                {isAdmin ? (
-                  <TableCell className="pr-4">
-                    <div className="flex justify-end gap-1">
+                <TableCell className="pr-4">
+                  <div className="flex justify-end gap-1">
+                    <PinItemButton itemType="product" itemId={product.id} label={localize(product.name)} />
+                    <ShareItemButton itemType="product" itemId={product.id} itemName={localize(product.name)} iconOnly />
+                    {isAdmin ? (
+                      <>
                       <IconAction label={t("products.editAria", { name: localize(product.name) })} icon={Pencil} onClick={() => void openEdit(product)} />
                       <IconAction
                         label={t("products.deleteAria", { name: localize(product.name) })}
@@ -241,9 +250,10 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
                         destructive
                         onClick={() => setDeleting(product)}
                       />
-                    </div>
-                  </TableCell>
-                ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -269,11 +279,21 @@ export function ProductsPanel({ supplierId, isAdmin }: ProductsPanelProps) {
         />
       ) : null}
 
-      <Dialog open={viewingId !== null} onOpenChange={(open) => !open && setViewingId(null)}>
+      <Dialog open={viewingId !== null} onOpenChange={(open) => {
+        if (!open) {
+          setViewingId(null);
+          if (initialProductId) navigate("/products", { replace: true });
+        }
+      }}>
         {viewingId ? (
           <DialogContent className="max-h-[95dvh] overflow-y-auto sm:max-w-xl">
             <DialogHeader>
-              <DialogTitle>{viewing ? localize(viewing.name) : t("common.loading")}</DialogTitle>
+              <div className="flex items-center justify-between gap-3">
+                <DialogTitle>{viewing ? localize(viewing.name) : t("common.loading")}</DialogTitle>
+                {viewing ? (
+                  <ShareItemButton itemType="product" itemId={viewing.id} itemName={localize(viewing.name)} />
+                ) : null}
+              </div>
               <DialogDescription>{t("products.detailsSubtitle")}</DialogDescription>
             </DialogHeader>
             {!viewing && detailQuery.error ? <ErrorAlert message={errorMessage(detailQuery.error)} /> : null}

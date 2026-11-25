@@ -1,0 +1,11 @@
+{
+ "page": null,
+ "url": "http://localhost:5173/",
+ "root": null,
+ "kind": "software",
+ "category": "supplier and product management",
+ "primary": "Open item",
+ "rounds": 3,
+ "start": "2026-11-25T03:46:33.970Z",
+ "by": "gate.mjs --start"
+}

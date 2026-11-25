@@ -19,6 +19,7 @@ import { ProductsPage } from "./features/products/products-page";
 import { SupplierDetailPage, SupplierNewPage, SuppliersPage } from "./features/suppliers/suppliers-page";
 import { UsersPage } from "./features/users/users-page";
 import { AppShell } from "./layout/app-shell";
+import { DashboardPage } from "./features/dashboard/dashboard-page";
 
 export function App() {
   const { t } = useTranslation();
@@ -75,14 +76,16 @@ export function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={<Navigate to="/suppliers" replace />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route element={<AppShell />}>
-        <Route index element={<Navigate to="/suppliers" replace />} />
+          <Route index element={<DashboardPage />} />
+          <Route path="dashboard" element={<Navigate to="/" replace />} />
         <Route path="suppliers" element={<SuppliersPage />} />
         {isAdmin ? <Route path="suppliers/new" element={<SupplierNewPage />} /> : null}
         <Route path="suppliers/:supplierId" element={<SupplierDetailPage />} />
         <Route path="suppliers/:supplierId/:tab" element={<SupplierDetailPage />} />
         <Route path="products" element={<ProductsPage />} />
+        <Route path="products/:productId" element={<ProductsPage />} />
         <Route path="catalogs" element={<CatalogsPage />} />
         <Route path="catalogs/:catalogId/workspace" element={<CatalogWorkspace />} />
         <Route path="attribute-sets" element={<AttributeSetsPage />} />

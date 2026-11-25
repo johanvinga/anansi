@@ -1,0 +1,674 @@
+{
+ "start": "2026-11-25T03:46:33.970Z",
+ "round": 1,
+ "idle": 0,
+ "errors": 0,
+ "status": "fail",
+ "history": [
+  {
+   "at": "2026-11-25T03:47:48.995Z",
+   "mode": "manual",
+   "status": "fail",
+   "fails": 17,
+   "round": 1,
+   "reused": false,
+   "stopHookActive": false
+  }
+ ],
+ "max": 3,
+ "marker": {
+  "page": null,
+  "url": "http://localhost:5173/",
+  "root": null,
+  "kind": "software",
+  "category": "supplier and product management",
+  "primary": "Open item",
+  "rounds": 3,
+  "start": "2026-11-25T03:46:33.970Z",
+  "by": "gate.mjs --start"
+ },
+ "manual": true,
+ "roundKey": "4ed43d78d0f38dc5:da39a3ee",
+ "roundFree": false,
+ "idleFree": false,
+ "blockKey": null,
+ "fp": "4ed43d78d0f38dc5",
+ "page": "http://localhost:5173/",
+ "found": {
+  "fails": [
+   {
+    "check": "copy-headline",
+    "where": "div.flex.flex-col > div.grid.auto-rows-min > div.font-heading.font-medium > h1 \"Sign in\"",
+    "msg": "\"Sign in\" does not name what is sold (supplier and product management, supplier, product, management, from flags)",
+    "fix": "put the category noun in the h1 (and who it is for, or where), in 2 to 8 words",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "copy-headline"
+    ],
+    "wheres": [
+     "div.flex.flex-col > div.grid.auto-rows-min > div.font-heading.font-medium > h1 \"Sign in\""
+    ]
+   },
+   {
+    "check": "motion-layer",
+    "where": "html[data-motion]",
+    "msg": "the page marks <html data-motion> but motion.css is not loaded: buttons, links, cards and photos answer nothing on hover",
+    "fix": "link assets/motion/motion.css after cards.css and keep data-motion on <html> (both, or neither)",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "motion-layer"
+    ],
+    "wheres": [
+     "html[data-motion]"
+    ]
+   },
+   {
+    "check": "focus-visible",
+    "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full",
+    "msg": "Tab stop 1, input \"\": its focus change is faint: 1.73:1 against the ground, 3:1 needed",
+    "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "focus-visible"
+    ],
+    "wheres": [
+     "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full"
+    ]
+   },
+   {
+    "check": "focus-visible",
+    "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(2) > input.h-10.w-full",
+    "msg": "Tab stop 2, input \"\": its focus change is faint: 2.05:1 against the ground, 3:1 needed",
+    "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "focus-visible"
+    ],
+    "wheres": [
+     "form > div.flex.w-full > div.flex.w-full:nth-of-type(2) > input.h-10.w-full"
+    ]
+   },
+   {
+    "check": "focus-visible",
+    "where": "div.px-6:nth-of-type(2) > form > div.flex.w-full > button.inline-flex.shrink-0 \"Sign in\"",
+    "msg": "Tab stop 3, button \"Sign in\": its focus change is faint: 1.86:1 against the ground, 3:1 needed",
+    "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "focus-visible"
+    ],
+    "wheres": [
+     "div.px-6:nth-of-type(2) > form > div.flex.w-full > button.inline-flex.shrink-0 \"Sign in\""
+    ]
+   },
+   {
+    "check": "focus-visible",
+    "where": "button#radix-_r_2_ \"Change language\"",
+    "msg": "Tab stop 4, button \"Change language\": its focus change is faint: 1.82:1 against the ground, 3:1 needed",
+    "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "focus-visible"
+    ],
+    "wheres": [
+     "button#radix-_r_2_ \"Change language\""
+    ]
+   },
+   {
+    "check": "moment-none",
+    "where": "(the page)",
+    "msg": "a software page (--type) deals no moment: every kind carries one, two on a long page (moments.md)",
+    "fix": "deal one (moments.mjs pick --page software) and mount it in its own section",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "moment-none"
+    ],
+    "wheres": [
+     "(the page)"
+    ]
+   },
+   {
+    "check": "hero-screen",
+    "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+    "msg": "the hero ends at 673px on a 900px screen, 227px above the fold: it ends at the fold, 1px either way (SR-1)",
+    "fix": "make the hero exactly one screen (height: 100svh, its content fitted inside), never taller or shorter",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "hero-screen"
+    ],
+    "wheres": [
+     "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \""
+    ]
+   },
+   {
+    "check": "section-height",
+    "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+    "msg": "the section starts at 227px, 227px below the screen grid (0 x 900px): sections start on whole screens (SR-2)",
+    "fix": "make every section above it exactly one or two screens tall, so this one starts on a whole screen",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "section-height"
+    ],
+    "wheres": [
+     "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \""
+    ]
+   },
+   {
+    "check": "one-section",
+    "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+    "msg": "a <div> sits directly in <main>: every part of <main> is a <section> (SR-4)",
+    "fix": "put every block of <main> in a <section>, and give a band its own section instead of a ground inside one",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "one-section"
+    ],
+    "wheres": [
+     "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+     "div#root > main.flex.min-h-dvh > div.flex.w-full > div.flex.flex-col \"Sign inUse the account your administrato\""
+    ]
+   },
+   {
+    "check": "container-edges",
+    "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+    "msg": "the content of section 1 runs 528px from the left and 528px from the right (read from its outermost blocks: no .wrap): the margin is 64-120px at 1440px (one container, equal margins, 2px either way) (SR-6)",
+    "fix": "use one container on every section and the nav (.wrap): one margin left and right, 64-120px on a desktop, 16-24px on a phone",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "container-edges"
+    ],
+    "wheres": [
+     "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \""
+    ]
+   },
+   {
+    "check": "container-edges",
+    "where": "div#root \"Supplier HubSign inUse the account your \"",
+    "msg": "a <div> at the top of the page, outside header.nav, main, footer.closing and nav.actionbar (SR-6)",
+    "fix": "build the page as header.nav, a main of sections (each one in-flow .wrap plus background layers) and footer.closing",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "container-edges"
+    ],
+    "wheres": [
+     "div#root \"Supplier HubSign inUse the account your \""
+    ]
+   },
+   {
+    "check": "container-edges",
+    "where": "div.flex.w-full > div.flex.w-full:nth-of-type(2) > label.items-center.text-sm > span.text-destructive \"*\"",
+    "msg": "1 text block starts on a left line at x 624, 96px from the container's left: text starts on the container's left, or on one split line (x 698, 732, 766) (SR-6)",
+    "fix": "start the text on the container's left, or on the one split line every split shares",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "container-edges"
+    ],
+    "wheres": [
+     "div.flex.w-full > div.flex.w-full:nth-of-type(2) > label.items-center.text-sm > span.text-destructive \"*\""
+    ]
+   },
+   {
+    "check": "container-edges",
+    "where": "div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm > span.text-destructive \"*\"",
+    "msg": "1 text block starts on a left line at x 596, 68px from the container's left: text starts on the container's left, or on one split line (x 698, 732, 766) (SR-6)",
+    "fix": "start the text on the container's left, or on the one split line every split shares",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "container-edges"
+    ],
+    "wheres": [
+     "div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm > span.text-destructive \"*\""
+    ]
+   },
+   {
+    "check": "container-edges",
+    "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm \"Email*\"",
+    "msg": "2 text blocks start on a left line at x 552, 24px from the container's left: text starts on the container's left, or on one split line (x 698, 732, 766) (also \"Password*\") (SR-6)",
+    "fix": "start the text on the container's left, or on the one split line every split shares",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "container-edges"
+    ],
+    "wheres": [
+     "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm \"Email*\""
+    ]
+   },
+   {
+    "check": "text-only",
+    "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Sign in\"",
+    "msg": "the closing section is only text: no picture, icon, mock or effect in it",
+    "fix": "give the section a visual: a photograph that fits, the real icons, or a UI fragment on a ground",
+    "widths": [
+     390
+    ],
+    "from": "consistency",
+    "ids": [
+     "text-only"
+    ],
+    "wheres": [
+     "div#root > main.flex.min-h-dvh > div.flex.w-full \"Sign in\""
+    ]
+   },
+   {
+    "check": "container",
+    "where": "page",
+    "msg": "no .wrap",
+    "fix": "put the content in one .wrap",
+    "widths": [
+     1440,
+     390
+    ],
+    "from": "layout",
+    "ids": [
+     "container"
+    ],
+    "wheres": [
+     "page"
+    ]
+   }
+  ],
+  "warns": [
+   {
+    "check": "assets",
+    "where": "(the page)",
+    "msg": "the data file api/v1/auth/me did not load (401)",
+    "fix": "fix the path, or remove the reference",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "skip-link",
+    "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full",
+    "msg": "the first Tab stop is \"form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full\", not a skip link: a keyboard user tabs through the whole nav on every visit",
+    "fix": "add the starter's skip link as the header's first child: <a class=\"skip-link\" href=\"#top\">Skip to content</a>",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "form-fields",
+    "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full",
+    "msg": "the email field lacks autocomplete=\"email\": the phone shows the wrong keyboard and nothing fills it in",
+    "fix": "give each field its type, autocomplete and inputmode, never block paste or disable the button before a submit, and add the status line (references/system.md, Forms)",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "form-fields",
+    "where": "div.flex.w-full > div.flex.flex-col:nth-of-type(2) > div.px-6:nth-of-type(2) > form",
+    "msg": "the form has no status line (role=\"status\"): sending, sent and errors are never read out",
+    "fix": "give each field its type, autocomplete and inputmode, never block paste or disable the button before a submit, and add the status line (references/system.md, Forms)",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "tap-size",
+    "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full",
+    "msg": "a 310x40px tap target (and 1 more like it on this screen): under the 44px a phone needs",
+    "fix": "make every link and control outside running text 44px tall on a phone: display: inline-flex; align-items: center; min-height: 44px (a footer list then needs no gap), a 44px small button, or a transparent ::before laid past the box",
+    "widths": [
+     390,
+     320
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "tap-size",
+    "where": "div.px-6:nth-of-type(2) > form > div.flex.w-full > button.inline-flex.shrink-0 \"Sign in\"",
+    "msg": "a 310x36px tap target: under the 44px a phone needs",
+    "fix": "make every link and control outside running text 44px tall on a phone: display: inline-flex; align-items: center; min-height: 44px (a footer list then needs no gap), a 44px small button, or a transparent ::before laid past the box",
+    "widths": [
+     390,
+     320
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "tap-size",
+    "where": "button#radix-_r_2_",
+    "msg": "a 32x32px tap target: under the 44px a phone needs",
+    "fix": "make every link and control outside running text 44px tall on a phone: display: inline-flex; align-items: center; min-height: 44px (a footer list then needs no gap), a 44px small button, or a transparent ::before laid past the box",
+    "widths": [
+     390,
+     320
+    ],
+    "from": "consistency"
+   }
+  ],
+  "crashed": [],
+  "seconds": {
+   "consistency": 51,
+   "layout": 14
+  }
+ },
+ "open": [
+  {
+   "check": "copy-headline",
+   "where": "div.flex.flex-col > div.grid.auto-rows-min > div.font-heading.font-medium > h1 \"Sign in\"",
+   "msg": "\"Sign in\" does not name what is sold (supplier and product management, supplier, product, management, from flags)",
+   "fix": "put the category noun in the h1 (and who it is for, or where), in 2 to 8 words",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "copy-headline"
+   ],
+   "wheres": [
+    "div.flex.flex-col > div.grid.auto-rows-min > div.font-heading.font-medium > h1 \"Sign in\""
+   ]
+  },
+  {
+   "check": "motion-layer",
+   "where": "html[data-motion]",
+   "msg": "the page marks <html data-motion> but motion.css is not loaded: buttons, links, cards and photos answer nothing on hover",
+   "fix": "link assets/motion/motion.css after cards.css and keep data-motion on <html> (both, or neither)",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "motion-layer"
+   ],
+   "wheres": [
+    "html[data-motion]"
+   ]
+  },
+  {
+   "check": "focus-visible",
+   "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full",
+   "msg": "Tab stop 1, input \"\": its focus change is faint: 1.73:1 against the ground, 3:1 needed",
+   "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "focus-visible"
+   ],
+   "wheres": [
+    "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > input.h-10.w-full"
+   ]
+  },
+  {
+   "check": "focus-visible",
+   "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(2) > input.h-10.w-full",
+   "msg": "Tab stop 2, input \"\": its focus change is faint: 2.05:1 against the ground, 3:1 needed",
+   "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "focus-visible"
+   ],
+   "wheres": [
+    "form > div.flex.w-full > div.flex.w-full:nth-of-type(2) > input.h-10.w-full"
+   ]
+  },
+  {
+   "check": "focus-visible",
+   "where": "div.px-6:nth-of-type(2) > form > div.flex.w-full > button.inline-flex.shrink-0 \"Sign in\"",
+   "msg": "Tab stop 3, button \"Sign in\": its focus change is faint: 1.86:1 against the ground, 3:1 needed",
+   "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "focus-visible"
+   ],
+   "wheres": [
+    "div.px-6:nth-of-type(2) > form > div.flex.w-full > button.inline-flex.shrink-0 \"Sign in\""
+   ]
+  },
+  {
+   "check": "focus-visible",
+   "where": "button#radix-_r_2_ \"Change language\"",
+   "msg": "Tab stop 4, button \"Change language\": its focus change is faint: 1.82:1 against the ground, 3:1 needed",
+   "fix": "keep the kit's ring (system.css :focus-visible, 2px in --action, there at once); a control that hides itself shows on focus",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "focus-visible"
+   ],
+   "wheres": [
+    "button#radix-_r_2_ \"Change language\""
+   ]
+  },
+  {
+   "check": "moment-none",
+   "where": "(the page)",
+   "msg": "a software page (--type) deals no moment: every kind carries one, two on a long page (moments.md)",
+   "fix": "deal one (moments.mjs pick --page software) and mount it in its own section",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "moment-none"
+   ],
+   "wheres": [
+    "(the page)"
+   ]
+  },
+  {
+   "check": "hero-screen",
+   "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+   "msg": "the hero ends at 673px on a 900px screen, 227px above the fold: it ends at the fold, 1px either way (SR-1)",
+   "fix": "make the hero exactly one screen (height: 100svh, its content fitted inside), never taller or shorter",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "hero-screen"
+   ],
+   "wheres": [
+    "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \""
+   ]
+  },
+  {
+   "check": "section-height",
+   "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+   "msg": "the section starts at 227px, 227px below the screen grid (0 x 900px): sections start on whole screens (SR-2)",
+   "fix": "make every section above it exactly one or two screens tall, so this one starts on a whole screen",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "section-height"
+   ],
+   "wheres": [
+    "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \""
+   ]
+  },
+  {
+   "check": "one-section",
+   "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+   "msg": "a <div> sits directly in <main>: every part of <main> is a <section> (SR-4)",
+   "fix": "put every block of <main> in a <section>, and give a band its own section instead of a ground inside one",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "one-section"
+   ],
+   "wheres": [
+    "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+    "div#root > main.flex.min-h-dvh > div.flex.w-full > div.flex.flex-col \"Sign inUse the account your administrato\""
+   ]
+  },
+  {
+   "check": "container-edges",
+   "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \"",
+   "msg": "the content of section 1 runs 528px from the left and 528px from the right (read from its outermost blocks: no .wrap): the margin is 64-120px at 1440px (one container, equal margins, 2px either way) (SR-6)",
+   "fix": "use one container on every section and the nav (.wrap): one margin left and right, 64-120px on a desktop, 16-24px on a phone",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "container-edges"
+   ],
+   "wheres": [
+    "div#root > main.flex.min-h-dvh > div.flex.w-full \"Supplier HubSign inUse the account your \""
+   ]
+  },
+  {
+   "check": "container-edges",
+   "where": "div#root \"Supplier HubSign inUse the account your \"",
+   "msg": "a <div> at the top of the page, outside header.nav, main, footer.closing and nav.actionbar (SR-6)",
+   "fix": "build the page as header.nav, a main of sections (each one in-flow .wrap plus background layers) and footer.closing",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "container-edges"
+   ],
+   "wheres": [
+    "div#root \"Supplier HubSign inUse the account your \""
+   ]
+  },
+  {
+   "check": "container-edges",
+   "where": "div.flex.w-full > div.flex.w-full:nth-of-type(2) > label.items-center.text-sm > span.text-destructive \"*\"",
+   "msg": "1 text block starts on a left line at x 624, 96px from the container's left: text starts on the container's left, or on one split line (x 698, 732, 766) (SR-6)",
+   "fix": "start the text on the container's left, or on the one split line every split shares",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "container-edges"
+   ],
+   "wheres": [
+    "div.flex.w-full > div.flex.w-full:nth-of-type(2) > label.items-center.text-sm > span.text-destructive \"*\""
+   ]
+  },
+  {
+   "check": "container-edges",
+   "where": "div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm > span.text-destructive \"*\"",
+   "msg": "1 text block starts on a left line at x 596, 68px from the container's left: text starts on the container's left, or on one split line (x 698, 732, 766) (SR-6)",
+   "fix": "start the text on the container's left, or on the one split line every split shares",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "container-edges"
+   ],
+   "wheres": [
+    "div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm > span.text-destructive \"*\""
+   ]
+  },
+  {
+   "check": "container-edges",
+   "where": "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm \"Email*\"",
+   "msg": "2 text blocks start on a left line at x 552, 24px from the container's left: text starts on the container's left, or on one split line (x 698, 732, 766) (also \"Password*\") (SR-6)",
+   "fix": "start the text on the container's left, or on the one split line every split shares",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "container-edges"
+   ],
+   "wheres": [
+    "form > div.flex.w-full > div.flex.w-full:nth-of-type(1) > label.items-center.text-sm \"Email*\""
+   ]
+  },
+  {
+   "check": "text-only",
+   "where": "div#root > main.flex.min-h-dvh > div.flex.w-full \"Sign in\"",
+   "msg": "the closing section is only text: no picture, icon, mock or effect in it",
+   "fix": "give the section a visual: a photograph that fits, the real icons, or a UI fragment on a ground",
+   "widths": [
+    390
+   ],
+   "from": "consistency",
+   "ids": [
+    "text-only"
+   ],
+   "wheres": [
+    "div#root > main.flex.min-h-dvh > div.flex.w-full \"Sign in\""
+   ]
+  },
+  {
+   "check": "container",
+   "where": "page",
+   "msg": "no .wrap",
+   "fix": "put the content in one .wrap",
+   "widths": [
+    1440,
+    390
+   ],
+   "from": "layout",
+   "ids": [
+    "container"
+   ],
+   "wheres": [
+    "page"
+   ]
+  }
+ ],
+ "waived": [],
+ "warnCount": 7,
+ "at": "2026-11-25T03:47:48.997Z"
+}

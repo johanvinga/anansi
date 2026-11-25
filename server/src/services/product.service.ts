@@ -457,6 +457,8 @@ export async function deleteProduct(db: Database, request: AuditRequestContext, 
     const existing = await loadDetail(tx, id);
     if (existing.image) await queueStoredFileRemoval(tx, existing.image.storageKey);
     // Attribute values are removed by the database cascade (SPEC §8.3).
+    await tx.pinnedItem.deleteMany({ where: { itemType: "product", itemId: id } });
+    await tx.sharedItem.deleteMany({ where: { itemType: "product", itemId: id } });
     await tx.product.delete({ where: { id } });
     await recordAudit(tx, request, {
       action: AuditAction.PRODUCT_DELETE,

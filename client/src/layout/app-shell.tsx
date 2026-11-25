@@ -5,6 +5,7 @@ import {
   Boxes,
   ChevronsUpDown,
   ListTree,
+  LayoutDashboard,
   LogOut,
   Moon,
   Package,
@@ -59,6 +60,7 @@ interface NavItem {
 }
 
 const CATALOG_ITEMS: NavItem[] = [
+  { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { to: "/suppliers", labelKey: "nav.suppliers", icon: Truck },
   { to: "/products", labelKey: "nav.products", icon: Package },
   { to: "/catalogs", labelKey: "nav.catalogs", icon: BookOpen },
@@ -96,7 +98,10 @@ function NavGroup({ label, items, pathname }: NavGroupProps) {
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {
-            const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
+            const isActive =
+              item.to === "/"
+                ? pathname === "/"
+                : pathname === item.to || pathname.startsWith(`${item.to}/`);
             const label = t(item.labelKey);
             return (
               <SidebarMenuItem key={item.to}>

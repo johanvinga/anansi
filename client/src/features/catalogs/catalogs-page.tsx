@@ -1,10 +1,17 @@
 ﻿import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { BookOpen, Download, Eye, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, Share2, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
 import { loadSettings } from "../../api/settings";
@@ -16,7 +23,6 @@ import { ErrorAlert } from "../../components/error-alert";
 import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
 import { useBulkDelete } from "../../hooks/use-bulk-delete";
 import { CategoryTreeFilter } from "../../components/category-tree-filter";
-import { IconAction } from "../../components/icon-action";
 import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
@@ -25,8 +31,126 @@ import { UploadCatalogDialog } from "./upload-catalog-dialog";
 import { CatalogExtractionDialog } from "./catalog-extraction-dialog";
 import { CatalogEditDialog } from "./catalog-edit-dialog";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import { ShareItemDialog } from "../../components/share-item-dialog";
 
 const PAGE_SIZE = 25;
+
+interface CatalogActionsProps {
+  catalog: CatalogWithSupplier;
+  isAdmin: boolean;
+  analysisEnabled: boolean;
+  onEdit: (catalog: CatalogWithSupplier) => void;
+  onDelete: (catalog: CatalogWithSupplier) => void;
+  onReview: (catalog: CatalogWithSupplier) => void;
+}
+
+function CatalogActions({
+  catalog,
+  isAdmin,
+  analysisEnabled,
+  onEdit,
+  onDelete,
+  onReview,
+}: CatalogActionsProps) {
+  const { t } = useTranslation();
+  const [pinned, setPinned] = useState(false);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  useEffect(() => {
+    void apiRequest<{ pinned: boolean }>("GET", `/pins/catalog/${catalog.id}/status`)
+      .then((result) => setPinned(result.pinned))
+      .catch(() => setPinned(false));
+  }, [catalog.id]);
+
+  async function togglePin() {
+    if (pinBusy) return;
+    const previous = pinned;
+    setPinBusy(true);
+    setPinned(!previous);
+    try {
+      const result = await apiRequest<{ pinned: boolean }>(
+        previous ? "DELETE" : "POST",
+        "/pins",
+        { itemType: "catalog", itemId: catalog.id },
+      );
+      setPinned(result.pinned);
+    } catch {
+      setPinned(previous);
+    } finally {
+      setPinBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("suppliers.actions")}
+          >
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuItem asChild>
+            <Link to={`/catalogs/${catalog.id}/workspace`}>
+              <BookOpen />
+              {t("catalogs.openWorkspace")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={`/api/v1/catalogs/${catalog.id}/download`}>
+              <Download />
+              {t("common.download")}
+            </a>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={pinBusy} onSelect={() => void togglePin()}>
+            <Pin className={pinned ? "fill-current" : ""} />
+            {pinned ? t("pins.unpin") : t("pins.pin")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+            <Share2 />
+            {t("pins.share")}
+          </DropdownMenuItem>
+          {analysisEnabled ? (
+            <DropdownMenuItem onSelect={() => onReview(catalog)}>
+              <Eye />
+              {t("catalogs.reviewButton")}
+            </DropdownMenuItem>
+          ) : null}
+          {isAdmin ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => onEdit(catalog)}>
+                <Pencil />
+                {t("common.edit")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => onDelete(catalog)}
+              >
+                <Trash2 />
+                {t("common.delete")}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ShareItemDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        itemType="catalog"
+        itemId={catalog.id}
+        itemName={catalog.name}
+      />
+    </>
+  );
+}
 
 /** Global catalogs list: every supplier's catalogs in one table, searchable by name/version/
  * supplier, filterable by catalog or supplier categories, newest first (FR-CLG-04 global view). */
@@ -160,22 +284,13 @@ export function CatalogsPage() {
                   </Badge>
                 </TableCell> : null}
                 <TableCell className="pr-4 text-right">
-                  <Button asChild type="button" variant="outline" size="sm">
-                    <Link to={`/catalogs/${catalog.id}/workspace`}>
-                      <BookOpen />
-                      {t("catalogs.openWorkspace")}
-                    </Link>
-                  </Button>
-                  {isAdmin ? <IconAction label={t("suppliers.editAria", { name: catalog.name })} icon={Pencil} onClick={() => setEditing(catalog)} /> : null}
-                  {isAdmin ? <IconAction label={t("suppliers.deleteAria", { name: catalog.name })} icon={Trash2} destructive onClick={() => setDeleting(catalog)} /> : null}
-                  {analysisEnabled ? <Button type="button" variant="outline" size="sm" onClick={() => setReviewing(catalog)}>
-                    <Eye />
-                    {t("catalogs.reviewButton")}
-                  </Button> : null}
-                  <IconAction
-                    label={t("catalogs.downloadAria", { name: catalog.name })}
-                    icon={Download}
-                    href={`/api/v1/catalogs/${catalog.id}/download`}
+                  <CatalogActions
+                    catalog={catalog}
+                    isAdmin={isAdmin}
+                    analysisEnabled={analysisEnabled}
+                    onEdit={setEditing}
+                    onDelete={setDeleting}
+                    onReview={setReviewing}
                   />
                 </TableCell>
               </TableRow>

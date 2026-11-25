@@ -271,6 +271,24 @@ Where other requirements say "the user", they apply to admins only. Standard use
 
 ---
 
+### 4.13 Pinned Items and Shared Items (FR-PIN)
+
+| ID | Requirement |
+|---|---|
+| FR-PIN-01 | Authenticated admins and standard users may pin one catalog, supplier, or product at a time per item. Re-pinning the same item is idempotent. |
+| FR-PIN-02 | Pins are personal and do not alter item permissions. A user may open, pin, and share a view-only item. |
+| FR-PIN-03 | The Dashboard is the application's landing route and includes Pins, Shared with me, and Recently shared sections. Pins and Shared with me use card grids; Recently shared uses an ordered list. |
+| FR-PIN-04 | Pins and shared sections support search, item-type filtering, and lazy-loaded pagination. Shared with me also supports sender filtering and a Hidden filter. |
+| FR-PIN-05 | An item has pin/unpin controls in list rows and detail/header views. Pinned controls use a filled pin state and unpinned controls use an outline state. |
+| FR-PIN-06 | Authenticated users may share an item with multiple active users in one action. A share may include one optional note up to 500 characters. The same note is used for all recipients in that action. |
+| FR-PIN-07 | A sender may change the recipient list and note from the item share dialog or Recently shared. Adding/removing recipients applies immediately; re-sharing restores a recipient's hidden share and updates the note. |
+| FR-PIN-08 | Recipients may open an item, pin it personally, hide the share, restore it from the Hidden filter, and share it onward. Hiding and onward sharing do not grant domain edit permissions. |
+| FR-PIN-09 | Senders may edit notes and recipients or revoke individual shares. Recipient list changes revoke removed recipients. |
+| FR-PIN-10 | Sharing to self is rejected. Sharing with inactive or unknown users is rejected at save time. |
+| FR-PIN-11 | Deleting an item removes its pins and shares immediately. Pin and share records contain no public file URLs. |
+| FR-PIN-12 | Share and revoke operations are transactionally audited; pin/unpin and hidden/restore operations are personal UI state and are not separately appended. |
+| FR-PIN-13 | Catalog cards open the catalog workspace, supplier cards open supplier details, and product cards open a stable product detail route. |
+
 ### 4.9 User Management (FR-USR)
 
 | ID | Requirement |
