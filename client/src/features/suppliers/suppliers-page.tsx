@@ -22,6 +22,8 @@ import { SearchForm } from "../../components/search-form";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { SupplierDetail, type DetailTab } from "./supplier-detail";
 import { SupplierForm } from "./supplier-form";
+import { PinItemButton } from "../../components/pin-item-button";
+import { ShareItemButton } from "../../components/share-item-button";
 
 const PAGE_SIZE = 25;
 const DETAIL_TAB_KEYS: readonly DetailTab[] = ["details", "categories", "assets", "catalogs", "products"];
@@ -147,6 +149,8 @@ export function SuppliersPage() {
                   )}
                 </TableCell>
                 <TableCell className="pr-4 text-right">
+                  <PinItemButton itemType="supplier" itemId={supplier.id} label={supplier.name} />
+                  <ShareItemButton itemType="supplier" itemId={supplier.id} itemName={supplier.name} iconOnly />
                   <IconAction
                     label={t("suppliers.viewSupplier", { name: supplier.name })}
                     icon={Eye}

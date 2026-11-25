@@ -304,6 +304,8 @@ export async function deleteSupplier(
         changes: diffFields({ supplierId: id }, { supplierId: null }),
       });
     }
+    await tx.pinnedItem.deleteMany({ where: { itemType: "supplier", itemId: id } });
+    await tx.sharedItem.deleteMany({ where: { itemType: "supplier", itemId: id } });
     await tx.supplier.delete({ where: { id } });
     await recordAudit(tx, request, {
       action: AuditAction.SUPPLIER_DELETE,

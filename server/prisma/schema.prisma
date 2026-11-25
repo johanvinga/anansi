@@ -25,6 +25,12 @@ enum CatalogAnalysisStatus {
   failed
 }
 
+enum PinnedItemType {
+  catalog
+  supplier
+  product
+}
+
 model User {
   id                 String    @id @default(uuid()) @db.Uuid
   email              String    @unique @db.VarChar(254)
@@ -42,6 +48,9 @@ model User {
   suppliersCreated Supplier[]      @relation("SupplierCreatedBy")
   assetsUploaded   SupplierAsset[] @relation("AssetUploadedBy")
   catalogsUploaded Catalog[]       @relation("CatalogUploadedBy")
+  pinnedItems      PinnedItem[]
+  sentShares       SharedItem[]     @relation("SharedItemSender")
+  receivedShares   SharedItem[]     @relation("SharedItemRecipient")
 
   @@map("users")
 }
@@ -373,6 +382,41 @@ model CatalogImageCandidate {
 
   @@index([jobId, pageNumber])
   @@map("catalog_image_candidates")
+}
+
+model PinnedItem {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @map("user_id") @db.Uuid
+  itemType  PinnedItemType @map("item_type")
+  itemId    String         @map("item_id") @db.Uuid
+  pinnedAt  DateTime       @default(now()) @map("pinned_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemType, itemId])
+  @@index([userId, pinnedAt(sort: Desc)])
+  @@map("pinned_items")
+}
+
+model SharedItem {
+  id        String         @id @default(uuid()) @db.Uuid
+  senderId  String         @map("sender_id") @db.Uuid
+  recipientId String       @map("recipient_id") @db.Uuid
+  itemType  PinnedItemType @map("item_type")
+  itemId    String         @map("item_id") @db.Uuid
+  note      String?        @db.VarChar(500)
+  hiddenByRecipient Boolean @default(false) @map("hidden_by_recipient")
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sender    User @relation("SharedItemSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient User @relation("SharedItemRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, recipientId, itemType, itemId])
+  @@index([recipientId, hiddenByRecipient, updatedAt(sort: Desc)])
+  @@index([senderId, updatedAt(sort: Desc)])
+  @@index([itemType, itemId])
+  @@map("shared_items")
 }
 
 model Session {

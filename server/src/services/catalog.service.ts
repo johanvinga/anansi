@@ -639,6 +639,8 @@ export async function deleteCatalog(deps: AssetDeps, request: AuditRequestContex
     });
     for (const image of images) await queueStoredFileRemoval(tx, image.storageKey);
 
+    await tx.pinnedItem.deleteMany({ where: { itemType: "catalog", itemId: catalogId } });
+    await tx.sharedItem.deleteMany({ where: { itemType: "catalog", itemId: catalogId } });
     await tx.catalog.delete({ where: { id: catalogId } });
     await recordAudit(tx, request, {
       action: AuditAction.CATALOG_DELETE,

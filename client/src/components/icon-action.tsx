@@ -11,11 +11,12 @@ interface IconActionProps {
   href?: string;
   destructive?: boolean;
   disabled?: boolean;
+  className?: string;
 }
 
 /** Icon-only row action with a tooltip and an accessible label. */
-export function IconAction({ label, icon: Icon, onClick, href, destructive, disabled }: IconActionProps) {
-  const className = cn(destructive && "text-destructive hover:bg-destructive/10 hover:text-destructive");
+export function IconAction({ label, icon: Icon, onClick, href, destructive, disabled, className: extraClassName }: IconActionProps) {
+  const className = cn(destructive && "text-destructive hover:bg-destructive/10 hover:text-destructive", extraClassName);
   return (
     <Tooltip>
       <TooltipTrigger asChild>

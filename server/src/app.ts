@@ -24,6 +24,7 @@ import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerCategoryRoutes } from "./routes/category.routes.js";
 import { registerSupplierRoutes } from "./routes/supplier.routes.js";
 import { registerUserRoutes } from "./routes/user.routes.js";
+import { registerPinShareRoutes } from "./routes/pin-share.routes.js";
 import {
   createCatalogExtractionRuntime,
   type CatalogExtractionRuntime,
@@ -174,6 +175,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       v1.get("/health", async () => ({ status: "ok" }));
       registerAuthRoutes(v1, deps, guards);
       registerUserRoutes(v1, deps, guards);
+      registerPinShareRoutes(v1, db, guards);
       registerAuditRoutes(v1, db, guards);
       registerCategoryRoutes(v1, db, guards);
       registerSupplierRoutes(v1, { db, config, storage, log: app.log }, guards);
