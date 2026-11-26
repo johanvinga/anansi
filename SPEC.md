@@ -345,6 +345,19 @@ Where other requirements say "the user", they apply to admins only. Standard use
 | FR-MODAL-06 | Rename uses the same dialog component as create, with fields pre-filled. |
 | FR-MODAL-07 | Only admins see create entry points (existing role rule). |
 
+### 4.14 List Pagination and URL State (FR-LST)
+
+| ID | Requirement |
+|---|---|
+| FR-LST-01 | Every browsable table is paginated: suppliers, products, catalogs, users, audit log, tags, attribute sets, independent attributes, supplier assets, supplier catalogs, supplier products, and the dashboard. The category tree, the attribute-set builder fields, the catalog workspace review tables, and the supplier contact list are not paginated. |
+| FR-LST-02 | List endpoints accept `page` (integer ≥ 1) and `pageSize` (1–100, default 25) and return `{ items, total, page, pageSize }`. Invalid values return 400 `VALIDATION_ERROR`. Ordering is deterministic (ties are broken by ID) so pages never overlap or skip rows. |
+| FR-LST-03 | Endpoints that also feed dropdowns and filters (`/tags`, `/attribute-sets`, `/attributes`, `/suppliers/{id}/assets`, `/suppliers/{id}/catalogs`) paginate only when `page` or `pageSize` is sent. Without them they return the full list as `{ items }`. |
+| FR-LST-04 | Search (`q`), every filter, `page`, and `pageSize` are stored in the page URL query string, so a list view can be bookmarked, shared, and survives a reload. Default values (page 1, page size 25) are omitted. Embedded tables on the supplier detail page use the same parameters on `/suppliers/{id}/{tab}`; switching tab clears them. |
+| FR-LST-05 | Changing the search or a filter returns to page 1. Page changes add a browser history entry, so Back steps through pages; search and filter changes replace the current entry. |
+| FR-LST-06 | A malformed `page` or `pageSize` in the URL is replaced with its canonical value. A `page` past the last page (for example after deleting the last row of a page) moves to the last page. |
+| FR-LST-07 | While another page loads, the table keeps showing the previous rows, and the view scrolls to the top of the table on a page change. |
+| FR-LST-08 | Bulk selection keeps working across pages and is cleared when the search or a filter changes. |
+
 ---
 
 ## 5. Data Model
@@ -589,7 +602,7 @@ Base path: `/api/v1`. All responses are JSON except file downloads. Errors use t
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/suppliers?page&pageSize&q&category` | List with filters. `category` matches any selected ID or its descendants against direct or product-inherited categories. |
+| GET | `/suppliers?page&pageSize&q&category` | List with filters. `category` matches any selected ID or its descendants against direct or product-inherited categories. Pagination follows FR-LST-02. |
 | POST | `/suppliers` | Create. |
 | GET | `/suppliers/{id}` | Detail including effective `categories`, directly assigned `assignedCategories`, and product-derived `inheritedCategories`. |
 | PUT | `/suppliers/{id}` | Update name, address, and directly assigned categories. |
