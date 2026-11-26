@@ -2,7 +2,6 @@ import type { FastifyBaseLogger } from "fastify";
 import { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
-import { skipTake } from "../lib/pagination.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import {
@@ -13,6 +12,7 @@ import {
 } from "./audit.service.js";
 import { removeStoredFiles } from "./asset.service.js";
 import { resolveTagIds } from "./tag.service.js";
+import { listPinnedFirst } from "./pinned-first.js";
 
 export interface SupplierInput {
   name: string;
@@ -128,20 +128,23 @@ export async function listSuppliers(db: Database, request: AuditRequestContext, 
         : undefined,
   };
 
-  const [total, rows] = await db.$transaction([
-    db.supplier.count({ where }),
-    db.supplier.findMany({
-      where,
-      include: detailInclude,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-      ...skipTake(filters),
-    }),
-  ]);
+  const total = await db.supplier.count({ where });
+  const { rows, pinnedIds } = await listPinnedFirst(db, request.actor.userId, "supplier", filters, {
+    matchingIds: async (ids) =>
+      (await db.supplier.findMany({ where: { AND: [where, { id: { in: ids } }] }, select: { id: true } })).map((row) => row.id),
+    fetch: (id, window) =>
+      db.supplier.findMany({
+        where: { AND: [where, { id }] },
+        include: detailInclude,
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        ...window,
+      }),
+  });
 
   const inherited = await derivedTagsBySupplier(db, rows.map((row) => row.id));
   await recordAudit(db, request, { action: AuditAction.SUPPLIER_LIST, outcome: "success" });
   return {
-    items: rows.map((row) => toSupplierDto(row, inherited.get(row.id))),
+    items: rows.map((row) => ({ ...toSupplierDto(row, inherited.get(row.id)), pinned: pinnedIds.has(row.id) })),
     total,
     page: filters.page,
     pageSize: filters.pageSize,

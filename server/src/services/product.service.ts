@@ -1,7 +1,7 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
-import { skipTake } from "../lib/pagination.js";
+import { listPinnedFirst } from "./pinned-first.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated, TranslatedText } from "../lib/translations.js";
 import { loadFieldDefinitions } from "./attribute-set.service.js";
@@ -287,22 +287,30 @@ export async function listProducts(db: Database, request: AuditRequestContext, f
       : undefined,
     AND: tagFilters.length ? [{ OR: tagFilters }] : undefined,
   };
-  const [total, rows] = await db.$transaction([
-    db.product.count({ where }),
-    db.product.findMany({
-      where,
-      include: listInclude,
-      orderBy: [{ nameEn: "asc" }, { id: "asc" }],
-      ...skipTake(filters),
-    }),
-  ]);
+  const total = await db.product.count({ where });
+  const { rows, pinnedIds } = await listPinnedFirst(db, request.actor.userId, "product", filters, {
+    matchingIds: async (ids) =>
+      (await db.product.findMany({ where: { AND: [where, { id: { in: ids } }] }, select: { id: true } })).map((row) => row.id),
+    fetch: (id, window) =>
+      db.product.findMany({
+        where: { AND: [where, { id }] },
+        include: listInclude,
+        orderBy: [{ nameEn: "asc" }, { id: "asc" }],
+        ...window,
+      }),
+  });
   await recordAudit(db, request, {
     action: AuditAction.PRODUCT_LIST,
     outcome: "success",
     entityType: filters.supplierId ? "Supplier" : undefined,
     entityId: filters.supplierId,
   });
-  return { items: rows.map(toProductSummary), total, page: filters.page, pageSize: filters.pageSize };
+  return {
+    items: rows.map((row) => ({ ...toProductSummary(row), pinned: pinnedIds.has(row.id) })),
+    total,
+    page: filters.page,
+    pageSize: filters.pageSize,
+  };
 }
 
 export async function listSupplierProducts(db: Database, request: AuditRequestContext, supplierId: string, filters: Omit<ListProductsFilters, "supplierId">) {

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Database } from "../db.js";
-import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
+import { parseInput, uuidSchema } from "../lib/validation.js";
 import { auditContext, type Guards } from "./route-helpers.js";
 import {
   getPinDashboard,
@@ -23,7 +23,7 @@ const shareSchema = itemSchema.extend({
 const shareIdSchema = z.object({ id: uuidSchema });
 const hideSchema = z.object({ hidden: z.boolean() });
 
-const dashboardQuerySchema = paginationSchema.extend({
+const dashboardQuerySchema = z.object({
   q: z.string().trim().max(200).optional(),
   pinType: itemTypeSchema.optional(),
   shareType: itemTypeSchema.optional(),

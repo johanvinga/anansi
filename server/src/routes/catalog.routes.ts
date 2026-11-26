@@ -13,6 +13,7 @@ import {
   getCatalogExtraction,
   listAllCatalogs,
   listCatalogs,
+  listRecentCatalogViews,
   prepareCatalogDownload,
   prepareCatalogImage,
   prepareCatalogView,
@@ -137,6 +138,9 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
       pageSize: query.pageSize,
     });
   });
+
+  app.get("/catalogs/recent", { preHandler: guards.requireUser }, async (request) =>
+    listRecentCatalogViews(deps.db, context(request)));
 
   app.get("/suppliers/:id/catalogs", { preHandler: guards.requireUser }, async (request) => {
     const { id } = parseInput(idParamsSchema, request.params);
