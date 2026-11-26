@@ -33,6 +33,7 @@ import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
 import { PdfFileField } from "../../components/pdf-file-field";
+import { PinItemButton } from "../../components/pin-item-button";
 import { PaginationControls } from "../../components/pagination-controls";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
@@ -141,6 +142,13 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
                 </TableCell> : null}
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
+                    <PinItemButton
+                      itemType="catalog"
+                      itemId={catalog.id}
+                      label={catalog.name}
+                      initialPinned={catalog.pinned}
+                      onChange={() => void queryClient.invalidateQueries({ queryKey: ["catalogs"] })}
+                    />
                     <Button asChild type="button" variant="outline" size="sm">
                       <Link to={`/catalogs/${catalog.id}/workspace`}>
                         <BookOpen />

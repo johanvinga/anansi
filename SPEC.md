@@ -168,7 +168,7 @@ or create a root, but reject ambiguous names.
 | FR-CLG-05 | The user shall be able to download a catalog. |
 | FR-CLG-06 | An admin may edit a catalog's name, version, supplier and categories. **Last updated** is set automatically to the time of the most recent change. |
 | FR-CLG-07 | The user shall be able to delete a catalog (file and metadata). |
-| FR-CLG-08 | Full catalog analysis is disabled by default. When enabled, an admin explicitly starts asynchronous Gemini analysis. Upload itself makes no Gemini request and does not create an extraction job. The full Gemini analysis identifies the catalog title and all distinct product-derived categories together with product candidates. Each catalog shall expose `not_processed`, `queued`, `processing`, `processed`, or `failed` status, plus job progress and errors. |
+| FR-CLG-08 | Full catalog analysis is disabled by default. When enabled, an admin explicitly starts asynchronous Gemini analysis. Upload itself makes no Gemini request and does not create an extraction job. The full Gemini analysis identifies the catalog title and all distinct product-derived categories together with product candidates. Each catalog shall expose `not_processed`, `queued`, `processing`, `metadata_only`, `processed`, or `failed` status, plus job progress and errors. `metadata_only` means the supplier metadata analysis (Prompt A) has completed but the category analysis (Prompt B) has not; `processed` means the category analysis completed. |
 | FR-CLG-09 | Full analysis identifies product candidates and attributes when recognizable, preserving source page references and excerpts. Prompt A (supplier metadata) renders and OCRs only the first four and last three PDF pages, deduplicates overlap, bounds rendered images, and sends Gemini those page images rather than the whole PDF. Prompt B (product tags) may send the whole catalog PDF. Output is unverified and is validated before storage. |
 | FR-CLG-10 | Extracted products and suggested attribute fields shall remain review candidates; analysis shall not create products or attribute sets automatically. An admin may review candidates, create products from selected candidates, create an attribute set from suggested fields, and retry a failed or completed analysis. |
 | FR-CLG-11 | Catalogs have independent categories. Assigning a supplier or adding catalog categories merges those categories into the supplier's direct categories without duplicates. Existing supplier categories remain, including after catalog unassignment, reassignment, category removal, or deletion. |
@@ -284,10 +284,12 @@ Where other requirements say "the user", they apply to admins only. Standard use
 | FR-PIN-07 | A sender may change the recipient list and note from the item share dialog or Recently shared. Adding/removing recipients applies immediately; re-sharing restores a recipient's hidden share and updates the note. |
 | FR-PIN-08 | Recipients may open an item, pin it personally, hide the share, restore it from the Hidden filter, and share it onward. Hiding and onward sharing do not grant domain edit permissions. |
 | FR-PIN-09 | Senders may edit notes and recipients or revoke individual shares. Recipient list changes revoke removed recipients. |
+| FR-PIN-10 | The Dashboard has a Recently viewed catalogs card listing up to eight catalogs the current user most recently opened (metadata or inline PDF view), newest first, each linking to its workspace with supplier, view time and analysis status. It is derived from the user's own audit entries; deleted catalogs are omitted. |
 | FR-PIN-10 | Sharing to self is rejected. Sharing with inactive or unknown users is rejected at save time. |
 | FR-PIN-11 | Deleting an item removes its pins and shares immediately. Pin and share records contain no public file URLs. |
 | FR-PIN-12 | Share and revoke operations are transactionally audited; pin/unpin and hidden/restore operations are personal UI state and are not separately appended. |
 | FR-PIN-13 | Catalog cards open the catalog workspace, supplier cards open supplier details, and product cards open a stable product detail route. |
+| FR-PIN-14 | In the catalog, supplier, and product tables, the user's pinned items are listed first, most recently pinned first, followed by the remaining items in the table's default order. Search and filters still apply, and pagination covers the combined order. |
 
 ### 4.9 User Management (FR-USR)
 
@@ -349,7 +351,7 @@ Where other requirements say "the user", they apply to admins only. Standard use
 
 | ID | Requirement |
 |---|---|
-| FR-LST-01 | Every browsable table is paginated: suppliers, products, catalogs, users, audit log, tags, attribute sets, independent attributes, supplier assets, supplier catalogs, supplier products, and the dashboard. The category tree, the attribute-set builder fields, the catalog workspace review tables, and the supplier contact list are not paginated. |
+| FR-LST-01 | Every browsable table is paginated: suppliers, products, catalogs, users, audit log, tags, attribute sets, independent attributes, supplier assets, supplier catalogs, and supplier products. The dashboard, the category tree, the attribute-set builder fields, the catalog workspace review tables, and the supplier contact list are not paginated. |
 | FR-LST-02 | List endpoints accept `page` (integer ≥ 1) and `pageSize` (1–100, default 25) and return `{ items, total, page, pageSize }`. Invalid values return 400 `VALIDATION_ERROR`. Ordering is deterministic (ties are broken by ID) so pages never overlap or skip rows. |
 | FR-LST-03 | Endpoints that also feed dropdowns and filters (`/tags`, `/attribute-sets`, `/attributes`, `/suppliers/{id}/assets`, `/suppliers/{id}/catalogs`) paginate only when `page` or `pageSize` is sent. Without them they return the full list as `{ items }`. |
 | FR-LST-04 | Search (`q`), every filter, `page`, and `pageSize` are stored in the page URL query string, so a list view can be bookmarked, shared, and survives a reload. Default values (page 1, page size 25) are omitted. Embedded tables on the supplier detail page use the same parameters on `/suppliers/{id}/{tab}`; switching tab clears them. |
@@ -648,6 +650,7 @@ normal authenticated `Origin` check.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/catalogs` | Global list including unassigned catalogs. Query: `q` (searches name, version, supplier name), repeated `category` (any selected category or descendants of a catalog or effective supplier assignment), `page`, `pageSize`. Each item includes nullable `supplierName`, catalog `categories`, effective `supplierCategoryNames`, and `analysisStatus`. |
+| GET | `/catalogs/recent` | Up to eight catalogs the current user most recently viewed (newest first), each with `id`, `name`, `version`, `supplierName`, `analysisStatus`, and `viewedAt`. |
 | GET | `/catalogs/{catalogId}` | Authenticated catalog metadata for a workspace. Audited as `CATALOG_VIEW`. |
 | GET | `/suppliers/{id}/catalogs` | List, ordered by name then version. Each item includes `sizeBytes`, `updatedAt`, and `analysisStatus`. |
 | POST | `/catalogs` | Upload (`multipart/form-data`, field `file`, optional `name`, `version`, `supplierId`, and JSON `categories`). An omitted name is deduced from the vendor on physical pages 1–3 or generated from the sanitized filename. Admin only. Full analysis must be started separately. |

@@ -62,6 +62,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
     extraction !== undefined &&
     (extraction.analysisStatus === "not_processed" ||
       extraction.analysisStatus === "failed" ||
+      extraction.analysisStatus === "metadata_only" ||
       extraction.analysisStatus === "processed" ||
       extraction.analysisStatus === "queued");
 

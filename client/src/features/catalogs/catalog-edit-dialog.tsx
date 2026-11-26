@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FieldGroup } from "@/components/ui/field";
 import { apiRequest, errorMessage } from "../../api/client";
+import { formatDateTime } from "../../api/format";
 import type { Catalog } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
@@ -14,11 +15,13 @@ import { loadCatalogSuppliers } from "./supplier-picker";
 interface CatalogEditDialogProps {
   catalog: Catalog;
   initialSupplierId?: string;
+  /** Shows the catalog details without allowing changes (standard users). */
+  readOnly?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved }: CatalogEditDialogProps) {
+export function CatalogEditDialog({ catalog, initialSupplierId, readOnly = false, onClose, onSaved }: CatalogEditDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(catalog.name);
   const [version, setVersion] = useState(catalog.version ?? "");
@@ -32,6 +35,7 @@ export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (readOnly) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -50,22 +54,26 @@ export function CatalogEditDialog({ catalog, initialSupplierId, onClose, onSaved
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-          <DialogHeader><DialogTitle>{t("catalogs.editCatalog")}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{readOnly ? t("catalogs.catalogDetails") : t("catalogs.editCatalog")}</DialogTitle></DialogHeader>
           <FieldGroup>
             <ErrorAlert message={error ?? (suppliers.error ? errorMessage(suppliers.error) : null)} />
-            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required />
-            <FormField label={t("catalogs.version")} name="version" value={version} onChange={setVersion} />
+            <FormField label={t("suppliers.name")} name="name" value={name} onChange={setName} required disabled={readOnly} />
+            <FormField label={t("catalogs.version")} name="version" value={version} onChange={setVersion} disabled={readOnly} />
             <SelectField
               label={t("catalogs.supplier")}
               value={supplierId ?? ""}
               onChange={(value) => setSupplierId(value || null)}
-              disabled={!suppliers.data}
+              disabled={readOnly || !suppliers.data}
               options={[{ value: "", label: t("catalogs.unassigned") }, ...(suppliers.data ?? []).map((s) => ({ value: s.id, label: s.name }))]}
             />
+            <FormField label={t("catalogs.pdfFile")} value={catalog.originalFileName} onChange={() => undefined} disabled />
+            <FormField label={t("catalogs.uploadedAt")} value={formatDateTime(catalog.createdAt)} onChange={() => undefined} disabled />
           </FieldGroup>
           <DialogFooter>
-            <DialogClose asChild><Button type="button" variant="outline">{t("common.cancel")}</Button></DialogClose>
-            <Button type="submit" disabled={submitting || !suppliers.data}>{submitting ? t("common.saving") : t("common.save")}</Button>
+            <DialogClose asChild><Button type="button" variant="outline">{readOnly ? t("common.close") : t("common.cancel")}</Button></DialogClose>
+            {readOnly ? null : (
+              <Button type="submit" disabled={submitting || !suppliers.data}>{submitting ? t("common.saving") : t("common.save")}</Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

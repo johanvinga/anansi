@@ -1,8 +1,8 @@
 ﻿import { useTranslation } from "react-i18next";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, Share2, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, ScanSearch, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +16,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { apiRequest, errorMessage } from "../../api/client";
 import { loadSettings } from "../../api/settings";
 import { localize } from "../../api/translations";
-import { formatDateTime } from "../../api/format";
 import type { CatalogWithSupplier, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert } from "../../components/error-alert";
@@ -31,7 +30,9 @@ import { UploadCatalogDialog } from "./upload-catalog-dialog";
 import { CatalogExtractionDialog } from "./catalog-extraction-dialog";
 import { CatalogEditDialog } from "./catalog-edit-dialog";
 import { ConfirmDialog } from "../../components/confirm-dialog";
-import { ShareItemDialog } from "../../components/share-item-dialog";
+import { IconAction } from "../../components/icon-action";
+import { PinItemButton } from "../../components/pin-item-button";
+import { ShareItemButton } from "../../components/share-item-button";
 import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 
@@ -55,32 +56,23 @@ function CatalogActions({
   onPinChange,
 }: CatalogActionsProps) {
   const { t } = useTranslation();
-  const [pinned, setPinned] = useState(catalog.pinned);
-  const [pinBusy, setPinBusy] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
-
-async function togglePin() {
-    if (pinBusy) return;
-    const previous = pinned;
-    setPinBusy(true);
-    setPinned(!previous);
-    try {
-      const result = await apiRequest<{ pinned: boolean }>(
-        previous ? "DELETE" : "POST",
-        "/pins",
-        { itemType: "catalog", itemId: catalog.id },
-      );
-      setPinned(result.pinned);
-      onPinChange();
-    } catch {
-      setPinned(previous);
-    } finally {
-      setPinBusy(false);
-    }
-  }
+  const navigate = useNavigate();
 
   return (
-    <>
+    <div className="flex items-center justify-end gap-1">
+      <PinItemButton
+        itemType="catalog"
+        itemId={catalog.id}
+        label={catalog.name}
+        initialPinned={catalog.pinned}
+        onChange={onPinChange}
+      />
+      <ShareItemButton itemType="catalog" itemId={catalog.id} itemName={catalog.name} iconOnly />
+      <IconAction
+        label={t("catalogs.viewCatalog", { name: catalog.name })}
+        icon={Eye}
+        onClick={() => navigate(`/catalogs/${catalog.id}/workspace`)}
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -93,11 +85,9 @@ async function togglePin() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
-          <DropdownMenuItem asChild>
-            <Link to={`/catalogs/${catalog.id}/workspace`}>
-              <BookOpen />
-              {t("catalogs.openWorkspace")}
-            </Link>
+          <DropdownMenuItem onSelect={() => onEdit(catalog)}>
+            {isAdmin ? <Pencil /> : <BookOpen />}
+            {isAdmin ? t("catalogs.editCatalog") : t("catalogs.catalogDetails")}
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <a href={`/api/v1/catalogs/${catalog.id}/download`}>
@@ -105,28 +95,15 @@ async function togglePin() {
               {t("common.download")}
             </a>
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled={pinBusy} onSelect={() => void togglePin()}>
-            <Pin className={pinned ? "fill-current" : ""} />
-            {pinned ? t("pins.unpin") : t("pins.pin")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setShareOpen(true)}>
-            <Share2 />
-            {t("pins.share")}
-          </DropdownMenuItem>
           {analysisEnabled ? (
             <DropdownMenuItem onSelect={() => onReview(catalog)}>
-              <Eye />
+              <ScanSearch />
               {t("catalogs.reviewButton")}
             </DropdownMenuItem>
           ) : null}
           {isAdmin ? (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => onEdit(catalog)}>
-                <Pencil />
-                {t("common.edit")}
-              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => onDelete(catalog)}
@@ -138,14 +115,7 @@ async function togglePin() {
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      <ShareItemDialog
-        open={shareOpen}
-        onOpenChange={setShareOpen}
-        itemType="catalog"
-        itemId={catalog.id}
-        itemName={catalog.name}
-      />
-    </>
+    </div>
   );
 }
 
@@ -244,17 +214,15 @@ export function CatalogsPage() {
             <TableRow>
               {isAdmin ? <TableHead className="w-10 pl-4"><BulkSelectPage items={visibleItems} selection={bulk} /></TableHead> : null}
               <TableHead className="pl-4">{t("catalogs.catalogName")}</TableHead>
-              <TableHead>{t("catalogs.pdfFile")}</TableHead>
               <TableHead>{t("catalogs.supplier")}</TableHead>
               <TableHead>{t("catalogs.catalogCategories")}</TableHead>
-              <TableHead>{t("catalogs.uploadedAt")}</TableHead>
               {analysisEnabled ? <TableHead>{t("catalogs.analysis")}</TableHead> : null}
               <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {result && result.items.length === 0 ? (
-              <TableEmptyRow colSpan={(analysisEnabled ? 7 : 6) + (isAdmin ? 1 : 0)} message="No catalogs found." />
+              <TableEmptyRow colSpan={(analysisEnabled ? 5 : 4) + (isAdmin ? 1 : 0)} message="No catalogs found." />
             ) : null}
             {result?.items.map((catalog) => (
               <TableRow key={catalog.id}>
@@ -267,7 +235,6 @@ export function CatalogsPage() {
                     ) : null}
                   </span>
                 </TableCell>
-                <TableCell>{catalog.originalFileName}</TableCell>
                 <TableCell>{catalog.supplierName ?? t("catalogs.unassigned")}</TableCell>
                 <TableCell>
                   {catalog.tags.length === 0 ? "—" : (
@@ -278,7 +245,6 @@ export function CatalogsPage() {
                     </div>
                   )}
                 </TableCell>
-                <TableCell>{formatDateTime(catalog.createdAt)}</TableCell>
                 {analysisEnabled ? <TableCell>
                   <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
                     {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}
@@ -318,7 +284,7 @@ export function CatalogsPage() {
           }}
         />
       ) : null}
-      {editing ? <CatalogEditDialog catalog={editing} onClose={() => setEditing(null)} onSaved={() => {
+      {editing ? <CatalogEditDialog catalog={editing} readOnly={!isAdmin} onClose={() => setEditing(null)} onSaved={() => {
         setEditing(null);
         void queryClient.invalidateQueries({ queryKey: ["catalogs"] });
         void queryClient.invalidateQueries({ queryKey: ["supplier"] });

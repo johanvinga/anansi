@@ -40,10 +40,15 @@ export interface DashboardSharedItem {
   recipients: Array<ShareUserSummary & { shareId: string; hidden: boolean }>;
 }
 
+export interface DashboardSection {
+  items: DashboardSharedItem[];
+  total: number;
+}
+
 export interface PinDashboard {
-  pins: Page<DashboardSharedItem>;
-  received: Page<DashboardSharedItem>;
-  sent: Page<DashboardSharedItem>;
+  pins: DashboardSection;
+  received: DashboardSection;
+  sent: DashboardSection;
 }
 
 export interface AuditLogSummary {
@@ -99,6 +104,8 @@ export interface Supplier {
   country: string | null;
   website: string | null;
   tags: Tag[];
+  /** Present on list responses: whether the current user pinned this supplier. */
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,11 +146,22 @@ export interface Catalog {
   sizeBytes: number;
   uploadedById: string | null;
   analysisStatus: CatalogAnalysisStatus;
+  /** Present on list responses: whether the current user pinned this catalog. */
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-export type CatalogAnalysisStatus = "not_processed" | "queued" | "processing" | "processed" | "failed";
+export type CatalogAnalysisStatus = "not_processed" | "queued" | "processing" | "metadata_only" | "processed" | "failed";
+
+export interface RecentCatalogView {
+  id: string;
+  name: string;
+  version: string | null;
+  supplierName: string | null;
+  analysisStatus: CatalogAnalysisStatus;
+  viewedAt: string;
+}
 
 export interface CatalogExtractionAttribute {
   name: string;
@@ -315,6 +333,8 @@ export interface ProductSummary {
     version: string | null;
     pageNumbers: number[];
   } | null;
+  /** Present on list responses: whether the current user pinned this product. */
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
 }

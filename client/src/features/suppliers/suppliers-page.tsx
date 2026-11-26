@@ -136,7 +136,13 @@ export function SuppliersPage() {
                   )}
                 </TableCell>
                 <TableCell className="pr-4 text-right">
-                  <PinItemButton itemType="supplier" itemId={supplier.id} label={supplier.name} />
+                  <PinItemButton
+                    itemType="supplier"
+                    itemId={supplier.id}
+                    label={supplier.name}
+                    initialPinned={supplier.pinned}
+                    onChange={() => void queryClient.invalidateQueries({ queryKey: ["suppliers"] })}
+                  />
                   <ShareItemButton itemType="supplier" itemId={supplier.id} itemName={supplier.name} iconOnly />
                   <IconAction
                     label={t("suppliers.viewSupplier", { name: supplier.name })}
