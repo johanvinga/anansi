@@ -1,34 +1,47 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Eye, History, Package, Pin, Share2, Trash2, Truck, Users } from "lucide-react";
+import { ArrowRight, BookOpen, EyeOff, History, Eye, Pencil, Pin, Share2, Trash2, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiRequest, errorMessage } from "../../api/client";
-import type { DashboardSharedItem, PinDashboard, PinnedItemType, RecentCatalogView } from "../../api/types";
+import type { DashboardSharedItem, PinDashboard, PinnedItemType, RecentCatalogView, ShareUserSummary } from "../../api/types";
 import { localize } from "../../api/translations";
-import { formatDateTime } from "../../api/format";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
+import { formatDateShort } from "../../api/format";
+import { Avatar, AvatarFallback } from "../../components/ui/avatar";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { Card } from "../../components/ui/card";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../../components/ui/empty";
+import { Skeleton } from "../../components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { ErrorAlert } from "../../components/error-alert";
+import { IconAction } from "../../components/icon-action";
 import { SearchForm } from "../../components/search-form";
 import { SelectField } from "../../components/select-field";
-import { ErrorAlert } from "../../components/error-alert";
 import { ShareItemDialog } from "../../components/share-item-dialog";
-import { Badge } from "../../components/ui/badge";
-import { Skeleton } from "../../components/ui/skeleton";
-import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "../../components/ui/empty";
-import { PageHeader } from "../../components/page-header";
 import { usePagedList } from "../../lib/use-paged-list";
+import { DashboardRow, RecentCatalogCard, SharedEmptyState, StatCard } from "./dashboard-parts";
 
-function itemPath(item: DashboardSharedItem) {
-  if (item.itemType === "catalog") return `/catalogs/${item.itemId}/workspace`;
-  if (item.itemType === "supplier") return `/suppliers/${item.itemId}`;
-  return `/products/${item.itemId}`;
+type ListTab = "pinned" | "sent";
+
+function padCount(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
-function ItemIcon({ type, className = "size-5" }: { type: PinnedItemType; className?: string }) {
-  if (type === "catalog") return <BookOpen className={className} />;
-  if (type === "supplier") return <Truck className={className} />;
-  return <Package className={className} />;
+interface ShareTarget {
+  itemType: PinnedItemType;
+  itemId: string;
+  name: string;
+  recipientIds: string[];
+  note: string | null;
+}
+
+function userInitials(user: ShareUserSummary): string {
+  const parts = (user.displayName?.trim() || user.email).split(/[\s@.]+/).filter(Boolean);
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 export function DashboardPage() {
@@ -40,13 +53,9 @@ export function DashboardPage() {
   const shareType = list.getFilter("shareType") as PinnedItemType | "";
   const hidden = list.getFilter("hidden") as "" | "true" | "false";
 
-  const [shareTarget, setShareTarget] = useState<{
-    itemType: PinnedItemType;
-    itemId: string;
-    name: string;
-    recipientIds: string[];
-    note: string | null;
-  } | null>(null);
+  const [tab, setTab] = useState<ListTab>("pinned");
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
+  const listsRef = useRef<HTMLDivElement>(null);
 
   const dashboardQuery = useQuery({
     queryKey: ["pin-dashboard", { search, pinType, shareType, hidden }],
@@ -66,95 +75,171 @@ export function DashboardPage() {
     queryFn: () => apiRequest<{ items: RecentCatalogView[] }>("GET", "/catalogs/recent"),
   });
 
+  const refreshDashboard = () => queryClient.invalidateQueries({ queryKey: ["pin-dashboard"] });
+
   async function unpin(item: DashboardSharedItem) {
     await apiRequest("DELETE", "/pins", { itemType: item.itemType, itemId: item.itemId });
-    await queryClient.invalidateQueries({ queryKey: ["pin-dashboard"] });
+    await refreshDashboard();
+  }
+
+  async function pin(item: DashboardSharedItem) {
+    await apiRequest("POST", "/pins", { itemType: item.itemType, itemId: item.itemId });
+    await refreshDashboard();
   }
 
   async function setShareHidden(item: DashboardSharedItem, nextHidden: boolean) {
-    const shareId = item.shareId;
-    if (!shareId) return;
-    await apiRequest("PATCH", `/shares/${shareId}`, { hidden: nextHidden });
-    await queryClient.invalidateQueries({ queryKey: ["pin-dashboard"] });
+    if (!item.shareId) return;
+    await apiRequest("PATCH", `/shares/${item.shareId}`, { hidden: nextHidden });
+    await refreshDashboard();
   }
 
   async function revokeSent(item: DashboardSharedItem) {
     for (const recipient of item.recipients) {
       await apiRequest("DELETE", `/shares/${recipient.shareId}`);
     }
-    await queryClient.invalidateQueries({ queryKey: ["pin-dashboard"] });
+    await refreshDashboard();
+  }
+
+  function showList(next?: ListTab) {
+    if (next) setTab(next);
+    listsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function shareItem(item: DashboardSharedItem, existing?: { recipientIds: string[]; note: string | null }) {
+    setShareTarget({
+      itemType: item.itemType,
+      itemId: item.itemId,
+      name: localize(item.name),
+      recipientIds: existing?.recipientIds ?? [],
+      note: existing?.note ?? null,
+    });
   }
 
   const dashboard = dashboardQuery.data;
+  const loading = dashboardQuery.isLoading;
+  const pinnedCount = dashboard?.pins.total ?? 0;
+  const receivedCount = dashboard?.received.total ?? 0;
+  const sentCount = dashboard?.sent.total ?? 0;
+  const count = (value: number) => (loading ? "—" : padCount(value));
+  const typeOptions = [
+    { value: "", label: t("pins.allTypes") },
+    { value: "catalog", label: t("pins.typeCatalog") },
+    { value: "supplier", label: t("pins.typeSupplier") },
+    { value: "product", label: t("pins.typeProduct") },
+  ];
+  const recentCatalogs = recentCatalogsQuery.data?.items ?? [];
+  const sentRecipients = (dashboard?.sent.items ?? [])
+    .flatMap((item) => item.recipients)
+    .filter((recipient, index, all) => all.findIndex((other) => other.id === recipient.id) === index)
+    .slice(0, 2);
+
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title={t("pins.dashboardTitle")} breadcrumbs={[{ label: t("pins.dashboardTitle") }]} />
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-2">
+          <p className="text-[11px] font-medium tracking-[0.2em] text-muted-foreground uppercase">{t("pins.eyebrow")}</p>
+          <h1 className="text-3xl font-semibold tracking-tight">{t("pins.heroTitle")}</h1>
+          <p className="text-sm text-muted-foreground">{t("pins.heroSubtitle")}</p>
+        </div>
+        <Button asChild size="lg">
+          <Link to="/catalogs">
+            <BookOpen />
+            {t("pins.browseCatalogs")}
+            <ArrowRight />
+          </Link>
+        </Button>
+      </header>
 
       {dashboardQuery.error ? <ErrorAlert message={errorMessage(dashboardQuery.error)} /> : null}
 
-      <Card className="gap-0 overflow-hidden py-0">
-        <CardContent className="grid gap-3 p-4 md:grid-cols-3">
-          {[
-            { label: t("pins.sectionPins"), count: dashboard?.pins.total ?? 0, icon: Pin },
-            { label: t("pins.sectionShared"), count: dashboard?.received.total ?? 0, icon: Users },
-            { label: t("pins.sectionRecent"), count: dashboard?.sent.total ?? 0, icon: Share2 },
-          ].map((stat) => (
-            <div key={stat.label} className="flex items-center gap-3 rounded-lg border px-4 py-3">
-              <div className="flex size-9 items-center justify-center rounded-md bg-muted">
-                <stat.icon className="size-4" />
-              </div>
-              <div>
-                <p className="text-2xl font-semibold leading-none tabular-nums">{dashboardQuery.isLoading ? "—" : stat.count}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{stat.label}</p>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <section className="grid gap-4 md:grid-cols-3">
+        <StatCard
+          featured
+          icon={Pin}
+          chipClassName="bg-transparent"
+          title={t("pins.statPinned")}
+          value={count(pinnedCount)}
+          tagline={t("pins.statPinnedTagline")}
+          footer={t("pins.statPinnedFooter")}
+          onClick={() => showList("pinned")}
+        />
+        <StatCard
+          icon={Users}
+          chipClassName="bg-accent text-primary dark:text-foreground"
+          title={t("pins.statReceived")}
+          value={count(receivedCount)}
+          tagline={t("pins.statReceivedTagline")}
+          footer={
+            <>
+              <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/50" />
+              {receivedCount === 0 ? t("pins.statReceivedFooterEmpty") : t("pins.statReceivedFooter")}
+            </>
+          }
+          onClick={() => showList()}
+        />
+        <StatCard
+          icon={Share2}
+          chipClassName="bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+          title={t("pins.statSent")}
+          value={count(sentCount)}
+          tagline={t("pins.statSentTagline")}
+          footer={
+            <>
+              {sentRecipients.length > 0 ? (
+                <span className="flex -space-x-1.5">
+                  {sentRecipients.map((recipient) => (
+                    <Avatar key={recipient.id} className="size-6 ring-2 ring-card">
+                      <AvatarFallback className="text-[9px]">{userInitials(recipient)}</AvatarFallback>
+                    </Avatar>
+                  ))}
+                </span>
+              ) : null}
+              {sentCount === 0 ? t("pins.statSentFooterEmpty") : t("pins.statSentFooter")}
+            </>
+          }
+          onClick={() => showList("sent")}
+        />
+      </section>
 
-      <Card className="gap-0 overflow-hidden py-0">
-        <CardHeader className="border-b p-4">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <History className="size-4" />
-              {t("pins.recentCatalogsTitle")}
-            </CardTitle>
-            <Badge variant="secondary">{recentCatalogsQuery.data?.items.length ?? 0}</Badge>
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <History className="size-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">{t("pins.recentCatalogsTitle")}</h2>
+            <Badge variant="secondary">{recentCatalogs.length}</Badge>
           </div>
-        </CardHeader>
-        <CardContent className="p-4">
-          {recentCatalogsQuery.error ? <ErrorAlert message={errorMessage(recentCatalogsQuery.error)} /> : null}
-          {recentCatalogsQuery.isLoading ? (
-            <Skeleton className="h-16 w-full" />
-          ) : recentCatalogsQuery.data?.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("pins.recentCatalogsEmpty")}</p>
-          ) : (
-            <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {recentCatalogsQuery.data?.items.map((catalog) => (
-                <li key={catalog.id}>
-                  <Link
-                    to={`/catalogs/${catalog.id}/workspace`}
-                    className="flex h-full items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
-                  >
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><BookOpen className="size-4" /></div>
-                    <div className="min-w-0 space-y-1">
-                      <p className="line-clamp-2 text-sm font-medium">{catalog.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{catalog.supplierName ?? t("catalogs.unassigned")}</p>
-                      <p className="text-xs text-muted-foreground">{t("pins.viewedAt", { date: formatDateTime(catalog.viewedAt) })}</p>
-                      <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
-                        {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}
-                      </Badge>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+          <Button asChild variant="link" size="sm" className="text-muted-foreground">
+            <Link to="/catalogs">
+              {t("pins.viewAllRecent")}
+              <ArrowRight />
+            </Link>
+          </Button>
+        </div>
+        {recentCatalogsQuery.error ? <ErrorAlert message={errorMessage(recentCatalogsQuery.error)} /> : null}
+        {recentCatalogsQuery.isLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[0, 1, 2, 3].map((index) => (
+              <Skeleton key={index} className="h-64 rounded-xl" />
+            ))}
+          </div>
+        ) : recentCatalogs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("pins.recentCatalogsEmpty")}</p>
+        ) : (
+          <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {recentCatalogs.map((catalog) => (
+              <RecentCatalogCard key={catalog.id} catalog={catalog} onPinChange={() => void refreshDashboard()} />
+            ))}
+          </ul>
+        )}
+      </section>
 
-      <Card className="gap-0 overflow-hidden py-0">
-        <div className="border-b p-4">
+      <section ref={listsRef} className="scroll-mt-20 space-y-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-base font-semibold">{t("pins.workflowTitle")}</h2>
+          <p className="text-xs text-muted-foreground">{t("pins.workflowHint")}</p>
+        </div>
+
+        <Card className="flex-row flex-wrap items-center gap-3 px-4 py-3">
           <SearchForm
             label={t("pins.searchLabel")}
             placeholder={t("pins.searchPlaceholder")}
@@ -162,190 +247,163 @@ export function DashboardPage() {
             onChange={list.setSearchInput}
             onSearch={list.submitSearch}
           />
-        </div>
-        <div className="grid gap-3 p-4 md:grid-cols-3">
-          <SelectField
-            label={t("pins.pinType")}
-            value={pinType}
-            onChange={(value) => list.setFilter("pinType", value)}
-            options={[
-              { value: "", label: t("pins.allTypes") },
-              { value: "catalog", label: t("pins.typeCatalog") },
-              { value: "supplier", label: t("pins.typeSupplier") },
-              { value: "product", label: t("pins.typeProduct") },
-            ]}
-          />
-          <SelectField
-            label={t("pins.sharedType")}
-            value={shareType}
-            onChange={(value) => list.setFilter("shareType", value)}
-            options={[
-              { value: "", label: t("pins.allTypes") },
-              { value: "catalog", label: t("pins.typeCatalog") },
-              { value: "supplier", label: t("pins.typeSupplier") },
-              { value: "product", label: t("pins.typeProduct") },
-            ]}
-          />
-          <SelectField
-            label={t("pins.visibility")}
-            value={hidden}
-            onChange={(value) => list.setFilter("hidden", value)}
-            options={[
-              { value: "", label: t("pins.allShares") },
-              { value: "false", label: t("pins.visibleShares") },
-              { value: "true", label: t("pins.hiddenShares") },
-            ]}
-          />
-        </div>
-      </Card>
-
-      {dashboardQuery.isLoading ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {[0, 1, 2].map((column) => (
-            <Card key={column} className="gap-3 py-4">
-              <CardHeader><Skeleton className="h-5 w-32" /></CardHeader>
-              <CardContent><Skeleton className="h-28 w-full" /></CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-3">
-          <section className="min-w-0 space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-base font-semibold">{t("pins.sectionPins")}</h2>
-              <Badge variant="secondary">{dashboard?.pins.total ?? 0}</Badge>
+          <div className="flex flex-wrap gap-2">
+            <div className="w-40">
+              <SelectField hideLabel label={t("pins.pinType")} value={pinType} onChange={(value) => list.setFilter("pinType", value)} options={typeOptions} />
             </div>
-            {dashboard?.pins.items.length === 0 ? (
-              <Empty className="min-h-64 border bg-card">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon"><Pin /></EmptyMedia>
-                  <EmptyTitle>{t("pins.emptyPins")}</EmptyTitle>
-                </EmptyHeader>
-                <EmptyContent className="max-w-none">
-                  <div className="flex flex-wrap justify-center gap-2">
-                    <Button asChild variant="outline" size="sm"><Link to="/suppliers">{t("nav.suppliers")}</Link></Button>
-                    <Button asChild variant="outline" size="sm"><Link to="/catalogs">{t("nav.catalogs")}</Link></Button>
-                    <Button asChild variant="outline" size="sm"><Link to="/products">{t("nav.products")}</Link></Button>
-                  </div>
-                </EmptyContent>
-              </Empty>
-            ) : (
-              <div className="space-y-3">
-                {dashboard?.pins.items.map((item) => (
-                  <Card key={`${item.itemType}-${item.itemId}`} className="gap-3 py-4 transition-transform hover:-translate-y-0.5">
-                    <CardHeader className="pb-0">
-                      <div className="flex items-start gap-3">
-                        <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted"><ItemIcon type={item.itemType} /></div>
-                        <div className="min-w-0">
-                          <CardTitle className="line-clamp-2 text-base">{localize(item.name)}</CardTitle>
-                          <CardDescription className="mt-1">{t(`pins.type.${item.itemType}`)}</CardDescription>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      {item.pinnedAt ? <p className="mb-3 text-xs text-muted-foreground">{formatDateTime(item.pinnedAt)}</p> : null}
-                      <div className="flex flex-wrap gap-2">
-                        <Button asChild variant="outline" size="sm"><Link to={itemPath(item)}><Eye />{t("pins.open")}</Link></Button>
-                        <Button variant="outline" size="sm" onClick={() => setShareTarget({ itemType: item.itemType, itemId: item.itemId, name: localize(item.name), recipientIds: [], note: null })}><Share2 />{t("pins.share")}</Button>
-                        <Button variant="ghost" size="sm" onClick={() => void unpin(item)}><Pin className="fill-current" />{t("pins.unpin")}</Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+            <div className="w-40">
+              <SelectField hideLabel label={t("pins.sharedType")} value={shareType} onChange={(value) => list.setFilter("shareType", value)} options={typeOptions} />
+            </div>
+            <div className="w-44">
+              <SelectField
+                hideLabel
+                label={t("pins.visibility")}
+                value={hidden}
+                onChange={(value) => list.setFilter("hidden", value)}
+                options={[
+                  { value: "", label: t("pins.allShares") },
+                  { value: "false", label: t("pins.visibleShares") },
+                  { value: "true", label: t("pins.hiddenShares") },
+                ]}
+              />
+            </div>
+          </div>
+          <p className="ml-auto hidden text-xs text-muted-foreground xl:block">{t("pins.searchHint")}</p>
+        </Card>
+
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+          <Card className="gap-0 py-0">
+            <Tabs value={tab} onValueChange={(value) => setTab(value as ListTab)} className="gap-0">
+              <div className="flex h-12 items-center justify-between gap-3 border-b px-4">
+                <TabsList variant="line" className="gap-5 p-0 group-data-horizontal/tabs:h-full">
+                  <TabsTrigger value="pinned" className="h-full flex-none px-1 data-active:text-primary group-data-horizontal/tabs:after:bottom-[-1px] after:bg-primary">
+                    <Pin />
+                    {t("pins.sectionPins")}
+                    <Badge variant="secondary">{loading ? "—" : pinnedCount}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="sent" className="h-full flex-none px-1 data-active:text-primary group-data-horizontal/tabs:after:bottom-[-1px] after:bg-primary">
+                    <Share2 />
+                    {t("pins.sectionSent")}
+                    <Badge variant="secondary">{loading ? "—" : sentCount}</Badge>
+                  </TabsTrigger>
+                </TabsList>
+                <span className="text-xs text-muted-foreground">{t("pins.recentlyAdded")}</span>
               </div>
-            )}
-          </section>
 
-          <section className="min-w-0 space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-base font-semibold">{t("pins.sectionShared")}</h2>
-              <Badge variant="secondary">{dashboard?.received.total ?? 0}</Badge>
+              <TabsContent value="pinned">
+                {loading ? (
+                  <Skeleton className="m-4 h-40" />
+                ) : dashboard?.pins.items.length === 0 ? (
+                  <Empty className="min-h-64 border-0">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon"><Pin /></EmptyMedia>
+                      <EmptyTitle>{t("pins.emptyPins")}</EmptyTitle>
+                      <EmptyDescription>{t("pins.emptyPinsHint")}</EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent className="max-w-none">
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Button asChild variant="outline" size="sm"><Link to="/suppliers">{t("nav.suppliers")}</Link></Button>
+                        <Button asChild variant="outline" size="sm"><Link to="/catalogs">{t("nav.catalogs")}</Link></Button>
+                        <Button asChild variant="outline" size="sm"><Link to="/products">{t("nav.products")}</Link></Button>
+                      </div>
+                    </EmptyContent>
+                  </Empty>
+                ) : (
+                  <ul>
+                    {dashboard?.pins.items.map((item) => (
+                      <DashboardRow
+                        key={`${item.itemType}-${item.itemId}`}
+                        item={item}
+                        subtitle={t(`pins.type.${item.itemType}`)}
+                        date={item.pinnedAt ? formatDateShort(item.pinnedAt) : null}
+                        actions={
+                          <>
+                            <IconAction label={t("pins.share")} icon={Share2} onClick={() => shareItem(item)} />
+                            <IconAction label={t("pins.unpin")} icon={Pin} className="text-primary [&_svg]:fill-current" onClick={() => void unpin(item)} />
+                          </>
+                        }
+                      />
+                    ))}
+                  </ul>
+                )}
+              </TabsContent>
+
+              <TabsContent value="sent">
+                {loading ? (
+                  <Skeleton className="m-4 h-40" />
+                ) : dashboard?.sent.items.length === 0 ? (
+                  <Empty className="min-h-64 border-0">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon"><Share2 /></EmptyMedia>
+                      <EmptyTitle>{t("pins.emptySent")}</EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <ul>
+                    {dashboard?.sent.items.map((item) => (
+                      <DashboardRow
+                        key={`${item.itemType}-${item.itemId}`}
+                        item={item}
+                        subtitle={`${t(`pins.type.${item.itemType}`)} · ${item.recipients.map((recipient) => recipient.displayName || recipient.email).join(", ")}`}
+                        date={item.sharedAt ? formatDateShort(item.sharedAt) : null}
+                        note={item.note}
+                        actions={
+                          <>
+                            <IconAction
+                              label={t("pins.editShare")}
+                              icon={Pencil}
+                              onClick={() => shareItem(item, { recipientIds: item.recipients.map((recipient) => recipient.id), note: item.note })}
+                            />
+                            <IconAction label={t("pins.revoke")} icon={Trash2} destructive onClick={() => void revokeSent(item)} />
+                          </>
+                        }
+                      />
+                    ))}
+                  </ul>
+                )}
+              </TabsContent>
+            </Tabs>
+          </Card>
+
+          <Card className="gap-0 py-0">
+            <div className="flex h-12 items-center justify-between gap-3 border-b px-4">
+              <h3 className="flex items-center gap-2 text-sm font-medium">
+                <Users className="size-4 text-muted-foreground" />
+                {t("pins.sectionShared")}
+              </h3>
+              <Badge variant="secondary">{loading ? "—" : receivedCount}</Badge>
             </div>
-            {dashboard?.received.items.length === 0 ? (
-              <Empty className="min-h-64 border bg-card">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon"><Users /></EmptyMedia>
-                  <EmptyTitle>{t("pins.emptyShared")}</EmptyTitle>
-                </EmptyHeader>
-              </Empty>
+            {loading ? (
+              <Skeleton className="m-4 h-40" />
+            ) : dashboard?.received.items.length === 0 ? (
+              <SharedEmptyState />
             ) : (
-              <div className="space-y-3">
+              <ul>
                 {dashboard?.received.items.map((item) => (
-                  <Card key={`${item.itemType}-${item.itemId}`} className="gap-3 py-4 transition-transform hover:-translate-y-0.5">
-                    <CardHeader className="pb-0">
-                      <div className="flex items-start gap-3">
-                        <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted"><ItemIcon type={item.itemType} /></div>
-                        <div className="min-w-0">
-                          <CardTitle className="line-clamp-2 text-base">{localize(item.name)}</CardTitle>
-                          <CardDescription className="mt-1">{item.sender?.displayName || item.sender?.email} · {t(`pins.type.${item.itemType}`)}</CardDescription>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {item.note ? <p className="line-clamp-3 rounded-md bg-muted px-3 py-2 text-sm">{item.note}</p> : null}
-                      {item.sharedAt ? <p className="text-xs text-muted-foreground">{formatDateTime(item.sharedAt)}</p> : null}
-                      <div className="flex flex-wrap gap-2">
-                        <Button asChild variant="outline" size="sm"><Link to={itemPath(item)}><Eye />{t("pins.open")}</Link></Button>
-                        <Button variant="outline" size="sm" onClick={() => void setShareHidden(item, !item.hidden)}>{item.hidden ? t("pins.restore") : t("pins.hide")}</Button>
-                        <Button variant="outline" size="sm" onClick={() => setShareTarget({ itemType: item.itemType, itemId: item.itemId, name: localize(item.name), recipientIds: [], note: null })}><Share2 />{t("pins.reshare")}</Button>
-                        <Button variant="outline" size="sm" onClick={async () => {
-                          await apiRequest("POST", "/pins", { itemType: item.itemType, itemId: item.itemId });
-                          await queryClient.invalidateQueries({ queryKey: ["pin-dashboard"] });
-                        }}><Pin />{t("pins.pin")}</Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <DashboardRow
+                    key={`${item.itemType}-${item.itemId}`}
+                    item={item}
+                    compact
+                    subtitle={`${t("pins.fromSender", { name: item.sender?.displayName || item.sender?.email })} · ${t(`pins.type.${item.itemType}`)}`}
+                    note={item.note}
+                    actions={
+                      <>
+                        <IconAction
+                          label={item.hidden ? t("pins.restore") : t("pins.hide")}
+                          icon={item.hidden ? Eye : EyeOff}
+                          onClick={() => void setShareHidden(item, !item.hidden)}
+                        />
+                        <IconAction label={t("pins.reshare")} icon={Share2} onClick={() => shareItem(item)} />
+                        <IconAction label={t("pins.pin")} icon={Pin} onClick={() => void pin(item)} />
+                      </>
+                    }
+                  />
                 ))}
-              </div>
+              </ul>
             )}
-          </section>
-
-          <section className="min-w-0 space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-base font-semibold">{t("pins.sectionRecent")}</h2>
-              <Badge variant="secondary">{dashboard?.sent.total ?? 0}</Badge>
-            </div>
-            {dashboard?.sent.items.length === 0 ? (
-              <Empty className="min-h-64 border bg-card">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon"><Share2 /></EmptyMedia>
-                  <EmptyTitle>{t("pins.emptyRecent")}</EmptyTitle>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              <div className="space-y-3">
-                {dashboard?.sent.items.map((item) => (
-                  <Card key={`${item.itemType}-${item.itemId}`} className="gap-3 py-4 transition-transform hover:-translate-y-0.5">
-                    <CardHeader className="pb-0">
-                      <div className="flex items-start gap-3">
-                        <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted"><ItemIcon type={item.itemType} /></div>
-                        <div className="min-w-0">
-                          <CardTitle className="line-clamp-2 text-base">{localize(item.name)}</CardTitle>
-                          <CardDescription className="mt-1">{item.recipients.map((recipient) => recipient.displayName || recipient.email).join(", ")}</CardDescription>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {item.note ? <p className="line-clamp-3 rounded-md bg-muted px-3 py-2 text-sm">{item.note}</p> : null}
-                      <div className="flex flex-wrap gap-2">
-                        <Button asChild variant="outline" size="sm"><Link to={itemPath(item)}><Eye />{t("pins.open")}</Link></Button>
-                        <Button variant="outline" size="sm" onClick={() => setShareTarget({
-                          itemType: item.itemType,
-                          itemId: item.itemId,
-                          name: localize(item.name),
-                          recipientIds: item.recipients.map((recipient) => recipient.id),
-                          note: item.note,
-                        })}>{t("pins.editShare")}</Button>
-                        <Button variant="destructive" size="sm" onClick={() => void revokeSent(item)}><Trash2 />{t("pins.revoke")}</Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </section>
+          </Card>
         </div>
-      )}
+      </section>
 
       {shareTarget ? (
         <ShareItemDialog
@@ -356,7 +414,7 @@ export function DashboardPage() {
           itemName={shareTarget.name}
           recipientIds={shareTarget.recipientIds}
           note={shareTarget.note}
-          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["pin-dashboard"] })}
+          onSaved={() => void refreshDashboard()}
         />
       ) : null}
     </div>
