@@ -8,7 +8,10 @@ Status: **implemented**. Production use requires the deployment checks below.
 Allow an external script or integration to upload a PDF catalog over HTTPS using
 an existing administrator's email address and password. A caller may omit the
 catalog name; the server immediately generates one from the uploaded filename.
-No Gemini request blocks upload. A later, explicitly started full analysis may
+No Gemini request blocks the upload response. When catalog analysis is enabled, the
+server queues supplier and tag analysis for the new catalog after the upload, and the
+detected supplier and tags are assigned automatically when the analysis completes. A
+later, explicitly started full analysis may
 replace that generated placeholder and assign a complete root-to-leaf category
 path. The catalog is created without a supplier and can be edited in the existing UI.
 
@@ -27,8 +30,9 @@ the application, not just this endpoint.
 - Catalog uploads validate both PDF MIME type and `%PDF-` signature, store files
   under generated private storage keys, and write catalog metadata and audit
   records transactionally. Reuse this service rather than duplicating it.
-- Analysis is disabled by default and, when enabled, is started explicitly.
-  An upload remains `not_processed` and must not start analysis or import data.
+- Analysis is disabled by default. When enabled, a new upload queues supplier and
+  tag analysis (the response still reports `not_processed`) and the results are
+  applied automatically; uploads never import products.
 - Existing session-authenticated endpoints and CSRF rules remain unchanged;
   browser and machine-to-machine uploads use the same metadata inference.
 
@@ -275,4 +279,4 @@ catalog accepted for upload.
   audit actor and request context, with the upload audit transactional; no
   credentials or file contents appear in audit or captured logs.
 - Verify HTTPS-only public access, proxy error envelope and file-size limit,
-  and that upload requests do not start analysis or create products.
+  and that upload requests queue supplier and tag analysis only when analysis is enabled and never create products.

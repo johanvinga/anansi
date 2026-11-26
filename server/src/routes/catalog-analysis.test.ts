@@ -15,6 +15,7 @@ import {
   seedUser,
   unsafeHeaders,
 } from "../test/helpers.js";
+import { autoApplyCatalogAnalysis } from "../services/catalog-auto-populate.service.js";
 
 const PDF = Buffer.from("%PDF-1.4 split prompt catalog\n%%EOF\n");
 
@@ -89,6 +90,107 @@ describe("split catalog analysis", () => {
       .get(`/api/v1/catalogs/${catalogId}/extraction`)
       .set("Cookie", readerCookie);
     expect(view.status).toBe(200);
+  });
+
+  it("queues supplier and tag analysis when a catalog is uploaded", async () => {
+    const jobs = await db.catalogExtractionJob.findMany({ where: { catalogId }, orderBy: { prompt: "asc" } });
+    expect(jobs.map((job) => [job.prompt, job.status])).toEqual([["supplier", "queued"], ["tags", "queued"]]);
+  });
+
+  it("assigns supplier and tags automatically without confirmation", async () => {
+    const existingTag = await db.tag.create({ data: { nameEn: "Chair", nameFr: "Fauteuil", nameKey: "chair" } });
+    await db.catalogExtractionJob.updateMany({
+      where: { catalogId, prompt: "supplier" },
+      data: {
+        status: "processed",
+        results: {
+          supplier: {
+            name: { value: "Auto Supplier", pageNumber: 1, excerpt: "Auto Supplier" },
+            city: { value: "Montreal", pageNumber: 1, excerpt: "Montreal" },
+            contacts: [{ name: { value: "Jane", pageNumber: 1, excerpt: "Jane" }, role: null }],
+          },
+        },
+      },
+    });
+    await db.catalogExtractionJob.updateMany({
+      where: { catalogId, prompt: "tags" },
+      data: {
+        status: "processed",
+        results: {
+          catalogTags: [{ en: "Chair", fr: "Fauteuil" }, { en: "Desk", fr: "Bureau" }],
+          products: [],
+        },
+      },
+    });
+    const jobs = await db.catalogExtractionJob.findMany({ where: { catalogId } });
+    for (const job of jobs) await autoApplyCatalogAnalysis(db, job.id);
+
+    const catalog = await db.catalog.findUniqueOrThrow({
+      where: { id: catalogId },
+      include: { supplier: true, tags: { include: { tag: true } } },
+    });
+    expect(catalog.supplier).toMatchObject({ name: "Auto Supplier", city: "Montreal" });
+    expect(catalog.tags.map((link) => link.tag.nameEn).sort()).toEqual(["Chair", "Desk"]);
+    expect(catalog.tags.some((link) => link.tagId === existingTag.id)).toBe(true);
+    expect(await db.supplierContact.count({ where: { supplierId: catalog.supplierId! } })).toBe(1);
+    const audits = await db.auditLog.count({ where: { entityId: catalogId, action: "CATALOG_UPDATE" } });
+    expect(audits).toBe(2);
+  });
+
+  it("keeps a supplier that was assigned manually", async () => {
+    const manual = await db.supplier.create({ data: { name: "Manual", nameKey: "manual" } });
+    await db.catalog.update({ where: { id: catalogId }, data: { supplierId: manual.id } });
+    await db.catalogExtractionJob.updateMany({
+      where: { catalogId, prompt: "supplier" },
+      data: {
+        status: "processed",
+        results: { supplier: { name: { value: "Other", pageNumber: 1, excerpt: "Other" }, contacts: [] } },
+      },
+    });
+    const job = await db.catalogExtractionJob.findFirstOrThrow({ where: { catalogId, prompt: "supplier" } });
+    await autoApplyCatalogAnalysis(db, job.id);
+    const catalog = await db.catalog.findUniqueOrThrow({ where: { id: catalogId } });
+    expect(catalog.supplierId).toBe(manual.id);
+    expect(await db.supplier.count()).toBe(1);
+  });
+
+  it("populates only catalogs that miss a supplier or tags, for admins only", async () => {
+    const supplier = await db.supplier.create({ data: { name: "Complete", nameKey: "complete" } });
+    const tag = await db.tag.create({ data: { nameEn: "Lamp", nameFr: "Lampe", nameKey: "lamp" } });
+    await db.catalog.update({
+      where: { id: catalogId },
+      data: { supplierId: supplier.id, tags: { create: [{ tagId: tag.id }] } },
+    });
+    await db.catalogExtractionJob.deleteMany({ where: { catalogId } });
+
+    const forbidden = await request(app.server)
+      .post("/api/v1/catalogs/populate")
+      .set(unsafeHeaders(readerCookie))
+      .send({ catalogIds: [catalogId] });
+    expect(forbidden.status).toBe(403);
+
+    const complete = await request(app.server)
+      .post("/api/v1/catalogs/populate")
+      .set(unsafeHeaders(adminCookie))
+      .send({ catalogIds: [catalogId] });
+    expect(complete.status).toBe(200);
+    expect(complete.body.results).toEqual([{ catalogId, outcome: "complete" }]);
+    expect(await db.catalogExtractionJob.count({ where: { catalogId } })).toBe(0);
+
+    await db.catalogTag.deleteMany({ where: { catalogId } });
+    const queued = await request(app.server)
+      .post("/api/v1/catalogs/populate")
+      .set(unsafeHeaders(adminCookie))
+      .send({ catalogIds: [catalogId] });
+    expect(queued.body.results).toEqual([{ catalogId, outcome: "queued" }]);
+    const jobs = await db.catalogExtractionJob.findMany({ where: { catalogId } });
+    expect(jobs.map((job) => job.prompt)).toEqual(["tags"]);
+
+    const invalid = await request(app.server)
+      .post("/api/v1/catalogs/populate")
+      .set(unsafeHeaders(adminCookie))
+      .send({ catalogIds: [] });
+    expect(invalid.status).toBe(400);
   });
 
   it("creates and applies exact supplier and tag review suggestions", async () => {

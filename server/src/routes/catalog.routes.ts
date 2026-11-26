@@ -22,6 +22,10 @@ import {
   uploadCatalog,
 } from "../services/catalog.service.js";
 import {
+  populateCatalogs,
+  populateUploadedCatalog,
+} from "../services/catalog-auto-populate.service.js";
+import {
   applyCatalogSupplierReview,
   applyCatalogTagReview,
   reviewCatalogSupplierAnalysis,
@@ -78,6 +82,10 @@ const catalogParamsSchema = z.object({ catalogId: uuidSchema });
 const catalogImageParamsSchema = z.object({ catalogId: uuidSchema, jobId: uuidSchema, imageId: uuidSchema });
 const startExtractionSchema = z.object({
   prompt: z.enum(["supplier", "tags"]).default("supplier"),
+});
+
+const populateSchema = z.object({
+  catalogIds: z.array(uuidSchema).min(1).max(500),
 });
 
 const tagReviewSchema = z.object({
@@ -182,12 +190,19 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
       throw errors.validation([{ field: "supplierId", message: "Supplier does not match the URL." }]);
     }
     const result = await uploadCatalog(deps, context(request), supplierId ?? metadata.supplierId, file, metadata);
+    await populateUploadedCatalog(deps, context(request), result.catalog.id, deps.extractionQueue);
     return reply.status(201).send({ catalog: result.catalog });
   };
   app.post("/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => handleUpload(request, reply));
   app.post("/suppliers/:id/catalogs", { preHandler: guards.requireAdmin }, async (request, reply) => {
     const { id } = parseInput(idParamsSchema, request.params);
     return handleUpload(request, reply, id);
+  });
+
+  app.post("/catalogs/populate", { preHandler: guards.requireAdmin }, async (request) => {
+    if (!deps.extractionQueue) throw new AppError(503, "FEATURE_DISABLED", "Catalog analysis is disabled.");
+    const body = parseInput(populateSchema, request.body);
+    return { results: await populateCatalogs(deps, context(request), body.catalogIds, deps.extractionQueue) };
   });
 
   app.get("/catalogs/:catalogId/extraction", { preHandler: guards.requireUser }, async (request) => {

@@ -4,9 +4,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createWorker } from "tesseract.js";
 import { z } from "zod";
+import type { FastifyBaseLogger } from "fastify";
 import type { Database } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
+import { autoApplyCatalogAnalysis } from "./catalog-auto-populate.service.js";
 import { GeminiRateLimitError } from "./gemini-request-limiter.js";
 
 const evidenceSchema = z.object({
@@ -563,7 +565,7 @@ export function createGeminiCatalogAnalyzer(apiKey: string, model: string, limit
 
 export async function processGeminiCatalogExtraction(
   extractionJobId: string,
-  deps: { db: Database; storage: AssetStorage; maxPages: number; maxBytes?: number },
+  deps: { db: Database; storage: AssetStorage; maxPages: number; maxBytes?: number; log?: FastifyBaseLogger },
   analyzeCatalog: CatalogAnalyzer,
   prompt: "supplier" | "tags" = "supplier",
 ): Promise<void> {
@@ -632,6 +634,7 @@ export async function processGeminiCatalogExtraction(
         data: { analysisStatus: categoriesAnalyzed ? "processed" : "metadata_only" },
       });
     }, { timeout: 120_000 });
+    await autoApplyCatalogAnalysis(deps.db, job.id, deps.log);
   } finally {
     await loadingTask.destroy();
   }

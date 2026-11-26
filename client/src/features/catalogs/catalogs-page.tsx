@@ -1,7 +1,7 @@
 ﻿import { useTranslation } from "react-i18next";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, ScanSearch, Trash2 } from "lucide-react";
+import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, ScanSearch, Sparkles, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { loadSettings } from "../../api/settings";
 import { localize } from "../../api/translations";
 import type { CatalogWithSupplier, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
-import { ErrorAlert } from "../../components/error-alert";
+import { ErrorAlert, SuccessAlert } from "../../components/error-alert";
 import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
 import { useBulkDelete } from "../../hooks/use-bulk-delete";
 import { TagFilter } from "../../components/tag-filter";
@@ -43,7 +43,12 @@ interface CatalogActionsProps {
   onEdit: (catalog: CatalogWithSupplier) => void;
   onDelete: (catalog: CatalogWithSupplier) => void;
   onReview: (catalog: CatalogWithSupplier) => void;
+  onPopulate: (catalog: CatalogWithSupplier) => void;
   onPinChange: () => void;
+}
+
+function needsPopulating(catalog: CatalogWithSupplier): boolean {
+  return !catalog.supplierId || catalog.tags.length === 0;
 }
 
 function CatalogActions({
@@ -53,13 +58,23 @@ function CatalogActions({
   onEdit,
   onDelete,
   onReview,
+  onPopulate,
   onPinChange,
 }: CatalogActionsProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const analyzing = catalog.analysisStatus === "queued" || catalog.analysisStatus === "processing";
 
   return (
     <div className="flex items-center justify-end gap-1">
+      {isAdmin && analysisEnabled && needsPopulating(catalog) ? (
+        <IconAction
+          label={t("catalogs.populate")}
+          icon={Sparkles}
+          disabled={analyzing}
+          onClick={() => onPopulate(catalog)}
+        />
+      ) : null}
       <PinItemButton
         itemType="catalog"
         itemId={catalog.id}
@@ -133,6 +148,9 @@ export function CatalogsPage() {
   const [editing, setEditing] = useState<CatalogWithSupplier | null>(null);
   const [deleting, setDeleting] = useState<CatalogWithSupplier | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [populating, setPopulating] = useState(false);
+  const [populateError, setPopulateError] = useState<string | null>(null);
+  const [populateNotice, setPopulateNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
   const analysisEnabled = settingsQuery.data?.catalogExtractionEnabled === true;
@@ -146,6 +164,11 @@ export function CatalogsPage() {
     queryKey: ["catalogs", "all", { page, pageSize, search, categoryIds }],
     queryFn: () => loadCatalogs(page, pageSize),
     placeholderData: keepPreviousData,
+    // Keep the list fresh while analysis jobs fill in suppliers and tags.
+    refetchInterval: (query) =>
+      query.state.data?.items.some((item) => item.analysisStatus === "queued" || item.analysisStatus === "processing")
+        ? 3000
+        : false,
   });
   const result = catalogsQuery.data;
   usePageClamp(list, result?.total);
@@ -161,6 +184,26 @@ export function CatalogsPage() {
     },
   });
   const visibleItems = (result?.items ?? []).map((item) => ({ id: item.id, label: item.name }));
+
+  async function populate(ids: string[]) {
+    setPopulating(true);
+    setPopulateError(null);
+    setPopulateNotice(null);
+    try {
+      const response = await apiRequest<{ results: { catalogId: string; outcome: string }[] }>(
+        "POST",
+        "/catalogs/populate",
+        { catalogIds: ids },
+      );
+      const queued = response.results.filter((item) => item.outcome === "queued").length;
+      setPopulateNotice(queued > 0 ? t("catalogs.populateQueued", { count: queued }) : t("catalogs.populateNothing"));
+      await queryClient.invalidateQueries({ queryKey: ["catalogs"] });
+    } catch (error) {
+      setPopulateError(errorMessage(error));
+    } finally {
+      setPopulating(false);
+    }
+  }
 
   async function deleteCatalog() {
     if (!deleting) return;
@@ -202,13 +245,36 @@ export function CatalogsPage() {
         }
       >
 
-        {deleteError || catalogsQuery.error || settingsQuery.error ? (
+        {deleteError || populateError || catalogsQuery.error || settingsQuery.error ? (
           <div className="px-4 pb-4">
-            <ErrorAlert message={deleteError ?? (catalogsQuery.error ? errorMessage(catalogsQuery.error) : settingsQuery.error ? errorMessage(settingsQuery.error) : null)} />
+            <ErrorAlert message={deleteError ?? populateError ?? (catalogsQuery.error ? errorMessage(catalogsQuery.error) : settingsQuery.error ? errorMessage(settingsQuery.error) : null)} />
+          </div>
+        ) : null}
+        {populateNotice ? (
+          <div className="px-4 pb-4">
+            <SuccessAlert message={populateNotice} />
           </div>
         ) : null}
 
-        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={pageSize} warning={t("bulkDelete.catalogsWarning")} /> : null}
+        {isAdmin ? (
+          <BulkDeleteControls
+            selection={bulk}
+            visibleItems={visibleItems}
+            total={result?.total}
+            pageSize={pageSize}
+            warning={t("bulkDelete.catalogsWarning")}
+            actions={analysisEnabled ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={bulk.busy || populating}
+                onClick={() => void populate(bulk.selected.map((item) => item.id))}
+              >
+                <Sparkles />{t("catalogs.populateSelected")}
+              </Button>
+            ) : null}
+          />
+        ) : null}
         <Table aria-label={t("catalogs.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -258,6 +324,7 @@ export function CatalogsPage() {
                     onEdit={setEditing}
                     onDelete={setDeleting}
                     onReview={setReviewing}
+                    onPopulate={(item) => void populate([item.id])}
                     onPinChange={() => void queryClient.invalidateQueries({ queryKey: ["catalogs"] })}
                   />
                 </TableCell>
