@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { errors } from "../errors.js";
+import { listResponse, optionalSkipTake, type PageRequest } from "../lib/pagination.js";
 import { PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated } from "../lib/translations.js";
 import { AuditAction, diffFields, recordAudit, type AuditRequestContext } from "./audit.service.js";
@@ -9,19 +10,44 @@ import type { CreateFieldInput } from "./attribute-set.service.js";
 import { normalizeOptionLabels } from "./attribute-option-labels.js";
 import { assertUniqueIndependentName } from "./independent-attribute-names.js";
 
-export async function listIndependentAttributes(db: Database, request: AuditRequestContext) {
-  const rows = await db.attributeField.findMany({
-    where: { attributeSetId: null, isArchived: false },
-    orderBy: { nameEn: "asc" },
-    include: { options: { orderBy: { sortOrder: "asc" } }, _count: { select: { values: true } } },
-  });
+export async function listIndependentAttributes(
+  db: Database,
+  request: AuditRequestContext,
+  filters: { q?: string | undefined; page?: PageRequest | null } = {},
+) {
+  const pageRequest = filters.page ?? null;
+  const where: Prisma.AttributeFieldWhereInput = {
+    attributeSetId: null,
+    isArchived: false,
+    ...(filters.q
+      ? {
+          OR: [
+            { nameEn: { contains: filters.q, mode: "insensitive" } },
+            { nameFr: { contains: filters.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+  const [total, rows] = await db.$transaction([
+    db.attributeField.count({ where }),
+    db.attributeField.findMany({
+      where,
+      orderBy: [{ nameEn: "asc" }, { id: "asc" }],
+      include: { options: { orderBy: { sortOrder: "asc" } }, _count: { select: { values: true } } },
+      ...optionalSkipTake(pageRequest),
+    }),
+  ]);
   await recordAudit(db, request, { action: AuditAction.ATTRIBUTE_FIELD_LIST, outcome: "success" });
-  return { items: rows.map((row) => ({
-    id: row.id, name: { en: row.nameEn, fr: row.nameFr }, code: row.code,
-    dataType: row.dataType, unit: row.unit, isRequired: false, isArchived: row.isArchived, sortOrder: row.sortOrder,
-    options: row.options.map((option) => ({ id: option.id, label: { en: option.labelEn, fr: option.labelFr }, sortOrder: option.sortOrder })),
-    hasValues: row._count.values > 0,
-  })) };
+  return listResponse(
+    rows.map((row) => ({
+      id: row.id, name: { en: row.nameEn, fr: row.nameFr }, code: row.code,
+      dataType: row.dataType, unit: row.unit, isRequired: false, isArchived: row.isArchived, sortOrder: row.sortOrder,
+      options: row.options.map((option) => ({ id: option.id, label: { en: option.labelEn, fr: option.labelFr }, sortOrder: option.sortOrder })),
+      hasValues: row._count.values > 0,
+    })),
+    total,
+    pageRequest,
+  );
 }
 
 export async function createIndependentAttribute(db: Database, request: AuditRequestContext, input: CreateFieldInput) {

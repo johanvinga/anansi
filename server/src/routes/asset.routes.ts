@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
 import { attachmentDisposition } from "../lib/pdf.js";
-import { parseInput, uuidSchema } from "../lib/validation.js";
+import { optionalPaginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
+import { resolvePage } from "../lib/pagination.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import {
   deleteAsset,
@@ -50,7 +51,8 @@ export function registerAssetRoutes(app: FastifyInstance, assetDeps: AssetDeps, 
 
   app.get("/suppliers/:id/assets", { preHandler: guards.requireUser }, async (request) => {
     const { id } = parseInput(idParamsSchema, request.params);
-    return listAssets(deps.db, context(request), id);
+    const query = parseInput(optionalPaginationSchema, request.query);
+    return listAssets(deps.db, context(request), id, resolvePage(query));
   });
 
   app.post("/suppliers/:id/assets", { preHandler: guards.requireAdmin }, async (request, reply) => {

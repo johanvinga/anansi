@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useId, useState, type FormEvent } from "react";
 import { KeyRound, Pencil, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -29,8 +29,7 @@ import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
 import { SelectField, type SelectOption } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
-
-const PAGE_SIZE = 25;
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 function useRoleOptions(): SelectOption[] {
   const { t } = useTranslation();
@@ -44,9 +43,8 @@ export function UsersPage() {
   const { user: me } = useAuth();
   const { t } = useTranslation();
   const roleOptions = useRoleOptions();
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
+  const list = usePagedList();
+  const { search, page, pageSize } = list;
   const [rowError, setRowError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<CurrentUser | null>(null);
@@ -54,16 +52,18 @@ export function UsersPage() {
   const [deactivating, setDeactivating] = useState<CurrentUser | null>(null);
 
   const usersQuery = useQuery({
-    queryKey: ["users", { page, pageSize: PAGE_SIZE, search }],
+    queryKey: ["users", { page, pageSize, search }],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (search) {
         params.set("q", search);
       }
       return apiRequest<Page<CurrentUser>>("GET", `/users?${params.toString()}`);
     },
+    placeholderData: keepPreviousData,
   });
   const result = usersQuery.data;
+  usePageClamp(list, result?.total);
   const refresh = () => usersQuery.refetch();
 
   async function changeRole(target: CurrentUser, role: UserRole) {
@@ -102,12 +102,9 @@ export function UsersPage() {
         <SearchForm
           label={t("users.searchLabel")}
           placeholder={t("users.searchPlaceholder")}
-          value={query}
-          onChange={setQuery}
-          onSearch={() => {
-            setPage(1);
-            setSearch(query.trim());
-          }}
+          value={list.searchInput}
+          onChange={list.setSearchInput}
+          onSearch={list.submitSearch}
         />
         <Button size="lg" onClick={() => setCreateOpen(true)}>
           <Plus />
@@ -188,7 +185,7 @@ export function UsersPage() {
         </Table>
 
         {result ? (
-          <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
+          <PaginationControls total={result.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
         ) : null}
       </Card>
 

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { parseInput, uuidSchema } from "../lib/validation.js";
+import { optionalPaginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
+import { resolvePage } from "../lib/pagination.js";
 import type { Database } from "../db.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import { archiveTag, listTags, createTag, renameTag } from "../services/tag.service.js";
@@ -33,7 +34,8 @@ export function registerTagRoutes(app: FastifyInstance, db: Database, guards: Gu
   });
 
   app.get("/tags", { preHandler: guards.requireUser }, async (request) => {
-    return listTags(db, context(request));
+    const query = parseInput(optionalPaginationSchema, request.query);
+    return listTags(db, context(request), false, resolvePage(query));
   });
 
   app.post("/tags", { preHandler: guards.requireAdmin }, async (request, reply) => {

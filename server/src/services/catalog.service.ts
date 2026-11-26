@@ -3,6 +3,7 @@ import type { Readable } from "node:stream";
 import type { CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
+import { listResponse, type PageRequest } from "../lib/pagination.js";
 import { hasPdfSignature, PDF_MIME_TYPE, sanitizeFileName } from "../lib/pdf.js";
 import { nameKeyOf } from "../lib/text.js";
 import type { CatalogExtractionQueue } from "./catalog-extraction.queue.js";
@@ -14,6 +15,7 @@ import {
 } from "./audit.service.js";
 import { removeStoredFiles, type AssetDeps, type UploadedFile } from "./asset.service.js";
 import { queueStoredFileRemoval } from "./stored-file-cleanup.js";
+import { listPinnedFirst } from "./pinned-first.js";
 import { readPrivateImage } from "../lib/read-private-image.js";
 import { resolveTagIds } from "./tag.service.js";
 export interface CatalogDeps extends AssetDeps {
@@ -163,7 +165,7 @@ async function enqueueExtraction(
 /**
  * Lists catalogs across all suppliers (the catalogs page). Search matches catalog name,
  * version, supplier name, or catalog tag name; tagIds matches catalog or effective supplier tags.
- * Sorted newest first, the last-added order the page defaults to.
+ * Pinned catalogs come first (most recently pinned first), then newest first, the last-added order the page defaults to.
  */
 export async function listAllCatalogs(
   db: Database,
@@ -199,16 +201,18 @@ export async function listAllCatalogs(
     }] : undefined,
   };
 
-  const [total, rows] = await db.$transaction([
-    db.catalog.count({ where }),
-    db.catalog.findMany({
-      where,
-      include: summaryInclude,
-      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-    }),
-  ]);
+  const total = await db.catalog.count({ where });
+  const { rows, pinnedIds } = await listPinnedFirst(db, request.actor.userId, "catalog", filters, {
+    matchingIds: async (ids) =>
+      (await db.catalog.findMany({ where: { AND: [where, { id: { in: ids } }] }, select: { id: true } })).map((row) => row.id),
+    fetch: (id, window) =>
+      db.catalog.findMany({
+        where: { AND: [where, { id }] },
+        include: summaryInclude,
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...window,
+      }),
+  });
 
   const tagNamesBySupplier = new Map<string, string[]>();
   await Promise.all(
@@ -228,14 +232,6 @@ export async function listAllCatalogs(
       );
     }),
   );
-
-  const pinnedRows = request.actor.userId && rows.length > 0
-    ? await db.pinnedItem.findMany({
-        where: { userId: request.actor.userId, itemType: "catalog", itemId: { in: rows.map((row) => row.id) } },
-        select: { itemId: true },
-      })
-    : [];
-  const pinnedIds = new Set(pinnedRows.map((row) => row.itemId));
 
   const toSummaryDto = (row: CatalogSummaryRow): CatalogSummaryDto => ({
     ...toCatalogDto(row),
@@ -287,6 +283,62 @@ export async function getCatalog(
   return toCatalogDto(row);
 }
 
+export interface RecentCatalogViewDto {
+  id: string;
+  name: string;
+  version: string | null;
+  supplierName: string | null;
+  analysisStatus: CatalogAnalysisStatus;
+  viewedAt: string;
+}
+
+const RECENT_CATALOG_LIMIT = 8;
+
+/**
+ * Catalogs the current user most recently opened (metadata or inline PDF views), newest first.
+ * Derived from the user's own audit entries; catalogs deleted since are skipped.
+ */
+export async function listRecentCatalogViews(
+  db: Database,
+  request: AuditRequestContext,
+): Promise<{ items: RecentCatalogViewDto[] }> {
+  const views = await db.auditLog.groupBy({
+    by: ["entityId"],
+    where: {
+      actorUserId: request.actor.userId,
+      action: { in: [AuditAction.CATALOG_VIEW, AuditAction.CATALOG_PDF_VIEW] },
+      outcome: "success",
+      entityType: "Catalog",
+      entityId: { not: null },
+    },
+    _max: { occurredAt: true },
+    orderBy: { _max: { occurredAt: "desc" } },
+    take: 50,
+  });
+  const ids = views.flatMap((view) => view.entityId ? [view.entityId] : []);
+  const catalogs = await db.catalog.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, version: true, analysisStatus: true, supplier: { select: { name: true } } },
+  });
+  const byId = new Map(catalogs.map((catalog) => [catalog.id, catalog]));
+  const items: RecentCatalogViewDto[] = [];
+  for (const view of views) {
+    const catalog = view.entityId ? byId.get(view.entityId) : undefined;
+    const viewedAt = view._max.occurredAt;
+    if (!catalog || !viewedAt) continue;
+    items.push({
+      id: catalog.id,
+      name: catalog.name,
+      version: catalog.version,
+      supplierName: catalog.supplier?.name ?? null,
+      analysisStatus: catalog.analysisStatus,
+      viewedAt: viewedAt.toISOString(),
+    });
+    if (items.length === RECENT_CATALOG_LIMIT) break;
+  }
+  return { items };
+}
+
 function catalogSnapshot(row: CatalogRow): Record<string, unknown> {
   return { name: row.name, version: row.version, supplierId: row.supplierId, tags: row.tags.map((link) => link.tagId).sort() };
 }
@@ -296,12 +348,25 @@ async function assertSupplierExists(db: Database | Prisma.TransactionClient, sup
   if (!supplier) throw errors.notFound("Supplier");
 }
 
-export async function listCatalogs(db: Database, request: AuditRequestContext, supplierId: string) {
+export async function listCatalogs(
+  db: Database,
+  request: AuditRequestContext,
+  supplierId: string,
+  pageRequest: PageRequest | null = null,
+) {
   await assertSupplierExists(db, supplierId);
-  const rows = await db.catalog.findMany({
-    where: { supplierId },
-    include: catalogInclude,
-    orderBy: [{ name: "asc" }, { version: "asc" }],
+  const where = { supplierId };
+  const total = await db.catalog.count({ where });
+  const { rows, pinnedIds } = await listPinnedFirst(db, request.actor.userId, "catalog", pageRequest, {
+    matchingIds: async (ids) =>
+      (await db.catalog.findMany({ where: { ...where, id: { in: ids } }, select: { id: true } })).map((row) => row.id),
+    fetch: (id, window) =>
+      db.catalog.findMany({
+        where: { ...where, id },
+        include: catalogInclude,
+        orderBy: [{ name: "asc" }, { version: "asc" }, { id: "asc" }],
+        ...window,
+      }),
   });
   await recordAudit(db, request, {
     action: AuditAction.CATALOG_LIST,
@@ -309,7 +374,11 @@ export async function listCatalogs(db: Database, request: AuditRequestContext, s
     entityType: "Supplier",
     entityId: supplierId,
   });
-  return { items: rows.map(toCatalogDto) };
+  return listResponse(
+    rows.map((row) => ({ ...toCatalogDto(row), pinned: pinnedIds.has(row.id) })),
+    total,
+    pageRequest,
+  );
 }
 
 export async function uploadCatalog(

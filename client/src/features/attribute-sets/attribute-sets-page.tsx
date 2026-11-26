@@ -1,7 +1,7 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Eye, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,16 +20,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
-import type { AttributeDataType, AttributeField, AttributeSetDetail, AttributeSetSummary } from "../../api/types";
+import type { AttributeDataType, AttributeField, AttributeSetDetail, AttributeSetSummary, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { FormField } from "../../components/form-field";
 import { ErrorAlert } from "../../components/error-alert";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { IconAction } from "../../components/icon-action";
 import { PageBreadcrumbs } from "../../components/page-breadcrumbs";
+import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
 import { SelectField } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 import { AttributeSetBuilder } from "./attribute-set-builder";
 
 export function AttributeSetsPage() {
@@ -38,15 +40,10 @@ export function AttributeSetsPage() {
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const [createOpen, setCreateOpen] = useState(false);
-  const [tab, setTab] = useState("attributes");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "sets" ? "sets" : "attributes";
+  const setTab = (value: string) => setSearchParams(value === "sets" ? { tab: "sets" } : {});
   const queryClient = useQueryClient();
-
-  const setsQuery = useQuery({
-    queryKey: ["attribute-sets"],
-    queryFn: async () => (await apiRequest<{ items: AttributeSetSummary[] }>("GET", "/attribute-sets")).items,
-  });
-  const sets = setsQuery.data ?? [];
-  const loaded = setsQuery.isSuccess;
 
   return (
     <>
@@ -67,49 +64,7 @@ export function AttributeSetsPage() {
                   </Button>
                 </div>
               ) : null}
-              <Card className="gap-0 py-0">
-        {setsQuery.error ? (
-          <div className="px-4 pb-4">
-            <ErrorAlert message={errorMessage(setsQuery.error)} />
-          </div>
-        ) : null}
-
-        <Table aria-label="Attribute sets">
-          <TableHeader className="bg-muted/50">
-            <TableRow>
-              <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
-              <TableHead className="text-right">{t("attributeSets.fields")}</TableHead>
-              <TableHead className="text-right">{t("attributeSets.products")}</TableHead>
-              <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loaded && sets.length === 0 ? <TableEmptyRow colSpan={4} message="No attribute sets yet." /> : null}
-            {sets.map((set) => (
-              <TableRow key={set.id}>
-                <TableCell className="pl-4 font-medium">
-                  <Link to={`/attribute-sets/${set.id}`} className="hover:underline">
-                    {localize(set.name)}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-right">
-                  <Badge variant="secondary">{set.fieldCount}</Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  <Badge variant={set.productCount > 0 ? "info" : "secondary"}>{set.productCount}</Badge>
-                </TableCell>
-                <TableCell className="pr-4 text-right">
-                  <IconAction
-                    label={isAdmin ? `Open builder for ${localize(set.name)}` : `View ${localize(set.name)}`}
-                    icon={isAdmin ? Settings2 : Eye}
-                    onClick={() => navigate(`/attribute-sets/${set.id}`)}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-              </Card>
+              <AttributeSetsTable isAdmin={isAdmin} />
             </TabsContent>
         </Tabs>
       </div>
@@ -128,6 +83,73 @@ export function AttributeSetsPage() {
   );
 }
 
+interface AttributeSetsTableProps {
+  isAdmin: boolean;
+}
+
+function AttributeSetsTable({ isAdmin }: AttributeSetsTableProps) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const list = usePagedList();
+  const { page, pageSize } = list;
+  const setsQuery = useQuery({
+    queryKey: ["attribute-sets", "page", { page, pageSize }],
+    queryFn: () => apiRequest<Page<AttributeSetSummary>>("GET", `/attribute-sets?page=${page}&pageSize=${pageSize}`),
+    placeholderData: keepPreviousData,
+  });
+  usePageClamp(list, setsQuery.data?.total);
+  const sets = setsQuery.data?.items ?? [];
+
+  return (
+    <Card className="gap-0 py-0">
+      {setsQuery.error ? (
+        <div className="px-4 pb-4">
+          <ErrorAlert message={errorMessage(setsQuery.error)} />
+        </div>
+      ) : null}
+
+      <Table aria-label="Attribute sets">
+        <TableHeader className="bg-muted/50">
+          <TableRow>
+            <TableHead className="pl-4">{t("suppliers.name")}</TableHead>
+            <TableHead className="text-right">{t("attributeSets.fields")}</TableHead>
+            <TableHead className="text-right">{t("attributeSets.products")}</TableHead>
+            <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {setsQuery.data && sets.length === 0 ? <TableEmptyRow colSpan={4} message="No attribute sets yet." /> : null}
+          {sets.map((set) => (
+            <TableRow key={set.id}>
+              <TableCell className="pl-4 font-medium">
+                <Link to={`/attribute-sets/${set.id}`} className="hover:underline">
+                  {localize(set.name)}
+                </Link>
+              </TableCell>
+              <TableCell className="text-right">
+                <Badge variant="secondary">{set.fieldCount}</Badge>
+              </TableCell>
+              <TableCell className="text-right">
+                <Badge variant={set.productCount > 0 ? "info" : "secondary"}>{set.productCount}</Badge>
+              </TableCell>
+              <TableCell className="pr-4 text-right">
+                <IconAction
+                  label={isAdmin ? `Open builder for ${localize(set.name)}` : `View ${localize(set.name)}`}
+                  icon={isAdmin ? Settings2 : Eye}
+                  onClick={() => navigate(`/attribute-sets/${set.id}`)}
+                />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {setsQuery.data ? (
+        <PaginationControls total={setsQuery.data.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
+      ) : null}
+    </Card>
+  );
+}
+
 interface IndependentAttributesProps {
   isAdmin: boolean;
 }
@@ -136,8 +158,8 @@ function IndependentAttributes({ isAdmin }: IndependentAttributesProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [queryText, setQueryText] = useState("");
-  const [search, setSearch] = useState("");
+  const list = usePagedList();
+  const { search, page, pageSize } = list;
   const [editing, setEditing] = useState<string | null>(null);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [migrateConfirm, setMigrateConfirm] = useState(false);
@@ -151,12 +173,16 @@ function IndependentAttributes({ isAdmin }: IndependentAttributesProps) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const query = useQuery({
-    queryKey: ["independent-attributes"],
-    queryFn: async () => (await apiRequest<{ items: AttributeField[] }>("GET", "/attributes")).items,
+    queryKey: ["independent-attributes", "page", { page, pageSize, search }],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (search) params.set("q", search);
+      return apiRequest<Page<AttributeField>>("GET", `/attributes?${params.toString()}`);
+    },
+    placeholderData: keepPreviousData,
   });
-  const attributes = (query.data ?? []).filter((attribute) =>
-    [attribute.name.en, attribute.name.fr].some((name) => name.toLowerCase().includes(search.toLowerCase())),
-  );
+  usePageClamp(list, query.data?.total);
+  const attributes = query.data?.items ?? [];
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -216,9 +242,9 @@ function IndependentAttributes({ isAdmin }: IndependentAttributesProps) {
         <SearchForm
           label={t("attributes.searchLabel")}
           placeholder={t("attributes.searchPlaceholder")}
-          value={queryText}
-          onChange={setQueryText}
-          onSearch={() => setSearch(queryText.trim())}
+          value={list.searchInput}
+          onChange={list.setSearchInput}
+          onSearch={list.submitSearch}
         />
         {isAdmin ? <div className="flex flex-wrap gap-2">
           <Button size="lg" onClick={() => { setEditing(null); setNameEn(""); setNameFr(""); setDataType("text"); setUnit(""); setOptions([""]); setError(null); setOpen(true); }}><Plus />{t("attributes.create")}</Button>
@@ -233,7 +259,7 @@ function IndependentAttributes({ isAdmin }: IndependentAttributesProps) {
         <Table>
           <TableHeader className="bg-muted/50"><TableRow><TableHead className="pl-4">{t("suppliers.name")}</TableHead><TableHead>{t("attributeSets.dataType")}</TableHead>{isAdmin ? <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead> : null}</TableRow></TableHeader>
           <TableBody>
-            {query.isSuccess && attributes.length === 0 ? <TableEmptyRow colSpan={isAdmin ? 3 : 2} message={t(search ? "attributes.noResults" : "attributes.empty")} /> : null}
+            {query.data && attributes.length === 0 ? <TableEmptyRow colSpan={isAdmin ? 3 : 2} message={t(search ? "attributes.noResults" : "attributes.empty")} /> : null}
             {attributes.map((attribute) => <TableRow key={attribute.id}>
               <TableCell className="pl-4">{localize(attribute.name)}</TableCell><TableCell>{t(`attributeSets.${{ text: "typeText", number: "typeNumberWhole", decimal: "typeDecimal", boolean: "typeBoolean", date: "typeDate", select: "typeSelect" }[attribute.dataType]}`)}</TableCell>
               {isAdmin ? <TableCell className="pr-4 text-right">
@@ -243,6 +269,9 @@ function IndependentAttributes({ isAdmin }: IndependentAttributesProps) {
             </TableRow>)}
           </TableBody>
         </Table>
+        {query.data ? (
+          <PaginationControls total={query.data.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
+        ) : null}
       </Card>
       {open ? (
         <Dialog open onOpenChange={(value) => !value && setOpen(false)}>

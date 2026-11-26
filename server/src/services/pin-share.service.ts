@@ -112,8 +112,6 @@ export async function getPinDashboard(db: Database, request: AuditRequestContext
   shareType?: PinShareItemType;
   senderId?: string;
   hidden?: boolean;
-  page: number;
-  pageSize: number;
 }) {
   const userId = request.actor.userId!;
   const pinWhere = {
@@ -228,11 +226,10 @@ export async function getPinDashboard(db: Database, request: AuditRequestContext
   const sent = [...sentMap.values()].filter(matchesSearch)
     .sort((a, b) => (b.sharedAt ?? "").localeCompare(a.sharedAt ?? ""));
 
-  const slice = <T>(items: T[]) => items.slice((filters.page - 1) * filters.pageSize, filters.page * filters.pageSize);
   return {
-    pins: { items: slice(pins), total: pins.length, page: filters.page, pageSize: filters.pageSize },
-    received: { items: slice(received), total: received.length, page: filters.page, pageSize: filters.pageSize },
-    sent: { items: slice(sent), total: sent.length, page: filters.page, pageSize: filters.pageSize },
+    pins: { items: pins, total: pins.length },
+    received: { items: received, total: received.length },
+    sent: { items: sent, total: sent.length },
   };
 }
 

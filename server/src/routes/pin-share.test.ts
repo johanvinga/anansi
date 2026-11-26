@@ -65,6 +65,44 @@ describe("pinned and shared items", () => {
     expect(unpin.status).toBe(200);
   });
 
+  it("lists pinned items first, most recently pinned first, across pages", async () => {
+    const reader = await db.user.findUniqueOrThrow({ where: { email: READER.email } });
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+    const suppliers = [];
+    for (const name of names) {
+      suppliers.push(await db.supplier.create({ data: { name, nameKey: name.toLowerCase() } }));
+    }
+    const [alpha, , charlie, , echo] = suppliers;
+    const pin = (itemId: string, pinnedAt: Date) =>
+      db.pinnedItem.create({ data: { userId: reader.id, itemType: "supplier", itemId, pinnedAt } });
+    await pin(echo!.id, new Date("2026-01-01T00:00:00Z"));
+    await pin(alpha!.id, new Date("2026-01-02T00:00:00Z"));
+    await pin(charlie!.id, new Date("2026-01-03T00:00:00Z"));
+
+    const fetchPage = async (page: number, query = "") => {
+      const response = await request(app.server)
+        .get(`/api/v1/suppliers?page=${page}&pageSize=2${query}`)
+        .set("Cookie", readerCookie);
+      expect(response.status).toBe(200);
+      return response.body as { items: { name: string; pinned: boolean }[]; total: number };
+    };
+
+    const first = await fetchPage(1);
+    const second = await fetchPage(2);
+    const third = await fetchPage(3);
+    expect(first.total).toBe(5);
+    expect([...first.items, ...second.items, ...third.items].map((item) => item.name)).toEqual([
+      "Charlie", "Alpha", "Echo", "Bravo", "Delta",
+    ]);
+    expect([...first.items, ...second.items].map((item) => item.pinned)).toEqual([true, true, true, false]);
+
+    const filtered = await fetchPage(1, "&q=a");
+    expect(filtered.items.map((item) => item.name)).toEqual(["Charlie", "Alpha"]);
+
+    const adminView = await request(app.server).get("/api/v1/suppliers?pageSize=2").set("Cookie", adminCookie);
+    expect(adminView.body.items.map((item: { name: string }) => item.name)).toEqual(["Alpha", "Bravo"]);
+  });
+
   it("shares an item, supports hidden restore, and audits share and revoke", async () => {
     const supplier = await createSupplier();
     const share = await request(app.server)

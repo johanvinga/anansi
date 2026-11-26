@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Database } from "../db.js";
-import { parseInput, uuidSchema } from "../lib/validation.js";
+import { optionalPaginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
+import { resolvePage } from "../lib/pagination.js";
 import { translatedNameInput, translatedNameUpdate } from "../lib/translations.js";
 import {
   addField,
@@ -20,6 +21,7 @@ import {
 import { auditContext, type Guards } from "./route-helpers.js";
 
 const setUpdateSchema = z.object({ name: translatedNameUpdate(100) });
+const listQuerySchema = optionalPaginationSchema.extend({ q: z.string().trim().max(200).optional() });
 const dataTypeSchema = z.enum(["text", "number", "decimal", "boolean", "date", "select"]);
 const fieldNameSchema = translatedNameInput(100);
 const unitSchema = z.string().trim().max(20).nullish();
@@ -55,9 +57,10 @@ const setParams = z.object({ id: uuidSchema });
 const fieldParams = z.object({ id: uuidSchema, fieldId: uuidSchema });
 
 export function registerAttributeSetRoutes(app: FastifyInstance, db: Database, guards: Guards): void {
-  app.get("/attribute-sets", { preHandler: guards.requireUser }, async (request) =>
-    listAttributeSets(db, auditContext(request)),
-  );
+  app.get("/attribute-sets", { preHandler: guards.requireUser }, async (request) => {
+    const query = parseInput(listQuerySchema, request.query);
+    return listAttributeSets(db, auditContext(request), { q: query.q || undefined, page: resolvePage(query) });
+  });
 
   app.post("/attribute-sets", { preHandler: guards.requireAdmin }, async (request, reply) => {
     const body = parseInput(setCreateSchema, request.body);

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Eye, Filter, X } from "lucide-react";
@@ -23,8 +23,7 @@ import { IconAction } from "../../components/icon-action";
 import { PageHeader } from "../../components/page-header";
 import { PaginationControls } from "../../components/pagination-controls";
 import { TableEmptyRow } from "../../components/table-empty-row";
-
-const PAGE_SIZE = 25;
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 interface Filters {
   action: string;
@@ -46,21 +45,34 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
 
 export function AuditLogPage() {
   const { t } = useTranslation();
-  const [draft, setDraft] = useState<Filters>(emptyFilters);
-  const [filters, setFilters] = useState<Filters>(emptyFilters);
-  const [page, setPage] = useState(1);
+  const list = usePagedList();
+  const { page, pageSize } = list;
+  const filters: Filters = {
+    action: list.getFilter("action"),
+    entityType: list.getFilter("entityType"),
+    from: list.getFilter("from"),
+    to: list.getFilter("to"),
+  };
+  const [draft, setDraft] = useState<Filters>(filters);
+  const filtersKey = JSON.stringify(filters);
+  const [syncedFiltersKey, setSyncedFiltersKey] = useState(filtersKey);
+  if (syncedFiltersKey !== filtersKey) {
+    setSyncedFiltersKey(filtersKey);
+    setDraft(filters);
+  }
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const logsQuery = useQuery({
-    queryKey: ["audit-log", { page, pageSize: PAGE_SIZE, filters }],
+    queryKey: ["audit-log", { page, pageSize, filters }],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (filters.action) params.set("action", filters.action.trim());
       if (filters.entityType) params.set("entityType", filters.entityType.trim());
       if (filters.from) params.set("from", new Date(`${filters.from}T00:00:00Z`).toISOString());
       if (filters.to) params.set("to", new Date(`${filters.to}T23:59:59.999Z`).toISOString());
       return apiRequest<Page<AuditLogSummary>>("GET", `/audit-log?${params.toString()}`);
     },
+    placeholderData: keepPreviousData,
   });
   const detailQuery = useQuery({
     queryKey: ["audit-entry", selectedId],
@@ -69,19 +81,23 @@ export function AuditLogPage() {
       (await apiRequest<{ entry: AuditLogDetail }>("GET", `/audit-log/${selectedId}`)).entry,
   });
   const result = logsQuery.data;
+  usePageClamp(list, result?.total);
   const detail = detailQuery.data;
   const error = logsQuery.error ?? detailQuery.error;
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPage(1);
-    setFilters(draft);
+    list.setFilterValues({
+      action: draft.action.trim() || null,
+      entityType: draft.entityType.trim() || null,
+      from: draft.from || null,
+      to: draft.to || null,
+    });
   }
 
   function clearFilters() {
     setDraft(emptyFilters);
-    setPage(1);
-    setFilters(emptyFilters);
+    list.setFilterValues({ action: null, entityType: null, from: null, to: null });
   }
 
   return (
@@ -164,7 +180,7 @@ export function AuditLogPage() {
         </Table>
 
         {result ? (
-          <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
+          <PaginationControls total={result.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
         ) : null}
       </Card>
 

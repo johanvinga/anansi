@@ -21,6 +21,8 @@ enum CatalogAnalysisStatus {
   not_processed
   queued
   processing
+  /// Supplier metadata analysis completed; category (tags) analysis has not.
+  metadata_only
   processed
   failed
 }

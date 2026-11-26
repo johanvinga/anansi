@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, Pencil, Plus, Trash2 } from "lucide-react";
@@ -17,13 +17,15 @@ import { FieldGroup } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, apiUpload, errorMessage, ApiError } from "../../api/client";
 import { formatSize } from "../../api/format";
-import type { SupplierAsset } from "../../api/types";
+import type { Page, SupplierAsset } from "../../api/types";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
 import { AssetFileField } from "../../components/asset-file-field";
+import { PaginationControls } from "../../components/pagination-controls";
 import { TableEmptyRow } from "../../components/table-empty-row";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 interface AssetsPanelProps {
   supplierId: string;
@@ -39,12 +41,16 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
   const [editing, setEditing] = useState<SupplierAsset | null>(null);
   const [deleting, setDeleting] = useState<SupplierAsset | null>(null);
   const queryClient = useQueryClient();
+  const list = usePagedList();
+  const { page, pageSize } = list;
   const assetsQuery = useQuery({
-    queryKey: ["assets", supplierId],
+    queryKey: ["assets", supplierId, { page, pageSize }],
     queryFn: async () =>
-      (await apiRequest<{ items: SupplierAsset[] }>("GET", `/suppliers/${supplierId}/assets`)).items,
+      apiRequest<Page<SupplierAsset>>("GET", `/suppliers/${supplierId}/assets?page=${page}&pageSize=${pageSize}`),
+    placeholderData: keepPreviousData,
   });
-  const assets = assetsQuery.data ?? [];
+  const assets = assetsQuery.data?.items ?? [];
+  usePageClamp(list, assetsQuery.data?.total);
   const refresh = () => {
     setError(null);
     void assetsQuery.refetch();
@@ -88,7 +94,7 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {assets.length === 0 ? <TableEmptyRow colSpan={6} message={t("suppliers.noAssets")} /> : null}
+            {assetsQuery.data && assets.length === 0 ? <TableEmptyRow colSpan={6} message={t("suppliers.noAssets")} /> : null}
             {assets.map((asset) => (
               <TableRow key={asset.id}>
                 <TableCell className="pl-4 whitespace-normal">
@@ -130,6 +136,9 @@ export function AssetsPanel({ supplierId, isAdmin }: AssetsPanelProps) {
             ))}
           </TableBody>
         </Table>
+        {assetsQuery.data ? (
+          <PaginationControls total={assetsQuery.data.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
+        ) : null}
       </Card>
 
       {editing ? (

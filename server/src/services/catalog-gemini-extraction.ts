@@ -623,7 +623,13 @@ export async function processGeminiCatalogExtraction(
         where: { id: job.id },
         data: { status: "processed", stage: "completed", progress: 100, currentPage: totalPages, totalPages, productsIdentified: products.length, results, processingError: null, completedAt: new Date() },
       });
-      await tx.catalog.update({ where: { id: job.catalogId }, data: { analysisStatus: "processed" } });
+      const categoriesAnalyzed = prompt === "tags" || await tx.catalogExtractionJob.count({
+        where: { catalogId: job.catalogId, prompt: "tags", status: "processed" },
+      }) > 0;
+      await tx.catalog.update({
+        where: { id: job.catalogId },
+        data: { analysisStatus: categoriesAnalyzed ? "processed" : "metadata_only" },
+      });
     }, { timeout: 120_000 });
   } finally {
     await loadingTask.destroy();

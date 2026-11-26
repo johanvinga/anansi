@@ -1,5 +1,5 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -31,8 +31,7 @@ import { TableEmptyRow } from "../../components/table-empty-row";
 import { ProductForm } from "./product-form";
 import { PinItemButton } from "../../components/pin-item-button";
 import { ShareItemButton } from "../../components/share-item-button";
-
-const PAGE_SIZE = 25;
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 function productSelectionItem(product: ProductSummary) {
   return { id: product.id, label: `${localize(product.name)} (${product.supplierSku})` };
@@ -49,12 +48,11 @@ interface ProductsPanelProps {
 export function ProductsPanel({ supplierId, isAdmin, initialProductId }: ProductsPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
-  const [categoryIds, setCategoryIds] = useState<string[]>([]);
-  const [uncategorized, setUncategorized] = useState(false);
-  const [page, setPage] = useState(1);
+  const list = usePagedList();
+  const { search, page, pageSize } = list;
+  const supplierFilter = list.getFilter("supplier") || null;
+  const categoryIds = list.getFilters("tag");
+  const uncategorized = list.getFilter("uncategorized") === "true";
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProductDetail | "new" | null>(null);
   const [viewingId, setViewingId] = useState<string | null>(initialProductId ?? null);
@@ -64,8 +62,8 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
 
 
   const effectiveSupplier = supplierId ?? supplierFilter ?? undefined;
-  async function loadProducts(targetPage: number, pageSize: number) {
-    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+  async function loadProducts(targetPage: number, size: number) {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(size) });
     if (search) params.set("q", search);
     if (effectiveSupplier) params.set("supplierId", effectiveSupplier);
     for (const id of categoryIds) params.append("tag", id);
@@ -73,8 +71,9 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
     return apiRequest<Page<ProductSummary>>("GET", `/products?${params.toString()}`);
   }
   const productsQuery = useQuery({
-    queryKey: ["products", { page, pageSize: PAGE_SIZE, search, supplierId: effectiveSupplier, categoryIds, uncategorized }],
-    queryFn: () => loadProducts(page, PAGE_SIZE),
+    queryKey: ["products", { page, pageSize, search, supplierId: effectiveSupplier, categoryIds, uncategorized }],
+    queryFn: () => loadProducts(page, pageSize),
+    placeholderData: keepPreviousData,
   });
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "picker", 100],
@@ -89,17 +88,17 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
       (await apiRequest<{ product: ProductDetail }>("GET", `/products/${viewingId}`)).product,
   });
   const result = productsQuery.data;
+  usePageClamp(list, result?.total);
   const suppliers = suppliersQuery.data ?? [];
   const viewing = detailQuery.data;
   const bulk = useBulkDelete({
     scope: JSON.stringify({ search, effectiveSupplier, categoryIds, uncategorized }),
     endpoint: "products",
-    loadPage: async (targetPage, pageSize) => {
-      const response = await loadProducts(targetPage, pageSize);
+    loadPage: async (targetPage, size) => {
+      const response = await loadProducts(targetPage, size);
       return { total: response.total, items: response.items.map(productSelectionItem) };
     },
     onDeleted: async () => {
-      setPage(1);
       await Promise.all(["products", "suppliers", "supplier", "catalogs"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
     },
   });
@@ -153,12 +152,9 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
               <SearchForm
                 label={t("products.searchLabel")}
                 placeholder={t("products.searchPlaceholder")}
-                value={query}
-                onChange={setQuery}
-                onSearch={() => {
-                  setPage(1);
-                  setSearch(query.trim());
-                }}
+                value={list.searchInput}
+                onChange={list.setSearchInput}
+                onSearch={list.submitSearch}
               />
             </div>
             {isAdmin ? (
@@ -171,8 +167,8 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
         }
         filters={
           <>
-            <TagFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }}
-              uncategorized={uncategorized} onUncategorizedChange={(value) => { setPage(1); setUncategorized(value); }} />
+            <TagFilter selected={categoryIds} onChange={(ids) => list.setFilters("tag", ids)}
+              uncategorized={uncategorized} onUncategorizedChange={(value) => list.setFilter("uncategorized", value ? "true" : null)} />
             {supplierId ? null : (
               <div className="w-56">
                 <SelectField
@@ -181,10 +177,7 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
                   placeholder={t("products.allSuppliers")}
                   options={[{ value: "", label: t("products.allSuppliers") }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
                   value={supplierFilter ?? ""}
-                  onChange={(value) => {
-                    setPage(1);
-                    setSupplierFilter(value || null);
-                  }}
+                  onChange={(value) => list.setFilter("supplier", value || null)}
                 />
               </div>
             )}
@@ -198,7 +191,7 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
           </div>
         ) : null}
 
-        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={PAGE_SIZE} warning={t("bulkDelete.productsWarning")} /> : null}
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={pageSize} warning={t("bulkDelete.productsWarning")} /> : null}
         <Table aria-label={supplierId ? "Products" : "All products"}>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -259,7 +252,7 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
           </TableBody>
         </Table>
 
-        {result ? <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} /> : null}
+        {result ? <PaginationControls total={result.total} pageSize={pageSize} page={page} onPageChange={list.setPage} /> : null}
       </PageLayout>
 
       {editing ? (
