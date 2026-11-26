@@ -28,3 +28,12 @@ export function formatDate(isoDate: string): string {
 export function formatDateTime(isoDate: string): string {
   return new Date(isoDate).toLocaleString(currentLocale());
 }
+
+/** Compact "Nov 25, 2026" style date for dense lists. */
+export function formatDateShort(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString(currentLocale(), { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function formatTime(isoDate: string): string {
+  return new Date(isoDate).toLocaleTimeString(currentLocale(), { hour: "numeric", minute: "2-digit" });
+}
