@@ -28,9 +28,6 @@ export const passwordSchema = z
   .max(256)
   .refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 bytes.");
 
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25),
-});
+export { optionalPaginationSchema, paginationSchema } from "./pagination.js";
 
 export const uuidSchema = z.uuid("Invalid identifier.");

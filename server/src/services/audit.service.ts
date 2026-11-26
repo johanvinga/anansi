@@ -1,6 +1,7 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
+import { skipTake } from "../lib/pagination.js";
 
 export const AuditAction = {
   LOGIN_SUCCESS: "LOGIN_SUCCESS",
@@ -176,8 +177,7 @@ export async function listAuditLogs(
     db.auditLog.findMany({
       where,
       orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
+      ...skipTake({ page, pageSize }),
     }),
   ]);
 

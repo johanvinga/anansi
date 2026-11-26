@@ -3,6 +3,7 @@ import type { Readable } from "node:stream";
 import type { CatalogAnalysisStatus, CatalogExtractionJob, Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
+import { listResponse, optionalSkipTake, skipTake, type PageRequest } from "../lib/pagination.js";
 import { hasPdfSignature, PDF_MIME_TYPE, sanitizeFileName } from "../lib/pdf.js";
 import { nameKeyOf } from "../lib/text.js";
 import type { CatalogExtractionQueue } from "./catalog-extraction.queue.js";
@@ -205,8 +206,7 @@ export async function listAllCatalogs(
       where,
       include: summaryInclude,
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
+      ...skipTake(filters),
     }),
   ]);
 
@@ -296,20 +296,30 @@ async function assertSupplierExists(db: Database | Prisma.TransactionClient, sup
   if (!supplier) throw errors.notFound("Supplier");
 }
 
-export async function listCatalogs(db: Database, request: AuditRequestContext, supplierId: string) {
+export async function listCatalogs(
+  db: Database,
+  request: AuditRequestContext,
+  supplierId: string,
+  pageRequest: PageRequest | null = null,
+) {
   await assertSupplierExists(db, supplierId);
-  const rows = await db.catalog.findMany({
-    where: { supplierId },
-    include: catalogInclude,
-    orderBy: [{ name: "asc" }, { version: "asc" }],
-  });
+  const where = { supplierId };
+  const [total, rows] = await db.$transaction([
+    db.catalog.count({ where }),
+    db.catalog.findMany({
+      where,
+      include: catalogInclude,
+      orderBy: [{ name: "asc" }, { version: "asc" }, { id: "asc" }],
+      ...optionalSkipTake(pageRequest),
+    }),
+  ]);
   await recordAudit(db, request, {
     action: AuditAction.CATALOG_LIST,
     outcome: "success",
     entityType: "Supplier",
     entityId: supplierId,
   });
-  return { items: rows.map(toCatalogDto) };
+  return listResponse(rows.map(toCatalogDto), total, pageRequest);
 }
 
 export async function uploadCatalog(

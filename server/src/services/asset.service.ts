@@ -5,6 +5,7 @@ import type { SupplierAsset } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
+import { listResponse, optionalSkipTake, type PageRequest } from "../lib/pagination.js";
 import { sanitizeFileName } from "../lib/pdf.js";
 import {
   AuditAction,
@@ -81,19 +82,29 @@ async function assertSupplierExists(db: Database, supplierId: string): Promise<v
   if (!supplier) throw errors.notFound("Supplier");
 }
 
-export async function listAssets(db: Database, request: AuditRequestContext, supplierId: string) {
+export async function listAssets(
+  db: Database,
+  request: AuditRequestContext,
+  supplierId: string,
+  pageRequest: PageRequest | null = null,
+) {
   await assertSupplierExists(db, supplierId);
-  const rows = await db.supplierAsset.findMany({
-    where: { supplierId },
-    orderBy: { createdAt: "desc" },
-  });
+  const where = { supplierId };
+  const [total, rows] = await db.$transaction([
+    db.supplierAsset.count({ where }),
+    db.supplierAsset.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      ...optionalSkipTake(pageRequest),
+    }),
+  ]);
   await recordAudit(db, request, {
     action: AuditAction.ASSET_LIST,
     outcome: "success",
     entityType: "Supplier",
     entityId: supplierId,
   });
-  return { items: rows.map(toAssetDto) };
+  return listResponse(rows.map(toAssetDto), total, pageRequest);
 }
 
 export async function uploadAsset(

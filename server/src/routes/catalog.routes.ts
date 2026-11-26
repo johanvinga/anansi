@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
 import { attachmentDisposition, inlineDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
-import { paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
+import { optionalPaginationSchema, paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
+import { resolvePage } from "../lib/pagination.js";
 import type { AuditRequestContext } from "../services/audit.service.js";
 import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
 import {
@@ -139,7 +140,8 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
 
   app.get("/suppliers/:id/catalogs", { preHandler: guards.requireUser }, async (request) => {
     const { id } = parseInput(idParamsSchema, request.params);
-    return listCatalogs(deps.db, context(request), id);
+    const query = parseInput(optionalPaginationSchema, request.query);
+    return listCatalogs(deps.db, context(request), id, resolvePage(query));
   });
 
   app.get("/catalogs/:catalogId", { preHandler: guards.requireUser }, async (request) => {

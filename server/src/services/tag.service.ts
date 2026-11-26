@@ -1,6 +1,7 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
+import { listResponse, optionalSkipTake, type PageRequest } from "../lib/pagination.js";
 import { nameKeyOf } from "../lib/text.js";
 import { AuditAction, diffFields, recordAudit, type AuditRequestContext } from "./audit.service.js";
 
@@ -26,13 +27,19 @@ function toDto(tag: { id: string; nameEn: string; nameFr: string; isArchived: bo
   };
 }
 
-export async function listTags(db: Database, request: AuditRequestContext, includeArchived = false) {
-  const tags = await db.tag.findMany({
-    where: includeArchived ? undefined : { isArchived: false },
-    orderBy: [{ nameEn: "asc" }, { id: "asc" }],
-  });
+export async function listTags(
+  db: Database,
+  request: AuditRequestContext,
+  includeArchived = false,
+  pageRequest: PageRequest | null = null,
+) {
+  const where = includeArchived ? undefined : { isArchived: false };
+  const [total, tags] = await db.$transaction([
+    db.tag.count({ where }),
+    db.tag.findMany({ where, orderBy: [{ nameEn: "asc" }, { id: "asc" }], ...optionalSkipTake(pageRequest) }),
+  ]);
   await recordAudit(db, request, { action: AuditAction.CATEGORY_LIST, outcome: "success", entityType: "Tag" });
-  return { items: tags.map(toDto) };
+  return listResponse(tags.map(toDto), total, pageRequest);
 }
 
 export async function createTag(db: Database, request: AuditRequestContext, input: TagInput): Promise<TagDto> {

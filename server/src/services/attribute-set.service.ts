@@ -1,6 +1,7 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
+import { listResponse, optionalSkipTake, type PageRequest } from "../lib/pagination.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated } from "../lib/translations.js";
 import { generateFieldCode, type AttributeDataType, type FieldDefinition } from "./attribute-values.js";
@@ -154,16 +155,34 @@ export async function loadFieldDefinitions(db: Database | Tx, setId: string): Pr
   }))].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-export async function listAttributeSets(db: Database, request: AuditRequestContext) {
-  const rows = await db.attributeSet.findMany({
-    orderBy: { nameEn: "asc" },
-    include: {
-      _count: { select: { fields: { where: { isArchived: false } }, sharedFields: { where: { isArchived: false, field: { isArchived: false } } }, products: true } },
-    },
-  });
+export async function listAttributeSets(
+  db: Database,
+  request: AuditRequestContext,
+  filters: { q?: string | undefined; page?: PageRequest | null } = {},
+) {
+  const pageRequest = filters.page ?? null;
+  const where: Prisma.AttributeSetWhereInput | undefined = filters.q
+    ? {
+        OR: [
+          { nameEn: { contains: filters.q, mode: "insensitive" } },
+          { nameFr: { contains: filters.q, mode: "insensitive" } },
+        ],
+      }
+    : undefined;
+  const [total, rows] = await db.$transaction([
+    db.attributeSet.count({ where }),
+    db.attributeSet.findMany({
+      where,
+      orderBy: [{ nameEn: "asc" }, { id: "asc" }],
+      include: {
+        _count: { select: { fields: { where: { isArchived: false } }, sharedFields: { where: { isArchived: false, field: { isArchived: false } } }, products: true } },
+      },
+      ...optionalSkipTake(pageRequest),
+    }),
+  ]);
   await recordAudit(db, request, { action: AuditAction.ATTRIBUTE_SET_LIST, outcome: "success" });
-  return {
-    items: rows.map((row) => ({
+  return listResponse(
+    rows.map((row) => ({
       id: row.id,
       name: { en: row.nameEn, fr: row.nameFr },
       fieldCount: row._count.fields + row._count.sharedFields,
@@ -171,7 +190,9 @@ export async function listAttributeSets(db: Database, request: AuditRequestConte
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     })),
-  };
+    total,
+    pageRequest,
+  );
 }
 
 export async function getAttributeSet(db: Database, request: AuditRequestContext, id: string) {

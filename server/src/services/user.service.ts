@@ -1,6 +1,7 @@
 import { Prisma, type User, type UserRole } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
+import { skipTake } from "../lib/pagination.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import {
   AuditAction,
@@ -70,8 +71,7 @@ export async function listUsers(
     db.user.findMany({
       where,
       orderBy: { email: "asc" },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
+      ...skipTake(filters),
     }),
   ]);
 

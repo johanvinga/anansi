@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { errors } from "../errors.js";
+import { skipTake } from "../lib/pagination.js";
 import type { AssetStorage } from "../lib/asset-storage.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import {
@@ -133,8 +134,7 @@ export async function listSuppliers(db: Database, request: AuditRequestContext, 
       where,
       include: detailInclude,
       orderBy: [{ name: "asc" }, { id: "asc" }],
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
+      ...skipTake(filters),
     }),
   ]);
 

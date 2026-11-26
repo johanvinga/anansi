@@ -1,6 +1,7 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { Database } from "../db.js";
 import { AppError, errors } from "../errors.js";
+import { skipTake } from "../lib/pagination.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import type { Translated, TranslatedText } from "../lib/translations.js";
 import { loadFieldDefinitions } from "./attribute-set.service.js";
@@ -292,8 +293,7 @@ export async function listProducts(db: Database, request: AuditRequestContext, f
       where,
       include: listInclude,
       orderBy: [{ nameEn: "asc" }, { id: "asc" }],
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
+      ...skipTake(filters),
     }),
   ]);
   await recordAudit(db, request, {
