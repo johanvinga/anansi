@@ -37,6 +37,12 @@ describe("loadConfig (SPEC §11)", () => {
     expect(loadConfig(required).geminiModel).toBe("gemini-3.1-flash-lite");
   });
 
+  it("configures the catalog analysis size limit in MiB", () => {
+    expect(loadConfig(required).catalogExtractionMaxMb).toBe(50);
+    expect(loadConfig({ ...required, CATALOG_EXTRACTION_MAX_MB: "120" }).catalogExtractionMaxMb).toBe(120);
+    expect(() => loadConfig({ ...required, CATALOG_EXTRACTION_MAX_MB: "0" })).toThrow(/CATALOG_EXTRACTION_MAX_MB/);
+  });
+
   it("requires SESSION_SECRET", () => {
     expect(() => loadConfig({ DATABASE_URL: required.DATABASE_URL })).toThrow(/SESSION_SECRET/);
   });

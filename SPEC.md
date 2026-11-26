@@ -841,6 +841,7 @@ normal authenticated `Origin` check.
 | `GEMINI_API_KEY` | Server-side Google AI Studio API key; required when analysis is enabled | – |
 | `GEMINI_MODEL` | Gemini model used for catalog analysis | `gemini-3.1-flash-lite` |
 | `CATALOG_EXTRACTION_MAX_PAGES` | Maximum pages analyzed per catalog | 300 |
+| `CATALOG_EXTRACTION_MAX_MB` | Maximum catalog PDF size in MiB accepted for analysis | 50 |
 | `CATALOG_EXTRACTION_CONCURRENCY` | Maximum concurrent catalog jobs | 1 |
 | `SESSION_SECRET` | Secret for session signing | – (required) |
 | `SESSION_IDLE_MINUTES` | Idle session timeout | 480 |

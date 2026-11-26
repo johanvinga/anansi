@@ -14,6 +14,7 @@ const envSchema = z.object({
     .positive()
     .max(500)
     .default(300),
+  CATALOG_EXTRACTION_MAX_MB: z.coerce.number().positive().default(50),
   CATALOG_EXTRACTION_CONCURRENCY: z.coerce
     .number()
     .int()
@@ -55,6 +56,7 @@ export interface AppConfig {
   geminiModel: string;
   catalogOcrLanguages: string;
   catalogExtractionMaxPages: number;
+  catalogExtractionMaxMb: number;
   catalogExtractionConcurrency: number;
   sessionSecret: string;
   sessionIdleMinutes: number;
@@ -109,6 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     geminiModel: e.GEMINI_MODEL,
     catalogOcrLanguages: e.CATALOG_OCR_LANGUAGES,
     catalogExtractionMaxPages: e.CATALOG_EXTRACTION_MAX_PAGES,
+    catalogExtractionMaxMb: e.CATALOG_EXTRACTION_MAX_MB,
     catalogExtractionConcurrency: e.CATALOG_EXTRACTION_CONCURRENCY,
     sessionSecret: e.SESSION_SECRET,
     sessionIdleMinutes: e.SESSION_IDLE_MINUTES,
