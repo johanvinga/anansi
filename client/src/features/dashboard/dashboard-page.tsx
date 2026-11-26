@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Eye, Package, Pin, Share2, Trash2, Truck, Users } from "lucide-react";
+import { BookOpen, Eye, History, Package, Pin, Share2, Trash2, Truck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiRequest, errorMessage } from "../../api/client";
-import type { DashboardSharedItem, PinDashboard, PinnedItemType } from "../../api/types";
+import type { DashboardSharedItem, PinDashboard, PinnedItemType, RecentCatalogView } from "../../api/types";
 import { localize } from "../../api/translations";
 import { formatDateTime } from "../../api/format";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
@@ -17,8 +17,7 @@ import { Badge } from "../../components/ui/badge";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "../../components/ui/empty";
 import { PageHeader } from "../../components/page-header";
-import { PaginationControls } from "../../components/pagination-controls";
-import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
+import { usePagedList } from "../../lib/use-paged-list";
 
 function itemPath(item: DashboardSharedItem) {
   if (item.itemType === "catalog") return `/catalogs/${item.itemId}/workspace`;
@@ -36,7 +35,7 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const list = usePagedList();
-  const { search, page, pageSize } = list;
+  const { search } = list;
   const pinType = list.getFilter("pinType") as PinnedItemType | "";
   const shareType = list.getFilter("shareType") as PinnedItemType | "";
   const hidden = list.getFilter("hidden") as "" | "true" | "false";
@@ -50,9 +49,9 @@ export function DashboardPage() {
   } | null>(null);
 
   const dashboardQuery = useQuery({
-    queryKey: ["pin-dashboard", { page, pageSize, search, pinType, shareType, hidden }],
+    queryKey: ["pin-dashboard", { search, pinType, shareType, hidden }],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      const params = new URLSearchParams();
       if (search) params.set("q", search);
       if (pinType) params.set("pinType", pinType);
       if (shareType) params.set("shareType", shareType);
@@ -60,6 +59,11 @@ export function DashboardPage() {
       return apiRequest<PinDashboard>("GET", `/pins/dashboard?${params.toString()}`);
     },
     placeholderData: keepPreviousData,
+  });
+
+  const recentCatalogsQuery = useQuery({
+    queryKey: ["catalogs", "recent"],
+    queryFn: () => apiRequest<{ items: RecentCatalogView[] }>("GET", "/catalogs/recent"),
   });
 
   async function unpin(item: DashboardSharedItem) {
@@ -82,9 +86,6 @@ export function DashboardPage() {
   }
 
   const dashboard = dashboardQuery.data;
-  // The server applies one page to all three sections, so the longest section sets the page count.
-  const longestSection = dashboard ? Math.max(dashboard.pins.total, dashboard.received.total, dashboard.sent.total) : undefined;
-  usePageClamp(list, longestSection);
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title={t("pins.dashboardTitle")} breadcrumbs={[{ label: t("pins.dashboardTitle") }]} />
@@ -108,6 +109,47 @@ export function DashboardPage() {
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card className="gap-0 overflow-hidden py-0">
+        <CardHeader className="border-b p-4">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <History className="size-4" />
+              {t("pins.recentCatalogsTitle")}
+            </CardTitle>
+            <Badge variant="secondary">{recentCatalogsQuery.data?.items.length ?? 0}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="p-4">
+          {recentCatalogsQuery.error ? <ErrorAlert message={errorMessage(recentCatalogsQuery.error)} /> : null}
+          {recentCatalogsQuery.isLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : recentCatalogsQuery.data?.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("pins.recentCatalogsEmpty")}</p>
+          ) : (
+            <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {recentCatalogsQuery.data?.items.map((catalog) => (
+                <li key={catalog.id}>
+                  <Link
+                    to={`/catalogs/${catalog.id}/workspace`}
+                    className="flex h-full items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                  >
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><BookOpen className="size-4" /></div>
+                    <div className="min-w-0 space-y-1">
+                      <p className="line-clamp-2 text-sm font-medium">{catalog.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{catalog.supplierName ?? t("catalogs.unassigned")}</p>
+                      <p className="text-xs text-muted-foreground">{t("pins.viewedAt", { date: formatDateTime(catalog.viewedAt) })}</p>
+                      <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
+                        {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}
+                      </Badge>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
 
@@ -304,12 +346,6 @@ export function DashboardPage() {
           </section>
         </div>
       )}
-
-      {longestSection !== undefined ? (
-        <Card className="gap-0 overflow-hidden py-0">
-          <PaginationControls total={longestSection} pageSize={pageSize} page={page} onPageChange={list.setPage} />
-        </Card>
-      ) : null}
 
       {shareTarget ? (
         <ShareItemDialog

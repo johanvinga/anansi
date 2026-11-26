@@ -11,18 +11,27 @@ interface PinItemButtonProps {
   itemType: PinnedItemType;
   itemId: string;
   label: string;
+  /** Known pinned state from a list response; skips the status request. */
+  initialPinned?: boolean;
+  onChange?: () => void;
 }
 
-export function PinItemButton({ itemType, itemId, label }: PinItemButtonProps) {
+export function PinItemButton({ itemType, itemId, label, initialPinned, onChange }: PinItemButtonProps) {
   const { t } = useTranslation();
-  const [pinned, setPinned] = useState(false);
+  const [pinned, setPinned] = useState(initialPinned ?? false);
+  const [syncedInitial, setSyncedInitial] = useState(initialPinned);
   const [busy, setBusy] = useState(false);
+  if (syncedInitial !== initialPinned) {
+    setSyncedInitial(initialPinned);
+    if (initialPinned !== undefined) setPinned(initialPinned);
+  }
 
   useEffect(() => {
+    if (initialPinned !== undefined) return;
     void apiRequest<{ pinned: boolean }>("GET", `/pins/${itemType}/${itemId}/status`)
       .then((result) => setPinned(result.pinned))
       .catch(() => setPinned(false));
-  }, [itemType, itemId]);
+  }, [itemType, itemId, initialPinned]);
 
   async function toggle() {
     if (busy) return;
@@ -36,6 +45,7 @@ export function PinItemButton({ itemType, itemId, label }: PinItemButtonProps) {
         { itemType, itemId },
       );
       setPinned(result.pinned);
+      onChange?.();
     } catch (error) {
       setPinned(previous);
       void errorMessage(error);

@@ -232,7 +232,13 @@ export function ProductsPanel({ supplierId, isAdmin, initialProductId }: Product
                 <TableCell>{formatDate(product.updatedAt)}</TableCell>
                 <TableCell className="pr-4">
                   <div className="flex justify-end gap-1">
-                    <PinItemButton itemType="product" itemId={product.id} label={localize(product.name)} />
+                    <PinItemButton
+                      itemType="product"
+                      itemId={product.id}
+                      label={localize(product.name)}
+                      initialPinned={product.pinned}
+                      onChange={() => void queryClient.invalidateQueries({ queryKey: ["products"] })}
+                    />
                     <ShareItemButton itemType="product" itemId={product.id} itemName={localize(product.name)} iconOnly />
                     {isAdmin ? (
                       <>
