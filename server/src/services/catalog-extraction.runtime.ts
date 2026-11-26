@@ -77,6 +77,7 @@ export function createCatalogExtractionRuntime(
             storage,
             maxPages: config.catalogExtractionMaxPages,
             maxBytes: Math.floor(config.catalogExtractionMaxMb * 1024 * 1024),
+            log,
           },
           analyzeCatalog,
           job.data.prompt,

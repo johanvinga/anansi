@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,6 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
   const extractionQuery = useQuery({
     queryKey: ["catalog-extraction", catalog.id],
     queryFn: () => apiRequest<CatalogExtraction>("GET", `/catalogs/${catalog.id}/extraction`),
@@ -79,81 +78,14 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
     }
   }
 
-  async function applySupplierReview(review: CatalogSupplierReview) {
-    if (!review.supplier?.name) {
-      setError("No supplier name was found by the analysis.");
-      return;
+  const analysisStatus = extraction?.analysisStatus;
+  // Results are applied by the server as each job completes, so refresh everything that shows them.
+  useEffect(() => {
+    if (analysisStatus !== "processed" && analysisStatus !== "metadata_only") return;
+    for (const key of ["catalogs", "catalog", "suppliers", "supplier", "products"]) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
     }
-    setError(null);
-    try {
-      await apiRequest("POST", `/catalogs/${catalog.id}/extraction/supplier-review`, {
-        jobId: review.jobId,
-        action: review.exactMatch ? "reuse" : "create",
-        supplierId: review.exactMatch?.id,
-        name: review.supplier.name.value,
-        address: {
-          street: review.supplier.address.street?.value ?? null,
-          city: review.supplier.address.city?.value ?? null,
-          stateRegion: review.supplier.address.stateRegion?.value ?? null,
-          postalCode: review.supplier.address.postalCode?.value ?? null,
-          country: review.supplier.address.country?.value ?? null,
-        },
-        website: review.supplier.website?.value ?? null,
-        contacts: (review.supplier.contacts ?? []).map((contact) => ({
-          name: contact.name.value,
-          role: contact.role?.value ?? null,
-        })),
-      });
-      await Promise.all([
-        extractionQuery.refetch(),
-        queryClient.invalidateQueries({ queryKey: ["catalogs"] }),
-        queryClient.invalidateQueries({ queryKey: ["suppliers"] }),
-      ]);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  async function applyTagReview(review: CatalogTagReview) {
-    setError(null);
-    setNotice(null);
-    // Catalog tags are the union of catalog-level tags and every product tag, deduplicated by English name.
-    const catalogTagMap = new Map<string, (typeof review.catalogTags)[number]>();
-    for (const tag of [...(review.catalogTags ?? []), ...(review.products ?? []).flatMap((product) => product.tags ?? [])]) {
-      if (tag?.name?.en) catalogTagMap.set(tag.name.en.trim().toLowerCase(), tag);
-    }
-    const catalogTags = [...catalogTagMap.values()];
-    if (catalogTags.length === 0) {
-      setError("The analysis found no tags to apply. Run Deduct product tags again.");
-      return;
-    }
-    try {
-      await apiRequest("POST", `/catalogs/${catalog.id}/extraction/tag-review`, {
-        jobId: review.jobId,
-        catalogTagIds: catalogTags.flatMap((tag) => tag.existing ? [tag.existing.id] : []),
-        newCatalogTags: catalogTags.flatMap((tag) => tag.existing ? [] : [{ en: tag.name.en, fr: tag.name.fr }]),
-        productTagIds: review.products.flatMap((product) =>
-          product.existingProduct
-            ? [{
-                productId: product.existingProduct.id,
-                tagIds: product.tags.flatMap((tag) => tag.existing ? [tag.existing.id] : []),
-                newTags: product.tags.flatMap((tag) => tag.existing ? [] : [{ en: tag.name.en, fr: tag.name.fr }]),
-              }]
-            : [],
-        ),
-      });
-      await Promise.all([
-        extractionQuery.refetch(),
-        queryClient.invalidateQueries({ queryKey: ["catalogs"] }),
-        queryClient.invalidateQueries({ queryKey: ["suppliers"] }),
-        queryClient.invalidateQueries({ queryKey: ["products"] }),
-        tagReviewQuery.refetch(),
-      ]);
-      setNotice(`Applied ${catalogTags.length} tag(s) to this catalog.`);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
+  }, [analysisStatus, job?.jobId, queryClient]);
 
 
   return (
@@ -166,7 +98,6 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
           </DialogHeader>
 
           <div className="flex flex-col gap-5">
-            {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
             <ErrorAlert
               message={
                 error ??
@@ -200,12 +131,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
                   {supplierReviewQuery.data?.supplier ? (
                     <section className="flex flex-col gap-3 rounded-lg border p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <h3 className="font-semibold">Supplier metadata review</h3>
-                        {isAdmin ? (
-                          <Button type="button" onClick={() => void applySupplierReview(supplierReviewQuery.data!)}>
-                            {supplierReviewQuery.data!.exactMatch ? "Reuse exact supplier" : "Create confirmed supplier"}
-                          </Button>
-                        ) : null}
+                        <h3 className="font-semibold">Supplier metadata</h3>
                       </div>
                       <dl className="grid gap-2 text-sm sm:grid-cols-2">
                         {[
@@ -243,12 +169,7 @@ export function CatalogExtractionDialog({ catalog, isAdmin, onClose }: CatalogEx
                   {tagReviewQuery.data ? (
                     <section className="flex flex-col gap-3 rounded-lg border p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <h3 className="font-semibold">Catalog tag review</h3>
-                        {isAdmin ? (
-                          <Button type="button" onClick={() => void applyTagReview(tagReviewQuery.data!)}>
-                            Apply confirmed tags
-                          </Button>
-                        ) : null}
+                        <h3 className="font-semibold">Detected catalog tags</h3>
                       </div>
                       {(tagReviewQuery.data.catalogTags ?? []).filter((tag) => tag?.name).map((tag) => (
                         <div key={`${tag.name.en}-${tag.name.fr}`} className="rounded border p-3 text-sm">

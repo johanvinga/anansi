@@ -181,7 +181,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
       registerSupplierRoutes(v1, { db, config, storage, log: app.log }, guards);
       registerAssetRoutes(v1, { db, storage, log: app.log }, guards);
       registerCatalogRoutes(v1, { db, storage, log: app.log, extractionQueue }, guards);
-      registerPublicCatalogRoutes(v1, deps, { db, storage, log: app.log });
+      registerPublicCatalogRoutes(v1, deps, { db, storage, log: app.log }, extractionQueue);
       registerAttributeSetRoutes(v1, db, guards);
       registerIndependentAttributeRoutes(v1, db, guards);
       registerProductRoutes(v1, { db, storage, log: app.log }, guards);

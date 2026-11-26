@@ -6,6 +6,8 @@ import { emailSchema, parseInput } from "../lib/validation.js";
 import type { UploadedFile } from "../services/asset.service.js";
 import { authenticateCatalogUpload, type AuthDeps } from "../services/auth.service.js";
 import { uploadCatalog } from "../services/catalog.service.js";
+import { populateUploadedCatalog } from "../services/catalog-auto-populate.service.js";
+import type { CatalogExtractionQueue } from "../services/catalog-extraction.queue.js";
 import type { CatalogDeps } from "../services/catalog.service.js";
 
 const nameSchema = z.string().trim().max(200).transform((value) => value || undefined);
@@ -34,7 +36,12 @@ function credentials(header: string | undefined): { email: string | null; passwo
   return { email: email.data, password };
 }
 
-export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps, assets: CatalogDeps): void {
+export function registerPublicCatalogRoutes(
+  app: FastifyInstance,
+  auth: AuthDeps,
+  assets: CatalogDeps,
+  extractionQueue?: CatalogExtractionQueue,
+): void {
   app.post("/public/catalogs", async (request, reply) => {
     const { email, password } = credentials(request.headers.authorization);
     const info = { requestId: request.id, ipAddress: request.ip };
@@ -103,14 +110,18 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, auth: AuthDeps
     }
     if (!file) throw errors.validation([{ field: "file", message: "A PDF file is required." }]);
     const metadata = parseInput(uploadSchema, fields);
+    const requestContext = { ...info, actor: { userId: user.id, email: user.email } };
     const result = await uploadCatalog(
       assets,
-      { ...info, actor: { userId: user.id, email: user.email } },
+      requestContext,
       null,
       file,
       { name: metadata.name, version: null },
       rawIdempotencyKey ? { idempotencyKey: rawIdempotencyKey } : undefined,
     );
+    if (!result.replayed) {
+      await populateUploadedCatalog(assets, requestContext, result.catalog.id, extractionQueue);
+    }
     return reply.status(result.replayed ? 200 : 201).send({ catalog: result.catalog });
   });
 }

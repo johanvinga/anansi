@@ -56,7 +56,7 @@ describe("public catalog upload", () => {
       .attach("file", data, { filename, contentType });
   }
 
-  it("creates an unassigned catalog with a derived name and transactional upload audit, without a session or analysis", async () => {
+  it("creates an unassigned catalog with a derived name and transactional upload audit, without a session, and queues analysis", async () => {
     const res = await upload();
     expect(res.status).toBe(201);
     const user = await db.user.findUniqueOrThrow({ where: { email: ADMIN.email } });
@@ -71,7 +71,7 @@ describe("public catalog upload", () => {
       analysisStatus: "not_processed",
     }));
     expect(await db.session.count()).toBe(0);
-    expect(await db.catalogExtractionJob.count()).toBe(0);
+    expect(await db.catalogExtractionJob.count()).toBe(2);
     expect(await db.product.count()).toBe(0);
     const audit = await db.auditLog.findFirstOrThrow({ where: { action: "CATALOG_UPLOAD" } });
     expect(audit.actorUserId).toBe(user.id);

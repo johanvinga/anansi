@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -43,9 +44,11 @@ interface BulkDeleteControlsProps {
   total?: number;
   pageSize?: number;
   warning: string;
+  /** Extra bulk actions shown next to the delete button while items are selected. */
+  actions?: ReactNode;
 }
 
-export function BulkDeleteControls({ selection, visibleItems, total, pageSize, warning }: BulkDeleteControlsProps) {
+export function BulkDeleteControls({ selection, visibleItems, total, pageSize, warning, actions }: BulkDeleteControlsProps) {
   const { t } = useTranslation();
   const visibleIds = new Set(visibleItems.map((item) => item.id));
   const acrossPages = selection.confirmation?.items.some((item) => !visibleIds.has(item.id)) ?? false;
@@ -59,6 +62,7 @@ export function BulkDeleteControls({ selection, visibleItems, total, pageSize, w
           <Button type="button" variant="destructive" disabled={selection.busy} onClick={selection.requestDelete}>
             <Trash2 />{t("bulkDelete.deleteSelected")}
           </Button>
+          {actions}
         </> : null}
         {total !== undefined && pageSize !== undefined && total > pageSize ? (
           <Button type="button" variant="outline" disabled={selection.busy} onClick={() => void selection.selectAll(total)}>
