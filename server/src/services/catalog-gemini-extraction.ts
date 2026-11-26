@@ -563,7 +563,7 @@ export function createGeminiCatalogAnalyzer(apiKey: string, model: string, limit
 
 export async function processGeminiCatalogExtraction(
   extractionJobId: string,
-  deps: { db: Database; storage: AssetStorage; maxPages: number },
+  deps: { db: Database; storage: AssetStorage; maxPages: number; maxBytes?: number },
   analyzeCatalog: CatalogAnalyzer,
   prompt: "supplier" | "tags" = "supplier",
 ): Promise<void> {
@@ -579,12 +579,13 @@ export async function processGeminiCatalogExtraction(
     }),
     deps.db.catalog.update({ where: { id: job.catalogId }, data: { analysisStatus: "processing" } }),
   ]);
+  const maxBytes = deps.maxBytes ?? 50 * 1024 * 1024;
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of deps.storage.openRead(job.catalog.storageKey)) {
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += data.length;
-    if (bytes > 50 * 1024 * 1024) throw new Error("Catalog PDF exceeds the extraction size limit.");
+    if (bytes > maxBytes) throw new Error("Catalog PDF exceeds the extraction size limit.");
     chunks.push(data);
   }
   const buffer = Buffer.concat(chunks, bytes);
