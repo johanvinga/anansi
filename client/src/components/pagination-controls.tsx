@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Pagination,
@@ -33,14 +34,18 @@ function visiblePages(page: number, totalPages: number): (number | "gap")[] {
 export function PaginationControls({ total, pageSize, page, onPageChange }: PaginationControlsProps) {
   const { t } = useTranslation();
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const containerRef = useRef<HTMLDivElement>(null);
   const go = (target: number) => (event: React.MouseEvent) => {
     event.preventDefault();
-    if (target >= 1 && target <= totalPages && target !== page) onPageChange(target);
+    if (target >= 1 && target <= totalPages && target !== page) {
+      onPageChange(target);
+      containerRef.current?.parentElement?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
   };
   const disabledClass = "pointer-events-none opacity-50";
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+    <div ref={containerRef} className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
       <p className="text-sm text-muted-foreground">
         {t("pagination.summary", { page, totalPages, count: total })}
       </p>

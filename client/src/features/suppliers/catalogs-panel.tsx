@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Download, Eye, Pencil, Plus, Trash2 } from "lucide-react";
@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { apiRequest, apiUpload, errorMessage, ApiError } from "../../api/client";
 import { loadSettings } from "../../api/settings";
 import { formatSize } from "../../api/format";
-import type { Catalog } from "../../api/types";
+import type { Catalog, Page } from "../../api/types";
 import { CatalogExtractionDialog } from "../catalogs/catalog-extraction-dialog";
 import { CatalogEditDialog } from "../catalogs/catalog-edit-dialog";
 import { CategoryEditor } from "./category-editor";
@@ -33,7 +33,9 @@ import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { IconAction } from "../../components/icon-action";
 import { PdfFileField } from "../../components/pdf-file-field";
+import { PaginationControls } from "../../components/pagination-controls";
 import { TableEmptyRow } from "../../components/table-empty-row";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 interface CatalogsPanelProps {
   supplierId: string;
@@ -51,12 +53,16 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
   const analysisEnabled = settingsQuery.data?.catalogExtractionEnabled === true;
+  const list = usePagedList();
+  const { page, pageSize } = list;
   const catalogsQuery = useQuery({
-    queryKey: ["catalogs", "supplier", supplierId],
+    queryKey: ["catalogs", "supplier", supplierId, { page, pageSize }],
     queryFn: async () =>
-      (await apiRequest<{ items: Catalog[] }>("GET", `/suppliers/${supplierId}/catalogs`)).items,
+      apiRequest<Page<Catalog>>("GET", `/suppliers/${supplierId}/catalogs?page=${page}&pageSize=${pageSize}`),
+    placeholderData: keepPreviousData,
   });
-  const catalogs = catalogsQuery.data ?? [];
+  const catalogs = catalogsQuery.data?.items ?? [];
+  usePageClamp(list, catalogsQuery.data?.total);
   const bulk = useBulkDelete({
     scope: supplierId,
     endpoint: "catalogs",
@@ -116,7 +122,7 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {catalogs.length === 0 ? <TableEmptyRow colSpan={(analysisEnabled ? 8 : 7) + (isAdmin ? 1 : 0)} message={t("suppliers.noCatalogs")} /> : null}
+            {catalogsQuery.data && catalogs.length === 0 ? <TableEmptyRow colSpan={(analysisEnabled ? 8 : 7) + (isAdmin ? 1 : 0)} message={t("suppliers.noCatalogs")} /> : null}
             {catalogs.map((catalog) => (
               <TableRow key={catalog.id}>
                 {isAdmin ? <TableCell className="pl-4"><BulkSelectItem item={{ id: catalog.id, label: catalog.name }} selection={bulk} /></TableCell> : null}
@@ -167,6 +173,9 @@ export function CatalogsPanel({ supplierId, isAdmin }: CatalogsPanelProps) {
             ))}
           </TableBody>
         </Table>
+        {catalogsQuery.data ? (
+          <PaginationControls total={catalogsQuery.data.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
+        ) : null}
       </Card>
 
       {editing ? (

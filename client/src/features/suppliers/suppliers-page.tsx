@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +23,8 @@ import { SupplierDetail, type DetailTab } from "./supplier-detail";
 import { SupplierForm } from "./supplier-form";
 import { PinItemButton } from "../../components/pin-item-button";
 import { ShareItemButton } from "../../components/share-item-button";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
-const PAGE_SIZE = 25;
 const DETAIL_TAB_KEYS: readonly DetailTab[] = ["details", "categories", "assets", "catalogs", "products"];
 
 function isDetailTab(value: string): value is DetailTab {
@@ -37,44 +36,35 @@ export function SuppliersPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const categoryIds = useMemo(() => searchParams.getAll("tag"), [searchParams]);
-  const [page, setPage] = useState(1);
+  const list = usePagedList();
+  const { search, page, pageSize } = list;
+  const categoryIds = list.getFilters("tag");
   const queryClient = useQueryClient();
-  async function loadSuppliers(targetPage: number, pageSize: number) {
-    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+  async function loadSuppliers(targetPage: number, size: number) {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(size) });
     if (search) params.set("q", search);
     for (const id of categoryIds) params.append("tag", id);
     return apiRequest<Page<Supplier>>("GET", `/suppliers?${params.toString()}`);
   }
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", "list", { page, pageSize: PAGE_SIZE, search, categoryIds }],
-    queryFn: () => loadSuppliers(page, PAGE_SIZE),
+    queryKey: ["suppliers", "list", { page, pageSize, search, categoryIds }],
+    queryFn: () => loadSuppliers(page, pageSize),
+    placeholderData: keepPreviousData,
   });
   const result = suppliersQuery.data;
+  usePageClamp(list, result?.total);
   const bulk = useBulkDelete({
     scope: JSON.stringify({ search, categoryIds }),
     endpoint: "suppliers",
-    loadPage: async (targetPage, pageSize) => {
-      const response = await loadSuppliers(targetPage, pageSize);
+    loadPage: async (targetPage, size) => {
+      const response = await loadSuppliers(targetPage, size);
       return { total: response.total, items: response.items.map((item) => ({ id: item.id, label: item.name })) };
     },
     onDeleted: async () => {
-      setPage(1);
       await Promise.all(["suppliers", "supplier", "catalogs", "categories"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
     },
   });
   const visibleItems = (result?.items ?? []).map((item) => ({ id: item.id, label: item.name }));
-
-  function changeCategories(next: string[]) {
-    setPage(1);
-    const params = new URLSearchParams(searchParams);
-    params.delete("tag");
-    for (const id of next) params.append("tag", id);
-    setSearchParams(params, { replace: true });
-  }
 
   return (
     <>
@@ -86,12 +76,9 @@ export function SuppliersPage() {
             <SearchForm
               label={t("suppliers.searchLabel")}
               placeholder={t("suppliers.searchPlaceholder")}
-              value={query}
-              onChange={setQuery}
-              onSearch={() => {
-                setPage(1);
-                setSearch(query.trim());
-              }}
+              value={list.searchInput}
+              onChange={list.setSearchInput}
+              onSearch={list.submitSearch}
             />
             {isAdmin ? (
               <Button size="lg" onClick={() => navigate("/suppliers/new")}>
@@ -102,7 +89,7 @@ export function SuppliersPage() {
           </>
         }
         filters={
-          <TagFilter selected={categoryIds} onChange={changeCategories} />
+          <TagFilter selected={categoryIds} onChange={(ids) => list.setFilters("tag", ids)} />
         }
       >
         {suppliersQuery.error ? (
@@ -111,7 +98,7 @@ export function SuppliersPage() {
           </div>
         ) : null}
 
-        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={PAGE_SIZE} warning={t("bulkDelete.suppliersWarning")} /> : null}
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={pageSize} warning={t("bulkDelete.suppliersWarning")} /> : null}
         <Table aria-label={t("suppliers.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -163,7 +150,7 @@ export function SuppliersPage() {
         </Table>
 
         {result ? (
-          <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
+          <PaginationControls total={result.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
         ) : null}
       </PageLayout>
     </>

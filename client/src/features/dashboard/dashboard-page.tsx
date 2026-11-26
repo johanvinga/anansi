@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Eye, Package, Pin, Share2, Trash2, Truck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -17,8 +17,8 @@ import { Badge } from "../../components/ui/badge";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "../../components/ui/empty";
 import { PageHeader } from "../../components/page-header";
-
-const PAGE_SIZE = 25;
+import { PaginationControls } from "../../components/pagination-controls";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 function itemPath(item: DashboardSharedItem) {
   if (item.itemType === "catalog") return `/catalogs/${item.itemId}/workspace`;
@@ -35,11 +35,11 @@ function ItemIcon({ type, className = "size-5" }: { type: PinnedItemType; classN
 export function DashboardPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const [pinType, setPinType] = useState<PinnedItemType | "">("");
-  const [shareType, setShareType] = useState<PinnedItemType | "">("");
-  const [hidden, setHidden] = useState<"" | "true" | "false">("");
+  const list = usePagedList();
+  const { search, page, pageSize } = list;
+  const pinType = list.getFilter("pinType") as PinnedItemType | "";
+  const shareType = list.getFilter("shareType") as PinnedItemType | "";
+  const hidden = list.getFilter("hidden") as "" | "true" | "false";
 
   const [shareTarget, setShareTarget] = useState<{
     itemType: PinnedItemType;
@@ -50,15 +50,16 @@ export function DashboardPage() {
   } | null>(null);
 
   const dashboardQuery = useQuery({
-    queryKey: ["pin-dashboard", { search, pinType, shareType, hidden }],
+    queryKey: ["pin-dashboard", { page, pageSize, search, pinType, shareType, hidden }],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: "1", pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (search) params.set("q", search);
       if (pinType) params.set("pinType", pinType);
       if (shareType) params.set("shareType", shareType);
       if (hidden) params.set("hidden", hidden);
       return apiRequest<PinDashboard>("GET", `/pins/dashboard?${params.toString()}`);
     },
+    placeholderData: keepPreviousData,
   });
 
   async function unpin(item: DashboardSharedItem) {
@@ -81,7 +82,9 @@ export function DashboardPage() {
   }
 
   const dashboard = dashboardQuery.data;
-
+  // The server applies one page to all three sections, so the longest section sets the page count.
+  const longestSection = dashboard ? Math.max(dashboard.pins.total, dashboard.received.total, dashboard.sent.total) : undefined;
+  usePageClamp(list, longestSection);
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title={t("pins.dashboardTitle")} breadcrumbs={[{ label: t("pins.dashboardTitle") }]} />
@@ -113,16 +116,16 @@ export function DashboardPage() {
           <SearchForm
             label={t("pins.searchLabel")}
             placeholder={t("pins.searchPlaceholder")}
-            value={query}
-            onChange={setQuery}
-            onSearch={() => setSearch(query.trim())}
+            value={list.searchInput}
+            onChange={list.setSearchInput}
+            onSearch={list.submitSearch}
           />
         </div>
         <div className="grid gap-3 p-4 md:grid-cols-3">
           <SelectField
             label={t("pins.pinType")}
             value={pinType}
-            onChange={(value) => setPinType(value as PinnedItemType | "")}
+            onChange={(value) => list.setFilter("pinType", value)}
             options={[
               { value: "", label: t("pins.allTypes") },
               { value: "catalog", label: t("pins.typeCatalog") },
@@ -133,7 +136,7 @@ export function DashboardPage() {
           <SelectField
             label={t("pins.sharedType")}
             value={shareType}
-            onChange={(value) => setShareType(value as PinnedItemType | "")}
+            onChange={(value) => list.setFilter("shareType", value)}
             options={[
               { value: "", label: t("pins.allTypes") },
               { value: "catalog", label: t("pins.typeCatalog") },
@@ -144,7 +147,7 @@ export function DashboardPage() {
           <SelectField
             label={t("pins.visibility")}
             value={hidden}
-            onChange={(value) => setHidden(value as "" | "true" | "false")}
+            onChange={(value) => list.setFilter("hidden", value)}
             options={[
               { value: "", label: t("pins.allShares") },
               { value: "false", label: t("pins.visibleShares") },
@@ -301,6 +304,12 @@ export function DashboardPage() {
           </section>
         </div>
       )}
+
+      {longestSection !== undefined ? (
+        <Card className="gap-0 overflow-hidden py-0">
+          <PaginationControls total={longestSection} pageSize={pageSize} page={page} onPageChange={list.setPage} />
+        </Card>
+      ) : null}
 
       {shareTarget ? (
         <ShareItemDialog

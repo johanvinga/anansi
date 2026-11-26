@@ -1,5 +1,5 @@
 ﻿import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { BookOpen, Download, Eye, MoreHorizontal, Pencil, Pin, Share2, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -32,8 +32,8 @@ import { CatalogExtractionDialog } from "./catalog-extraction-dialog";
 import { CatalogEditDialog } from "./catalog-edit-dialog";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ShareItemDialog } from "../../components/share-item-dialog";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
-const PAGE_SIZE = 25;
 
 interface CatalogActionsProps {
   catalog: CatalogWithSupplier;
@@ -155,10 +155,9 @@ export function CatalogsPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const [categoryIds, setCategoryIds] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
+  const list = usePagedList();
+  const { search, page, pageSize } = list;
+  const categoryIds = list.getFilters("tag");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [reviewing, setReviewing] = useState<CatalogWithSupplier | null>(null);
   const [editing, setEditing] = useState<CatalogWithSupplier | null>(null);
@@ -167,26 +166,27 @@ export function CatalogsPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
   const analysisEnabled = settingsQuery.data?.catalogExtractionEnabled === true;
-  async function loadCatalogs(targetPage: number, pageSize: number) {
-    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+  async function loadCatalogs(targetPage: number, size: number) {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(size) });
     if (search) params.set("q", search);
     for (const id of categoryIds) params.append("tag", id);
     return apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`);
   }
   const catalogsQuery = useQuery({
-    queryKey: ["catalogs", "all", { page, pageSize: PAGE_SIZE, search, categoryIds }],
-    queryFn: () => loadCatalogs(page, PAGE_SIZE),
+    queryKey: ["catalogs", "all", { page, pageSize, search, categoryIds }],
+    queryFn: () => loadCatalogs(page, pageSize),
+    placeholderData: keepPreviousData,
   });
   const result = catalogsQuery.data;
+  usePageClamp(list, result?.total);
   const bulk = useBulkDelete({
     scope: JSON.stringify({ search, categoryIds }),
     endpoint: "catalogs",
-    loadPage: async (targetPage, pageSize) => {
-      const response = await loadCatalogs(targetPage, pageSize);
+    loadPage: async (targetPage, size) => {
+      const response = await loadCatalogs(targetPage, size);
       return { total: response.total, items: response.items.map((item) => ({ id: item.id, label: item.name })) };
     },
     onDeleted: async () => {
-      setPage(1);
       await Promise.all(["catalogs", "supplier", "suppliers", "categories"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
     },
   });
@@ -216,12 +216,9 @@ export function CatalogsPage() {
             <SearchForm
               label={t("catalogs.searchLabel")}
               placeholder={t("catalogs.searchPlaceholder")}
-              value={query}
-              onChange={setQuery}
-              onSearch={() => {
-                setPage(1);
-                setSearch(query.trim());
-              }}
+              value={list.searchInput}
+              onChange={list.setSearchInput}
+              onSearch={list.submitSearch}
             />
             {isAdmin ? (
               <Button size="lg" onClick={() => setUploadOpen(true)}>
@@ -231,7 +228,7 @@ export function CatalogsPage() {
           </>
         }
         filters={
-          <TagFilter selected={categoryIds} onChange={(ids) => { setPage(1); setCategoryIds(ids); }} />
+          <TagFilter selected={categoryIds} onChange={(ids) => list.setFilters("tag", ids)} />
         }
       >
 
@@ -241,7 +238,7 @@ export function CatalogsPage() {
           </div>
         ) : null}
 
-        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={PAGE_SIZE} warning={t("bulkDelete.catalogsWarning")} /> : null}
+        {isAdmin ? <BulkDeleteControls selection={bulk} visibleItems={visibleItems} total={result?.total} pageSize={pageSize} warning={t("bulkDelete.catalogsWarning")} /> : null}
         <Table aria-label={t("catalogs.title")}>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -304,7 +301,7 @@ export function CatalogsPage() {
         </Table>
 
         {result ? (
-          <PaginationControls total={result.total} pageSize={PAGE_SIZE} page={page} onPageChange={setPage} />
+          <PaginationControls total={result.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
         ) : null}
       </PageLayout>
 
@@ -313,7 +310,7 @@ export function CatalogsPage() {
           onClose={() => setUploadOpen(false)}
           onUploaded={() => {
             setUploadOpen(false);
-            setPage(1);
+            list.replacePage(1);
             void queryClient.invalidateQueries({ queryKey: ["catalogs", "all"] });
             void queryClient.invalidateQueries({ queryKey: ["supplier"] });
             void queryClient.invalidateQueries({ queryKey: ["suppliers"] });

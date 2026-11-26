@@ -1,15 +1,17 @@
 import { useState, type FormEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, errorMessage } from "../../api/client";
 import { localize } from "../../api/translations";
-import type { Tag } from "../../api/types";
+import type { Page, Tag } from "../../api/types";
 import { ErrorAlert } from "../../components/error-alert";
 import { FormField } from "../../components/form-field";
 import { PageLayout } from "../../components/page-layout";
+import { PaginationControls } from "../../components/pagination-controls";
+import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
 interface TagsPageProps {
   isAdmin: boolean;
@@ -22,10 +24,14 @@ export function TagsPage({ isAdmin }: TagsPageProps) {
   const [nameFr, setNameFr] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const list = usePagedList();
+  const { page, pageSize } = list;
   const tags = useQuery({
-    queryKey: ["tags"],
-    queryFn: async () => (await apiRequest<{ items: Tag[] }>("GET", "/tags")).items,
+    queryKey: ["tags", "list", { page, pageSize }],
+    queryFn: () => apiRequest<Page<Tag>>("GET", `/tags?page=${page}&pageSize=${pageSize}`),
+    placeholderData: keepPreviousData,
   });
+  usePageClamp(list, tags.data?.total);
 
   async function createTag(event: FormEvent) {
     event.preventDefault();
@@ -53,7 +59,7 @@ export function TagsPage({ isAdmin }: TagsPageProps) {
       <Table>
         <TableHeader><TableRow><TableHead>Tag</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
         <TableBody>
-          {tags.data?.map((tag) => (
+          {tags.data?.items.map((tag) => (
             <TableRow key={tag.id}>
               <TableCell>{localize(tag.name)}</TableCell>
               <TableCell>{tag.isArchived ? "Archived" : "Active"}</TableCell>
@@ -61,6 +67,9 @@ export function TagsPage({ isAdmin }: TagsPageProps) {
           ))}
         </TableBody>
       </Table>
+      {tags.data ? (
+        <PaginationControls total={tags.data.total} pageSize={pageSize} page={page} onPageChange={list.setPage} />
+      ) : null}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
           <form onSubmit={createTag} className="flex flex-col gap-4">
