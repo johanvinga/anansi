@@ -15,7 +15,7 @@ import {
   seedUser,
   unsafeHeaders,
 } from "../test/helpers.js";
-import { autoApplyCatalogAnalysis } from "../services/catalog-auto-populate.service.js";
+import { autoApplyCatalogAnalysis, populateAllMissingCatalogs } from "../services/catalog-auto-populate.service.js";
 
 const PDF = Buffer.from("%PDF-1.4 split prompt catalog\n%%EOF\n");
 
@@ -191,6 +191,58 @@ describe("split catalog analysis", () => {
       .set(unsafeHeaders(adminCookie))
       .send({ catalogIds: [] });
     expect(invalid.status).toBe(400);
+  });
+
+  it("populates every catalog missing a supplier or tags in bulk, with dry-run and limit", async () => {
+    const supplier = await db.supplier.create({ data: { name: "Complete", nameKey: "complete" } });
+    const tag = await db.tag.create({ data: { nameEn: "Lamp", nameFr: "Lampe", nameKey: "lamp" } });
+    const makeCatalog = (name: string, data: { supplierId?: string; tagIds?: string[] }) =>
+      db.catalog.create({
+        data: {
+          name,
+          originalFileName: `${name}.pdf`,
+          storageKey: `bulk-${name}`,
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          ...(data.supplierId ? { supplierId: data.supplierId } : {}),
+          tags: { create: (data.tagIds ?? []).map((tagId) => ({ tagId })) },
+        },
+      });
+    const onlyTags = await makeCatalog("only-tags", { tagIds: [tag.id] });
+    const onlySupplier = await makeCatalog("only-supplier", { supplierId: supplier.id });
+    const complete = await makeCatalog("complete", { supplierId: supplier.id, tagIds: [tag.id] });
+    await db.catalogExtractionJob.deleteMany();
+    await db.catalog.update({ where: { id: catalogId }, data: { supplierId: supplier.id, tags: { create: [{ tagId: tag.id }] } } });
+
+    const enqueued: string[] = [];
+    const queue = { async enqueue(id: string) { enqueued.push(id); }, async close() {} };
+    const deps = { db, log: { error() {} } };
+    const context = { requestId: "bulk-test", ipAddress: null, actor: { userId: null, email: "system:populate-catalogs" } };
+
+    const dryRun = await populateAllMissingCatalogs(deps, context, queue, { dryRun: true });
+    expect(dryRun.map((result) => [result.catalogId, result.missing, result.outcome])).toEqual([
+      [onlyTags.id, ["supplier"], "would-queue"],
+      [onlySupplier.id, ["tags"], "would-queue"],
+    ]);
+    expect(await db.catalogExtractionJob.count()).toBe(0);
+    expect(enqueued).toHaveLength(0);
+
+    await db.catalogExtractionJob.create({ data: { catalogId: onlySupplier.id, prompt: "tags", status: "processing" } });
+    const limited = await populateAllMissingCatalogs(deps, context, queue, { limit: 1 });
+    expect(limited.map((result) => [result.catalogId, result.outcome])).toEqual([[onlyTags.id, "queued"]]);
+    expect(enqueued).toHaveLength(1);
+
+    const rest = await populateAllMissingCatalogs(deps, context, queue);
+    expect(rest.map((result) => [result.catalogId, result.outcome])).toEqual([
+      [onlyTags.id, "queued"],
+      [onlySupplier.id, "running"],
+    ]);
+    const jobs = await db.catalogExtractionJob.findMany({ where: { catalogId: onlyTags.id } });
+    expect(jobs.map((job) => job.prompt)).toEqual(["supplier"]);
+    expect(await db.catalogExtractionJob.count({ where: { catalogId: complete.id } })).toBe(0);
+    expect(await db.auditLog.count({
+      where: { actorEmail: "system:populate-catalogs", action: "CATALOG_ANALYSIS_START", entityId: onlyTags.id },
+    })).toBe(2);
   });
 
   it("creates and applies exact supplier and tag review suggestions", async () => {
