@@ -30,6 +30,7 @@ async function main(): Promise<void> {
     throw new Error("Catalog analysis is disabled. Set CATALOG_EXTRACTION_ENABLED=true (and GEMINI_API_KEY).");
   }
 
+  console.log(dryRun ? "Checking catalogs (dry run)..." : "Queueing analysis for catalogs...");
   const db = createDatabase(config.databaseUrl);
   const queue = createCatalogExtractionQueue(config.redisUrl);
   try {
@@ -41,12 +42,15 @@ async function main(): Promise<void> {
         actor: { userId: null, email: "system:populate-catalogs" },
       },
       queue,
-      { dryRun, limit },
+      {
+        dryRun,
+        limit,
+        onResult: (result) => {
+          console.log(`${result.outcome.padEnd(11)} ${result.catalogId}  ${result.name}  [missing: ${result.missing.join(", ")}]`);
+        },
+      },
     );
 
-    for (const result of results) {
-      console.log(`${result.outcome.padEnd(11)} ${result.catalogId}  ${result.name}  [missing: ${result.missing.join(", ")}]`);
-    }
     const count = (outcome: string) => results.filter((result) => result.outcome === outcome).length;
     console.log(
       `${dryRun ? "Dry run: " : ""}${results.length} catalog(s) lack a supplier or tags: ` +
