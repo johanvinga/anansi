@@ -5,7 +5,7 @@ import type { Database } from "../db.js";
 import { nameKeyOf, PRISMA_UNIQUE_VIOLATION } from "../lib/text.js";
 import { AuditAction, diffFields, recordAudit, type AuditRequestContext } from "./audit.service.js";
 import type { CatalogExtractionQueue } from "./catalog-extraction.queue.js";
-import { startCatalogExtraction, type CatalogDeps } from "./catalog.service.js";
+import { startCatalogExtraction, type CatalogDeps, type ExtractionDeps } from "./catalog.service.js";
 import { syncSupplierTags } from "./tag.service.js";
 
 interface SupplierEvidence {
@@ -29,6 +29,8 @@ interface AnalyzedSupplier {
 }
 
 export type PopulateOutcome = "queued" | "complete" | "running";
+
+type AnalysisPrompt = "supplier" | "tags";
 
 export interface PopulateCatalogResult {
   catalogId: string;
@@ -298,32 +300,43 @@ export async function autoApplyCatalogAnalysis(
  * automatically when each job completes.
  */
 export async function populateCatalog(
-  deps: CatalogDeps,
+  deps: ExtractionDeps,
   request: AuditRequestContext,
   catalogId: string,
   queue: CatalogExtractionQueue,
 ): Promise<PopulateOutcome> {
-  const catalog = await deps.db.catalog.findUnique({
+  const plan = await planPopulate(deps.db, catalogId);
+  if (!plan || plan.missing.length === 0) return "complete";
+  if (plan.startable.length === 0) return "running";
+  for (const prompt of plan.startable) {
+    await startCatalogExtraction(deps, request, catalogId, queue, prompt);
+  }
+  return "queued";
+}
+
+/** Splits what a catalog lacks into the analyses that can start now and those already processing. */
+async function planPopulate(
+  db: Database,
+  catalogId: string,
+): Promise<{ missing: AnalysisPrompt[]; startable: AnalysisPrompt[] } | null> {
+  const catalog = await db.catalog.findUnique({
     where: { id: catalogId },
     select: { supplierId: true, _count: { select: { tags: true } } },
   });
-  if (!catalog) return "complete";
-  const prompts: ("supplier" | "tags")[] = [];
-  if (!catalog.supplierId) prompts.push("supplier");
-  if (catalog._count.tags === 0) prompts.push("tags");
-  if (prompts.length === 0) return "complete";
+  if (!catalog) return null;
+  const missing: AnalysisPrompt[] = [];
+  if (!catalog.supplierId) missing.push("supplier");
+  if (catalog._count.tags === 0) missing.push("tags");
 
-  let started = 0;
-  for (const prompt of prompts) {
-    const running = await deps.db.catalogExtractionJob.findFirst({
+  const startable: AnalysisPrompt[] = [];
+  for (const prompt of missing) {
+    const running = await db.catalogExtractionJob.findFirst({
       where: { catalogId, prompt, status: "processing" },
       select: { id: true },
     });
-    if (running) continue;
-    await startCatalogExtraction(deps, request, catalogId, queue, prompt);
-    started += 1;
+    if (!running) startable.push(prompt);
   }
-  return started > 0 ? "queued" : "running";
+  return { missing, startable };
 }
 
 /** Scans a freshly uploaded catalog; a queueing problem must never fail the upload itself. */
@@ -353,6 +366,60 @@ export async function populateCatalogs(
   const results: PopulateCatalogResult[] = [];
   for (const catalogId of new Set(catalogIds)) {
     results.push({ catalogId, outcome: await populateCatalog(deps, request, catalogId, queue) });
+  }
+  return results;
+}
+
+export type BulkPopulateOutcome = PopulateOutcome | "would-queue" | "failed";
+
+export interface BulkPopulateResult {
+  catalogId: string;
+  name: string;
+  /** The analyses the catalog still lacks (no supplier, no tags). */
+  missing: AnalysisPrompt[];
+  outcome: BulkPopulateOutcome;
+}
+
+export interface PopulateAllOptions {
+  dryRun?: boolean;
+  /** Caps how many catalogs that lack a supplier or tags are handled, oldest first. */
+  limit?: number | undefined;
+}
+
+/**
+ * Handles every catalog that has no supplier or no tags, using the same rule as populateCatalog.
+ * A dry run reports what would be queued and changes nothing. One failing catalog never stops the run.
+ */
+export async function populateAllMissingCatalogs(
+  deps: ExtractionDeps,
+  request: AuditRequestContext,
+  queue: CatalogExtractionQueue,
+  options: PopulateAllOptions = {},
+): Promise<BulkPopulateResult[]> {
+  const catalogs = await deps.db.catalog.findMany({
+    where: { OR: [{ supplierId: null }, { tags: { none: {} } }] },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    ...(options.limit === undefined ? {} : { take: options.limit }),
+    select: { id: true, name: true },
+  });
+
+  const results: BulkPopulateResult[] = [];
+  for (const catalog of catalogs) {
+    const plan = await planPopulate(deps.db, catalog.id);
+    if (!plan || plan.missing.length === 0) continue;
+    const base = { catalogId: catalog.id, name: catalog.name, missing: plan.missing };
+    try {
+      const outcome: BulkPopulateOutcome = options.dryRun
+        ? plan.startable.length > 0 ? "would-queue" : "running"
+        : await populateCatalog(deps, request, catalog.id, queue);
+      results.push({ ...base, outcome });
+    } catch (error) {
+      deps.log.error(
+        { catalogId: catalog.id, errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not start catalog analysis",
+      );
+      results.push({ ...base, outcome: "failed" });
+    }
   }
   return results;
 }

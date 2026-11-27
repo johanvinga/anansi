@@ -66,7 +66,7 @@ function assetSnapshot(row: SupplierAsset): Record<string, unknown> {
 export async function removeStoredFiles(
   storage: AssetStorage,
   keys: string[],
-  log: FastifyBaseLogger,
+  log: { warn(details: object, message: string): void },
 ): Promise<void> {
   for (const key of keys) {
     try {

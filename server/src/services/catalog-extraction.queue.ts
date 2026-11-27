@@ -14,9 +14,8 @@ interface ExtractionPayload {
 }
 
 export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractionQueue {
-  const queue = new Queue<ExtractionPayload>(CATALOG_EXTRACTION_QUEUE, {
-    connection: createRedisConnection(redisUrl),
-  });
+  const connection = createRedisConnection(redisUrl);
+  const queue = new Queue<ExtractionPayload>(CATALOG_EXTRACTION_QUEUE, { connection });
 
   return {
     async enqueue(extractionJobId, prompt) {
@@ -32,7 +31,11 @@ export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractio
         },
       );
     },
-    close: () => queue.close(),
+    async close() {
+      await queue.close();
+      // BullMQ leaves a connection it was handed open, which would keep scripts from exiting.
+      connection.disconnect();
+    },
   };
 }
 
