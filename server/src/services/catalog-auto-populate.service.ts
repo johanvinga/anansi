@@ -384,6 +384,8 @@ export interface PopulateAllOptions {
   dryRun?: boolean;
   /** Caps how many catalogs that lack a supplier or tags are handled, oldest first. */
   limit?: number | undefined;
+  /** Called as soon as each catalog is handled, so callers can show progress. */
+  onResult?: (result: BulkPopulateResult) => void;
 }
 
 /**
@@ -420,6 +422,7 @@ export async function populateAllMissingCatalogs(
       );
       results.push({ ...base, outcome: "failed" });
     }
+    options.onResult?.(results[results.length - 1]!);
   }
   return results;
 }

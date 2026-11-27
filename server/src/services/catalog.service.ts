@@ -619,6 +619,7 @@ export async function startCatalogExtraction(
   catalogId: string,
   extractionQueue: CatalogExtractionQueue,
   prompt: "supplier" | "tags" = "supplier",
+  expectedFailure?: { id: string; processingError: string },
 ): Promise<CatalogExtractionJobDto> {
   const job = await deps.db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
@@ -627,6 +628,16 @@ export async function startCatalogExtraction(
       include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!existing) throw errors.notFound("Catalog");
+    if (expectedFailure) {
+      const latest = await tx.catalogExtractionJob.findFirst({
+        where: { catalogId, prompt },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { id: true, status: true, processingError: true },
+      });
+      if (latest?.id !== expectedFailure.id || latest.status !== "failed" || latest.processingError !== expectedFailure.processingError) {
+        throw errors.conflict("Catalog analysis has changed since the retry was selected.");
+      }
+    }
     const promptJob = await tx.catalogExtractionJob.findFirst({
       where: { catalogId, prompt, status: { in: ["queued", "processing"] } },
       orderBy: { createdAt: "desc" },

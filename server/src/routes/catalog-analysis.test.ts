@@ -16,6 +16,7 @@ import {
   unsafeHeaders,
 } from "../test/helpers.js";
 import { autoApplyCatalogAnalysis, populateAllMissingCatalogs } from "../services/catalog-auto-populate.service.js";
+import { findQuotaFailures, retryQuotaFailure } from "../services/catalog-quota-retry.service.js";
 
 const PDF = Buffer.from("%PDF-1.4 split prompt catalog\n%%EOF\n");
 
@@ -60,6 +61,61 @@ describe("split catalog analysis", () => {
       .send({ prompt: "supplier" });
     expect(started.status).toBe(202);
     expect(started.body.job).toMatchObject({ prompt: "supplier", status: "queued" });
+  });
+
+  it("finds and retries only latest quota-failed prompt jobs", async () => {
+    const message = "Gemini quota or rate limit exceeded. Try again later.";
+    await db.catalogExtractionJob.updateMany({
+      where: { catalogId, prompt: "supplier" },
+      data: { status: "failed", processingError: message },
+    });
+    await db.catalogExtractionJob.updateMany({
+      where: { catalogId, prompt: "tags" },
+      data: { status: "failed", processingError: "Catalog PDF exceeds the extraction size limit." },
+    });
+    const failures = await findQuotaFailures(db);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ catalogId, prompt: "supplier", name: "Split catalog" });
+    const enqueued: string[] = [];
+    const queue = {
+      async enqueue(id: string) { enqueued.push(id); },
+      async close() {},
+    };
+    const result = await retryQuotaFailure(
+      { db, log: app.log },
+      { requestId: "quota-test", ipAddress: null, actor: { userId: null, email: "system:test" } },
+      queue,
+      failures[0]!,
+    );
+    expect(result).toBe("queued");
+    expect(enqueued).toHaveLength(1);
+    const newJob = await db.catalogExtractionJob.findUniqueOrThrow({ where: { id: enqueued[0]! } });
+    expect(newJob).toMatchObject({ catalogId, prompt: "supplier", status: "queued" });
+    expect(await db.auditLog.count({ where: { requestId: "quota-test", action: "CATALOG_ANALYSIS_START" } })).toBe(1);
+    expect(await findQuotaFailures(db)).toEqual([]);
+  });
+
+  it("skips a quota failure when a newer analysis exists", async () => {
+    await db.catalogExtractionJob.updateMany({
+      where: { catalogId, prompt: "supplier" },
+      data: { status: "failed", processingError: "Gemini quota or rate limit exceeded. Try again later." },
+    });
+    const failures = await findQuotaFailures(db);
+    expect(failures).toHaveLength(1);
+    await db.catalogExtractionJob.create({
+      data: { catalogId, prompt: "supplier", status: "processed", createdAt: new Date(Date.now() + 1_000) },
+    });
+    expect(await findQuotaFailures(db)).toEqual([]);
+    const queue = {
+      async enqueue() { throw new Error("Unexpected enqueue"); },
+      async close() {},
+    };
+    expect(await retryQuotaFailure(
+      { db, log: app.log },
+      { requestId: "quota-skip", ipAddress: null, actor: { userId: null, email: "system:test" } },
+      queue,
+      failures[0]!,
+    )).toBe("skipped");
   });
 
   it("starts Prompt B independently and records its prompt", async () => {
