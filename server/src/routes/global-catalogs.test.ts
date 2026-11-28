@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -192,6 +193,57 @@ describe("global catalogs list", () => {
 
     const combined = await listCatalogs(`?tag=${tools.id}&tag=${paint.id}&q=bolt`);
     expect(combined.items.map((i) => i.supplierName)).toEqual(["Bolt"]);
+  });
+
+  it("filters each analysis status and combines it with search, tags, and pagination", async () => {
+    const tag = await makeTag("Status filter");
+    const supplier = await makeSupplier("Status supplier", [tag.id]);
+    const statuses = ["not_processed", "queued", "processing", "metadata_only", "processed", "failed"] as const;
+    for (const status of statuses) {
+      await db.catalog.create({
+        data: {
+          name: `Catalog ${status}`,
+          originalFileName: "catalog.pdf",
+          storageKey: `${randomUUID()}.pdf`,
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          supplierId: supplier.id,
+          analysisStatus: status,
+        },
+      });
+    }
+    for (const status of statuses) {
+      const result = await listCatalogs(`?status=${status}`);
+      expect(result.total).toBe(1);
+      expect(result.items.map((item) => item.name)).toEqual([`Catalog ${status}`]);
+    }
+
+    await db.catalog.create({
+      data: {
+        name: "Catalog queued extra",
+        originalFileName: "catalog.pdf",
+        storageKey: `${randomUUID()}.pdf`,
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        supplierId: supplier.id,
+        analysisStatus: "queued",
+      },
+    });
+    const query = `?status=queued&tag=${tag.id}&q=catalog&pageSize=1`;
+    const first = await listCatalogs(`${query}&page=1`);
+    const second = await listCatalogs(`${query}&page=2`);
+    expect(first.total).toBe(2);
+    expect(second.total).toBe(2);
+    expect(new Set([...first.items, ...second.items].map((item) => item.name))).toEqual(
+      new Set(["Catalog queued", "Catalog queued extra"]),
+    );
+    expect((await listCatalogs(`?status=failed&tag=${tag.id}&q=queued`)).total).toBe(0);
+  });
+
+  it("rejects invalid analysis statuses", async () => {
+    const res = await request(app.server).get("/api/v1/catalogs?status=unknown").set("Cookie", readerCookie);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
   });
 
   it("paginates with totals", async () => {

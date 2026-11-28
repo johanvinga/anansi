@@ -361,6 +361,9 @@
     "uploading": "Téléversement en cours…",
     "selectSupplier": "Sélectionnez un fournisseur ou ajoutez-en un nouveau.",
     "analysis": "Analyse",
+    "statusFilter": "Filtrer par statut d'analyse",
+    "allStatuses": "Tous les statuts d'analyse",
+    "noCatalogsFound": "Aucun catalogue trouvé.",
     "analysisStatus": {
       "not_processed": "Non traité",
       "queued": "En attente",

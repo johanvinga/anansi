@@ -55,6 +55,7 @@ Run from the repository root unless noted.
 | Apply migrations (dev) | `cd server && npm run db:migrate` |
 | Apply migrations (deploy) | `cd server && npm run db:deploy` |
 | Create first admin | `cd server && npm run seed:admin -- <email> <password>` (or set `SEED_ADMIN_PASSWORD`) |
+| Reset catalog extraction queue | `cd server && npm run reset:extraction-queue` (add `-- --include-failed` to also clear failed jobs); stop the API first |
 | API dev server | `cd server && npm run dev` |
 | Client dev server | `cd client && npm run dev` |
 | Server tests | `cd server && npm test` (uses `supplier_app_test`; migrations are applied automatically) |

@@ -14,8 +14,9 @@ interface ExtractionPayload {
 }
 
 export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractionQueue {
+  const connection = createRedisConnection(redisUrl);
   const queue = new Queue<ExtractionPayload>(CATALOG_EXTRACTION_QUEUE, {
-    connection: createRedisConnection(redisUrl),
+    connection,
   });
 
   return {
@@ -32,7 +33,13 @@ export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractio
         },
       );
     },
-    close: () => queue.close(),
+    async close() {
+      try {
+        await queue.close();
+      } finally {
+        connection.disconnect();
+      }
+    },
   };
 }
 

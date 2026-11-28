@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { apiRequest, errorMessage } from "../../api/client";
 import { loadSettings } from "../../api/settings";
 import { localize } from "../../api/translations";
-import type { CatalogWithSupplier, Page } from "../../api/types";
+import type { CatalogAnalysisStatus, CatalogWithSupplier, Page } from "../../api/types";
 import { useAuth } from "../../auth/auth-state";
 import { ErrorAlert, SuccessAlert } from "../../components/error-alert";
 import { BulkDeleteControls, BulkSelectItem, BulkSelectPage } from "../../components/bulk-delete";
@@ -25,6 +25,7 @@ import { TagFilter } from "../../components/tag-filter";
 import { PageLayout } from "../../components/page-layout";
 import { PaginationControls } from "../../components/pagination-controls";
 import { SearchForm } from "../../components/search-form";
+import { SelectField } from "../../components/select-field";
 import { TableEmptyRow } from "../../components/table-empty-row";
 import { UploadCatalogDialog } from "./upload-catalog-dialog";
 import { CatalogExtractionDialog } from "./catalog-extraction-dialog";
@@ -35,6 +36,7 @@ import { PinItemButton } from "../../components/pin-item-button";
 import { ShareItemButton } from "../../components/share-item-button";
 import { usePagedList, usePageClamp } from "../../lib/use-paged-list";
 
+const ANALYSIS_STATUSES: CatalogAnalysisStatus[] = ["not_processed", "queued", "processing", "metadata_only", "processed", "failed"];
 
 interface CatalogActionsProps {
   catalog: CatalogWithSupplier;
@@ -143,6 +145,7 @@ export function CatalogsPage() {
   const list = usePagedList();
   const { search, page, pageSize } = list;
   const categoryIds = list.getFilters("tag");
+  const status = list.getFilter("status");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [reviewing, setReviewing] = useState<CatalogWithSupplier | null>(null);
   const [editing, setEditing] = useState<CatalogWithSupplier | null>(null);
@@ -154,26 +157,28 @@ export function CatalogsPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
   const analysisEnabled = settingsQuery.data?.catalogExtractionEnabled === true;
+  const showAnalysisStatus = analysisEnabled || Boolean(status);
   async function loadCatalogs(targetPage: number, size: number) {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(size) });
     if (search) params.set("q", search);
+    if (status) params.set("status", status);
     for (const id of categoryIds) params.append("tag", id);
     return apiRequest<Page<CatalogWithSupplier>>("GET", `/catalogs?${params.toString()}`);
   }
   const catalogsQuery = useQuery({
-    queryKey: ["catalogs", "all", { page, pageSize, search, categoryIds }],
+    queryKey: ["catalogs", "all", { page, pageSize, search, categoryIds, status }],
     queryFn: () => loadCatalogs(page, pageSize),
     placeholderData: keepPreviousData,
     // Keep the list fresh while analysis jobs fill in suppliers and tags.
     refetchInterval: (query) =>
-      query.state.data?.items.some((item) => item.analysisStatus === "queued" || item.analysisStatus === "processing")
+      (analysisEnabled && Boolean(status)) || query.state.data?.items.some((item) => item.analysisStatus === "queued" || item.analysisStatus === "processing")
         ? 3000
         : false,
   });
   const result = catalogsQuery.data;
   usePageClamp(list, result?.total);
   const bulk = useBulkDelete({
-    scope: JSON.stringify({ search, categoryIds }),
+    scope: JSON.stringify({ search, categoryIds, status }),
     endpoint: "catalogs",
     loadPage: async (targetPage, size) => {
       const response = await loadCatalogs(targetPage, size);
@@ -241,7 +246,21 @@ export function CatalogsPage() {
           </>
         }
         filters={
-          <TagFilter selected={categoryIds} onChange={(ids) => list.setFilters("tag", ids)} />
+          <>
+            <TagFilter selected={categoryIds} onChange={(ids) => list.setFilters("tag", ids)} />
+            <div className="w-56">
+              <SelectField
+                hideLabel
+                label={t("catalogs.statusFilter")}
+                value={status}
+                onChange={(value) => list.setFilter("status", value)}
+                options={[
+                  { value: "", label: t("catalogs.allStatuses") },
+                  ...ANALYSIS_STATUSES.map((value) => ({ value, label: t(`catalogs.analysisStatus.${value}`) })),
+                ]}
+              />
+            </div>
+          </>
         }
       >
 
@@ -282,13 +301,13 @@ export function CatalogsPage() {
               <TableHead className="pl-4">{t("catalogs.catalogName")}</TableHead>
               <TableHead>{t("catalogs.supplier")}</TableHead>
               <TableHead>{t("catalogs.catalogCategories")}</TableHead>
-              {analysisEnabled ? <TableHead>{t("catalogs.analysis")}</TableHead> : null}
+              {showAnalysisStatus ? <TableHead>{t("catalogs.analysis")}</TableHead> : null}
               <TableHead className="pr-4 text-right">{t("suppliers.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {result && result.items.length === 0 ? (
-              <TableEmptyRow colSpan={(analysisEnabled ? 5 : 4) + (isAdmin ? 1 : 0)} message="No catalogs found." />
+              <TableEmptyRow colSpan={(showAnalysisStatus ? 5 : 4) + (isAdmin ? 1 : 0)} message={t("catalogs.noCatalogsFound")} />
             ) : null}
             {result?.items.map((catalog) => (
               <TableRow key={catalog.id}>
@@ -311,7 +330,7 @@ export function CatalogsPage() {
                     </div>
                   )}
                 </TableCell>
-                {analysisEnabled ? <TableCell>
+                {showAnalysisStatus ? <TableCell>
                   <Badge variant={catalog.analysisStatus === "failed" ? "destructive" : "secondary"}>
                     {t(`catalogs.analysisStatus.${catalog.analysisStatus}`)}
                   </Badge>
