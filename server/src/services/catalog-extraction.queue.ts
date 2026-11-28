@@ -15,9 +15,7 @@ interface ExtractionPayload {
 
 export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractionQueue {
   const connection = createRedisConnection(redisUrl);
-  const queue = new Queue<ExtractionPayload>(CATALOG_EXTRACTION_QUEUE, {
-    connection,
-  });
+  const queue = new Queue<ExtractionPayload>(CATALOG_EXTRACTION_QUEUE, { connection });
 
   return {
     async enqueue(extractionJobId, prompt) {

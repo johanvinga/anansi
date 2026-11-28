@@ -56,6 +56,9 @@ Run from the repository root unless noted.
 | Apply migrations (deploy) | `cd server && npm run db:deploy` |
 | Create first admin | `cd server && npm run seed:admin -- <email> <password>` (or set `SEED_ADMIN_PASSWORD`) |
 | Reset catalog extraction queue | `cd server && npm run reset:extraction-queue` (add `-- --include-failed` to also clear failed jobs); stop the API first |
+| Delete duplicate catalog PDFs (identical SHA-256) | `cd server && npm run dedupe:catalogs -- [--apply] [--limit N]` (dry run unless `--apply`; keeps the copy with the most data and merges tags, supplier, products, pins and shares into it) |
+| Queue supplier/tag analysis for catalogs missing them | `cd server && npm run populate:catalogs -- [--dry-run] [--limit N]` (needs `CATALOG_EXTRACTION_ENABLED=true` and Redis; the API server processes the jobs) |
+| Retry latest catalog analyses failed by Gemini quota | `cd server && npm run retry:quota-catalogs -- [--apply]` (dry run unless `--apply`) |
 | API dev server | `cd server && npm run dev` |
 | Client dev server | `cd client && npm run dev` |
 | Server tests | `cd server && npm test` (uses `supplier_app_test`; migrations are applied automatically) |

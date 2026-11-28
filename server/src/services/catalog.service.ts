@@ -21,6 +21,12 @@ import { resolveTagIds } from "./tag.service.js";
 export interface CatalogDeps extends AssetDeps {
 }
 
+/** The part of the dependencies that starting an analysis needs, so scripts can run without file storage. */
+export interface ExtractionDeps {
+  db: Database;
+  log: { error(details: object, message: string): void };
+}
+
 export interface CatalogMetadata {
   name?: string | undefined;
   /** Optional since FR-CLG-01 was relaxed at the user's request (2026-11-08). */
@@ -139,7 +145,7 @@ async function enqueueExtraction(
   db: Database,
   queue: CatalogExtractionQueue,
   job: { id: string; catalogId: string; prompt: "supplier" | "tags" },
-  log: AssetDeps["log"],
+  log: ExtractionDeps["log"],
 ): Promise<void> {
   try {
     await queue.enqueue(job.id, job.prompt);
@@ -610,11 +616,12 @@ export async function prepareCatalogImage(
 }
 
 export async function startCatalogExtraction(
-  deps: AssetDeps,
+  deps: ExtractionDeps,
   request: AuditRequestContext,
   catalogId: string,
   extractionQueue: CatalogExtractionQueue,
   prompt: "supplier" | "tags" = "supplier",
+  expectedFailure?: { id: string; processingError: string },
 ): Promise<CatalogExtractionJobDto> {
   const job = await deps.db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
@@ -623,6 +630,16 @@ export async function startCatalogExtraction(
       include: { extractionJobs: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!existing) throw errors.notFound("Catalog");
+    if (expectedFailure) {
+      const latest = await tx.catalogExtractionJob.findFirst({
+        where: { catalogId, prompt },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { id: true, status: true, processingError: true },
+      });
+      if (latest?.id !== expectedFailure.id || latest.status !== "failed" || latest.processingError !== expectedFailure.processingError) {
+        throw errors.conflict("Catalog analysis has changed since the retry was selected.");
+      }
+    }
     const promptJob = await tx.catalogExtractionJob.findFirst({
       where: { catalogId, prompt, status: { in: ["queued", "processing"] } },
       orderBy: { createdAt: "desc" },
@@ -690,7 +707,11 @@ export async function updateCatalog(
   });
 }
 
-export async function deleteCatalog(deps: AssetDeps, request: AuditRequestContext, catalogId: string): Promise<void> {
+export async function deleteCatalog(
+  deps: Pick<AssetDeps, "db" | "storage"> & { log: { warn(details: object, message: string): void } },
+  request: AuditRequestContext,
+  catalogId: string,
+): Promise<void> {
   const storageKey = await deps.db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM catalogs WHERE id = ${catalogId}::uuid FOR UPDATE`;
     const existing = await tx.catalog.findUnique({ where: { id: catalogId } });
