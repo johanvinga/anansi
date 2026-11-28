@@ -12,6 +12,7 @@
         "db:deploy": "prisma migrate deploy",
         "seed:admin": "tsx src/scripts/seed-admin.ts",
         "seed:attribute-sets": "tsx src/scripts/seed-attribute-sets.ts",
+        "reset:extraction-queue": "tsx src/scripts/reset-extraction-queue.ts",
         "populate:catalogs": "tsx src/scripts/populate-catalogs.ts",
         "retry:quota-catalogs": "tsx src/scripts/retry-quota-catalogs.ts",
         "dedupe:catalogs": "tsx src/scripts/dedupe-catalogs.ts",

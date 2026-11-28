@@ -361,6 +361,9 @@
     "uploading": "Uploading…",
     "selectSupplier": "Select a supplier or add a new one.",
     "analysis": "Analysis",
+    "statusFilter": "Filter by analysis status",
+    "allStatuses": "All analysis statuses",
+    "noCatalogsFound": "No catalogs found.",
     "analysisStatus": {
       "not_processed": "Not processed",
       "queued": "Queued",

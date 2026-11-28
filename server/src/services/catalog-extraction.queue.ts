@@ -32,9 +32,11 @@ export function createCatalogExtractionQueue(redisUrl: string): CatalogExtractio
       );
     },
     async close() {
-      await queue.close();
-      // BullMQ leaves a connection it was handed open, which would keep scripts from exiting.
-      connection.disconnect();
+      try {
+        await queue.close();
+      } finally {
+        connection.disconnect();
+      }
     },
   };
 }

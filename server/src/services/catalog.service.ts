@@ -74,6 +74,7 @@ export interface CatalogSummaryDto extends CatalogDto {
 export interface ListCatalogsFilters {
   q?: string | undefined;
   tagIds?: string[] | undefined;
+  status?: CatalogAnalysisStatus | undefined;
   page: number;
   pageSize: number;
 }
@@ -179,6 +180,7 @@ export async function listAllCatalogs(
   filters: ListCatalogsFilters,
 ) {
   const where: Prisma.CatalogWhereInput = {
+    analysisStatus: filters.status,
     OR: filters.q
       ? [
           { name: { contains: filters.q, mode: "insensitive" } },

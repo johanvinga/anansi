@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, errors } from "../errors.js";
+import { CatalogAnalysisStatus } from "../generated/prisma/enums.js";
 import { attachmentDisposition, inlineDisposition, PDF_MIME_TYPE } from "../lib/pdf.js";
 import { optionalPaginationSchema, paginationSchema, parseInput, uuidSchema } from "../lib/validation.js";
 import { resolvePage } from "../lib/pagination.js";
@@ -118,6 +119,7 @@ const supplierReviewSchema = z.object({
 /** Query for the global catalogs list (the catalogs page). */
 const globalListQuerySchema = paginationSchema.extend({
   q: z.string().trim().max(200).optional(),
+  status: z.enum(CatalogAnalysisStatus).optional(),
   tag: z
     .preprocess(
       (value) => (value === undefined ? [] : Array.isArray(value) ? value : [value]),
@@ -141,6 +143,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: CatalogRouteDe
     const query = parseInput(globalListQuerySchema, request.query);
     return listAllCatalogs(deps.db, context(request), {
       q: query.q || undefined,
+      status: query.status,
       tagIds: query.tag,
       page: query.page,
       pageSize: query.pageSize,
